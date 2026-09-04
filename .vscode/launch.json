@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Temenin Ajaa (Client) - Chrome Web",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "temenin_ajaa",
+      "deviceId": "chrome"
+    },
+    {
+      "name": "Temenin Ajaa Driver - Chrome Web",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "driver_temenin_ajaa/driver_app",
+      "deviceId": "chrome"
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+
+class AppTheme {
+  // TDS Colors - Signature Electric Pink + Cyberpunk Dark Obsidian
+  static const Color background = Color(0xFF0B0B0F); // Deep Obsidian Black
+  static const Color surface = Color(0xFF16151A);    // Dark Surface
+  static const Color card = Color(0xFF1C1B21);       // Elevated Dark Card
+  static const Color cardDeep = Color(0xFF24222A);   // Sub-surface Container
+  static const Color border = Color(0xFF2A2832);     // Subtle Dark Border
+  static const Color primaryPink = Color(0xFFFF4DA6); // Signature Electric Pink Fuchsia
+  static const Color roseGold = Color(0xFFDB2777);    // Deep Fuchsia / Pink Rose
+  static const Color fuchsiaLight = Color(0x33FF4DA6); // Subtle Fuchsia Glow
+
+  // Status Colors
+  static const Color success = Color(0xFF10B981); // Emerald Green
+  static const Color warning = Color(0xFFF59E0B); // Amber
+  static const Color danger = Color(0xFFEF4444);  // Crimson Red
+  static const Color info = Color(0xFF3B82F6);    // Royal Blue
+
+  // Text Colors (Dark Mode Hierarchy)
+  static const Color textHighContrast = Color(0xFFFFFFFF); // Pure White
+  static const Color textMediumContrast = Color(0xFFE2E8F0); // Light Slate
+  static const Color textMuted = Color(0xFF94A3B8); // Muted Slate 400
+
+  // Gradients
+  static const LinearGradient heroGradient = LinearGradient(
+    colors: [Color(0xFFFF4DA6), Color(0xFFFF1493), Color(0xFFBE185D)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient primaryGradient = LinearGradient(
+    colors: [primaryPink, Color(0xFFDB2777)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient darkBgGradient = LinearGradient(
+    colors: [
+      Color(0xFF0B0B0F),
+      Color(0xFF16151A),
+      Color(0xFF0B0B0F),
+    ],
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+  );
+
+  static const LinearGradient cardGradient = LinearGradient(
+    colors: [Color(0xFF1C1B21), Color(0xFF16151A)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient safetyGradient = LinearGradient(
+    colors: [Color(0xFF2B121E), Color(0xFF180A12)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient glassBorderGradient = LinearGradient(
+    colors: [Color(0x66FF4DA6), Color(0x1AFFFFFF)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static ThemeData get lightTheme {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: background,
+      primaryColor: primaryPink,
+      cardColor: surface,
+      dividerColor: border,
+      colorScheme: const ColorScheme.dark(
+        primary: primaryPink,
+        secondary: roseGold,
+        surface: surface,
+        background: background,
+        error: danger,
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: surface,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: border),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: border),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: primaryPink, width: 1.5),
+        ),
+        labelStyle: GoogleFonts.inter(
+          color: textMuted,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+        hintStyle: GoogleFonts.inter(
+          color: textMuted,
+          fontSize: 14,
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryPink,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          minimumSize: const Size(64, 52),
+          textStyle: GoogleFonts.inter(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: SmoothPageTransitionsBuilder(),
+          TargetPlatform.iOS: SmoothPageTransitionsBuilder(),
+          TargetPlatform.macOS: SmoothPageTransitionsBuilder(),
+          TargetPlatform.windows: SmoothPageTransitionsBuilder(),
+          TargetPlatform.linux: SmoothPageTransitionsBuilder(),
+        },
+      ),
+      textTheme: TextTheme(
+        headlineLarge: GoogleFonts.plusJakartaSans(
+          fontSize: 32,
+          fontWeight: FontWeight.bold,
+          color: textHighContrast,
+          letterSpacing: -0.64,
+        ),
+        headlineMedium: GoogleFonts.plusJakartaSans(
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+          color: textHighContrast,
+          letterSpacing: -0.24,
+        ),
+        titleLarge: GoogleFonts.plusJakartaSans(
+          fontSize: 20,
+          fontWeight: FontWeight.bold,
+          color: textHighContrast,
+        ),
+        titleMedium: GoogleFonts.plusJakartaSans(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: textHighContrast,
+        ),
+        bodyLarge: GoogleFonts.inter(
+          fontSize: 16,
+          color: textMediumContrast,
+        ),
+        bodyMedium: GoogleFonts.inter(
+          fontSize: 14,
+          color: textMediumContrast,
+        ),
+        bodySmall: GoogleFonts.inter(
+          fontSize: 12,
+          color: textMuted,
+        ),
+        labelSmall: GoogleFonts.inter(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: textMuted,
+          letterSpacing: 0.5,
+        ),
+      ),
+    );
+  }
+
+  static ThemeData get darkTheme => lightTheme;
+}
+
+class SmoothPageTransitionsBuilder extends PageTransitionsBuilder {
+  const SmoothPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    return FadeTransition(
+      opacity: CurvedAnimation(
+        parent: animation,
+        curve: Curves.easeInOut,
+      ),
+      child: child,
+    );
+  }
+}

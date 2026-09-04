@@ -1,0 +1,174 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:temenin_ajaa/core/constants/api_constants.dart';
+import 'package:temenin_ajaa/core/services/auth_service.dart';
+
+class ClientBookingProvider extends ChangeNotifier {
+  final AuthService _authService = AuthService();
+  
+  bool _isLoading = false;
+  String? _errorMessage;
+  Map<String, dynamic>? _currentBooking;
+  List<dynamic> _negotiations = [];
+
+  bool get isLoading => _isLoading;
+  String? get errorMessage => _errorMessage;
+  Map<String, dynamic>? get currentBooking => _currentBooking;
+  List<dynamic> get negotiations => _negotiations;
+
+  // 1. Create a Booking Request
+  Future<Map<String, dynamic>> createBookingRequest(Map<String, dynamic> bookingData) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('User is not authenticated');
+      }
+
+      final url = Uri.parse('${ApiConstants.baseUrl}/api/bookings');
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'pickup_location': bookingData['pickupLocation'],
+          'dropoff_location': bookingData['dropoffLocation'],
+          'pickup_latitude': bookingData['pickupLatitude'],
+          'pickup_longitude': bookingData['pickupLongitude'],
+          'dropoff_latitude': bookingData['dropoffLatitude'],
+          'dropoff_longitude': bookingData['dropoffLongitude'],
+          'duration': bookingData['duration'] != null ? int.tryParse(bookingData['duration'].toString()) : 1,
+          'total_price': bookingData['userInitialPrice'] ?? bookingData['serviceFee'] ?? 50000,
+          'booking_date': DateTime.now().toIso8601String(),
+          'additional_details': {
+            'serviceType': bookingData['serviceType'] ?? 'freedom',
+            'description': bookingData['description'] ?? '',
+            'negotiation': true,
+          }
+        }),
+      );
+
+      final data = jsonDecode(response.body);
+      _isLoading = false;
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        _currentBooking = data['data'];
+        notifyListeners();
+        return {'success': true, 'booking': data['data']};
+      } else {
+        _errorMessage = data['message'] ?? 'Failed to create booking';
+        notifyListeners();
+        return {'success': false, 'message': _errorMessage};
+      }
+    } catch (e) {
+      _isLoading = false;
+      _errorMessage = e.toString();
+      notifyListeners();
+      return {'success': false, 'message': _errorMessage};
+    }
+  }
+
+  // 2. Fetch Negotiations for current booking
+  Future<void> fetchNegotiations(String bookingId) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final token = await _authService.getToken();
+      if (token == null) return;
+
+      final url = Uri.parse('${ApiConstants.baseUrl}/api/bookings/$bookingId/negotiations');
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _negotiations = data['data'] ?? [];
+      }
+    } catch (e) {
+      debugPrint('Error fetching negotiations: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // 3. Accept a Negotiation Offer
+  Future<bool> acceptNegotiation(String bookingId, String negotiationId) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final token = await _authService.getToken();
+      if (token == null) return false;
+
+      final url = Uri.parse('${ApiConstants.baseUrl}/api/bookings/$bookingId/negotiations/$negotiationId/accept');
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      final data = jsonDecode(response.body);
+      _isLoading = false;
+
+      if (response.statusCode == 200) {
+        _currentBooking = data['data'];
+        notifyListeners();
+        return true;
+      } else {
+        _errorMessage = data['message'] ?? 'Failed to accept negotiation';
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      _isLoading = false;
+      _errorMessage = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // 4. Update Booking Status
+  Future<bool> updateStatus(String bookingId, String status) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) return false;
+
+      final url = Uri.parse('${ApiConstants.baseUrl}/api/bookings/$bookingId/status');
+      final response = await http.put(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'status': status}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        _currentBooking = data['data'];
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Error updating booking status: $e');
+      return false;
+    }
+  }
+}
