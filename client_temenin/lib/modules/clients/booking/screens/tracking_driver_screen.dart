@@ -1,6 +1,9 @@
 // lib/modules/booking/screens/tracking_driver_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import '../../../../../providers/auth_provider.dart';
+import '../../../../../providers/driver_provider.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
@@ -37,6 +40,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   final _reviewController = TextEditingController();
   
   StreamSubscription<List<Map<String, dynamic>>>? _realtimeSubscription;
+  bool _isCompletionModalShowing = false;
 
   @override
   void initState() {
@@ -104,6 +108,17 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                     _estimatedTime = "Arrived!";
                   } else if (status == 'started' || status == 'ongoing') {
                     _simulationState = 'started';
+                    final durationHours = int.tryParse(widget.bookingData?['duration']?.toString() ?? '3') ?? 3;
+                    if (_remainingSeconds <= 240) {
+                      _remainingSeconds = durationHours * 3600;
+                    }
+                    _startTimer();
+                  } else if (status == 'completion_requested') {
+                    _simulationState = 'started';
+                    _estimatedTime = "Menunggu Konfirmasi Anda...";
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      _showClientCompletionConfirmationDialog();
+                    });
                   } else if (status == 'completed') {
                     _simulationState = 'completed';
                     // Calculate invoice totals
@@ -129,10 +144,117 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       debugPrint('❌ Supabase subscription error: $e');
     }
   }
+
+  void _showClientCompletionConfirmationDialog() {
+    if (_isCompletionModalShowing) return;
+    _isCompletionModalShowing = true;
+
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryPink.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.task_alt_rounded, color: AppTheme.primaryPink, size: 40),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "Konfirmasi Penyelesaian Sesi",
+                style: GoogleFonts.plusJakartaSans(
+                  color: AppTheme.textHighContrast,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Driver meminta konfirmasi bahwa pendampingan telah selesai. Apakah sesi Anda sudah berakhir?",
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        _isCompletionModalShowing = false;
+                        await _updateClientBookingStatus('ongoing');
+                      },
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppTheme.border),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: Text("Belum Selesai", style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        _isCompletionModalShowing = false;
+                        await _updateClientBookingStatus('completed');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryPink,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: Text("Ya, Selesaikan", style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _updateClientBookingStatus(String status) async {
+    final bookingId = widget.bookingId;
+    if (bookingId == null) return;
+
+    final updatedDetails = Map<String, dynamic>.from(_bookingDetails?['additional_details'] ?? widget.bookingData ?? {});
+    updatedDetails['sub_status'] = status;
+
+    final payload = <String, dynamic>{
+      'status': status == 'completed' ? 'completed' : 'ongoing',
+      'additional_details': updatedDetails,
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+
+    try {
+      final dynamic queryId = int.tryParse(bookingId) ?? bookingId;
+      await Supabase.instance.client.from('bookings').update(payload).eq('id', queryId);
+    } catch (e) {
+      debugPrint("Error client update booking status: $e");
+    }
+  }
   
   void _startTimer() {
     Future.delayed(const Duration(seconds: 1), () {
-      if (mounted && _remainingSeconds > 0 && _simulationState == 'on_the_way') {
+      if (!mounted) return;
+      if (_remainingSeconds > 0 && _simulationState == 'on_the_way') {
         setState(() {
           _remainingSeconds--;
           
@@ -150,6 +272,19 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
           int minutes = (_remainingSeconds % 3600) ~/ 60;
           int seconds = _remainingSeconds % 60;
           _countdownTimer = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
+          
+          _startTimer();
+        });
+      } else if (_simulationState == 'started' || _simulationState == 'ongoing') {
+        setState(() {
+          if (_remainingSeconds > 0) {
+            _remainingSeconds--;
+          }
+          int hours = _remainingSeconds ~/ 3600;
+          int minutes = (_remainingSeconds % 3600) ~/ 60;
+          int seconds = _remainingSeconds % 60;
+          _countdownTimer = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
+          _estimatedTime = "Sesi Berjalan: $_countdownTimer";
           
           _startTimer();
         });
@@ -206,10 +341,19 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
         ? (_bookingDetails!['additional_details'] as Map<String, dynamic>? ?? widget.bookingData ?? {})
         : (_bookingDetails ?? widget.bookingData ?? {});
 
-    final driverName = details['driverName'] ?? "Dian Sastro";
-    final driverImage = details['driverImage'] ?? 'https://i.pravatar.cc/300?img=14';
-    final driverRating = details['driverRating'] ?? "4.9";
-    final vehicle = details['vehicle'] ?? "Vespa Primavera";
+    final driverProv = Provider.of<DriverProvider>(context, listen: false);
+    final dId = _bookingDetails?['driver_id']?.toString() ?? details['driver_id']?.toString();
+    Map<String, dynamic>? currentDriver;
+    if (dId != null) {
+      try {
+        currentDriver = driverProv.drivers.firstWhere((d) => d['id'] == dId || d['driverId'] == dId);
+      } catch (_) {}
+    }
+
+    final driverName = currentDriver?['name'] ?? details['driverName'] ?? "Dian Sastro";
+    final driverImage = currentDriver?['image'] ?? details['driverImage'] ?? 'https://i.pravatar.cc/300?img=14';
+    final driverRating = currentDriver?['rating'] ?? details['driverRating'] ?? "4.9";
+    final vehicle = currentDriver?['vehicle'] ?? details['vehicle'] ?? "Vespa Primavera";
     final plateNumber = details['plateNumber'] ?? "B 1234 DS";
     final pickupLocation = details['pickup'] ?? "Senayan City Mall";
     final destinationLocation = details['destination'] ?? "Bandara Soekarno-Hatta";

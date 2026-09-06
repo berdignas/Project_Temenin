@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../providers/booking_provider.dart';
 import '../../../providers/auth_provider.dart';
@@ -15,15 +16,30 @@ class DriverActiveBookingScreen extends StatefulWidget {
 }
 
 class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> with TickerProviderStateMixin {
+  String? _extractOtp(dynamic data) {
+    if (data == null) return null;
+    if (data is Map) {
+      final direct = data['otp']?.toString().trim();
+      if (direct != null && direct.isNotEmpty && direct != 'null') {
+        return direct;
+      }
+      if (data['additional_details'] is Map) {
+        final sub = _extractOtp(data['additional_details']);
+        if (sub != null) return sub;
+      }
+      if (data['additionalDetails'] is Map) {
+        final sub = _extractOtp(data['additionalDetails']);
+        if (sub != null) return sub;
+      }
+    }
+    return null;
+  }
+
   // Timer & state variables
   Timer? _driverEtaTimer;
   int _driverEta = 300; // 5 minutes in seconds
   Timer? _sessionTimer;
   int _sessionDuration = 10800; // 3 hours default
-  
-  bool _earlyTerminationRequestedByDriver = false;
-  bool _earlyTerminationRequestedByClient = false;
-  bool _earlyTerminationApproved = false;
   
   bool _isSessionBlinking = false;
   Timer? _blinkTimer;
@@ -54,8 +70,17 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
 
   void _syncStatusWithProvider(String status, int initialDurationHours) {
     if (_lastStatus == status) return;
+    final previousStatus = _lastStatus;
     _lastStatus = status;
     
+    if (previousStatus == 'accepted' && (status == 'dp_paid' || status == 'on_the_way')) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showDpPaymentSuccessNotification();
+        }
+      });
+    }
+
     if (status == 'on_the_way') {
       _startDriverEtaTimer();
     } else if (status == 'started' || status == 'ongoing') {
@@ -195,41 +220,43 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
     // Sync status with our local state timers
     _syncStatusWithProvider(active.status, durationHours);
 
-    String label = '';
     String actionText = '';
     String nextStatus = '';
-    Color statusColor = AppTheme.primaryPink;
 
     switch (active.status) {
       case 'accepted':
       case 'confirmed':
-        label = "Pesanan Terkonfirmasi - Silakan Bersiap";
+        actionText = "MENUNGGU PEMBAYARAN DP KLIEN...";
+        nextStatus = '';
+        break;
+      case 'dp_paid':
         actionText = "MULAI PERJALANAN (OTW)";
         nextStatus = 'on_the_way';
         break;
       case 'on_the_way':
-        label = "Menuju ke Lokasi Penjemputan Client";
         actionText = "SAYA SUDAH SAMPAI DI LOKASI";
         nextStatus = 'arrived';
         break;
       case 'arrived':
-        label = "Telah Sampai di Lokasi Penjemputan";
         actionText = "VERIFIKASI PIN KLIEN UNTUK MEMULAI";
         nextStatus = 'started';
-        statusColor = const Color(0xFF00FF7F);
         break;
       case 'started':
       case 'ongoing':
-        label = "Layanan Pendampingan Sedang Berjalan...";
-        actionText = "SELESAIKAN LAYANAN & RIDE";
-        nextStatus = 'completed';
-        statusColor = const Color(0xFF9D6BFF);
+        actionText = "MINTA KONFIRMASI SELESAI KE KLIEN";
+        nextStatus = 'completion_requested';
+        break;
+      case 'completion_requested':
+        actionText = "MENUNGGU KONFIRMASI SELESAI DARI KLIEN...";
+        nextStatus = '';
         break;
       case 'completed':
-        label = "Layanan Selesai - Menunggu Pelunasan Sisa Tagihan";
         actionText = "KONFIRMASI PELUNASAN SISA PEMBAYARAN";
         nextStatus = 'closed';
-        statusColor = const Color(0xFF00FF7F);
+        break;
+      case 'paid':
+        actionText = "SELESAIKAN & TUTUP ORDER";
+        nextStatus = 'closed';
         break;
     }
 
@@ -268,11 +295,14 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                       _buildClientCard(context, active.id, clientName, clientPhone, clientAvatar),
                       const SizedBox(height: 15),
 
-                      // GPS Map Simulator or Active session details
-                      if (active.status == 'started' || active.status == 'ongoing') ...[
+                      // Waiting for DP card, GPS Map Simulator, or Active session details
+                      if (active.status == 'accepted' || active.status == 'confirmed') ...[
+                        _buildWaitingForDpCard(active),
+                        const SizedBox(height: 20),
+                      ] else if (active.status == 'started' || active.status == 'ongoing') ...[
                         _buildActiveSessionCard(bookingProvider, active),
                         const SizedBox(height: 20),
-                      ] else if (active.status == 'completed') ...[
+                      ] else if (active.status == 'completed' || active.status == 'paid') ...[
                         _buildSettlementCard(active),
                         const SizedBox(height: 20),
                       ] else ...[
@@ -318,18 +348,21 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
     int currentStep = 0;
     if (currentStatus == 'accepted' || currentStatus == 'confirmed') {
       currentStep = 0;
-    } else if (currentStatus == 'on_the_way') {
+    } else if (currentStatus == 'dp_paid') {
       currentStep = 1;
-    } else if (currentStatus == 'arrived') {
+    } else if (currentStatus == 'on_the_way') {
       currentStep = 2;
-    } else if (currentStatus == 'started' || currentStatus == 'ongoing') {
+    } else if (currentStatus == 'arrived') {
       currentStep = 3;
-    } else if (currentStatus == 'completed') {
+    } else if (currentStatus == 'started' || currentStatus == 'ongoing') {
       currentStep = 4;
+    } else if (currentStatus == 'completed' || currentStatus == 'paid' || currentStatus == 'closed') {
+      currentStep = 5;
     }
     
     final List<String> stepLabels = [
-      "Confirmed",
+      "Menunggu DP",
+      "DP Lunas",
       "Perjalanan",
       "Tiba",
       "Layanan",
@@ -613,173 +646,75 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
           ),
           const Divider(color: AppTheme.border, height: 30),
           
-          // Early Termination Mutual Consent section
-          if (!_earlyTerminationRequestedByDriver && !_earlyTerminationRequestedByClient) ...[
-            SizedBox(
-              width: double.infinity,
-              height: 48,
-              child: OutlinedButton(
-                onPressed: () {
-                  setState(() {
-                    _earlyTerminationRequestedByDriver = true;
-                  });
-                },
-                style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Colors.redAccent, width: 1.5),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                ),
-                child: Text(
-                  "Selesai Sesi Lebih Awal",
-                  style: GoogleFonts.poppins(
-                    color: Colors.redAccent,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ] else if (_earlyTerminationRequestedByDriver && !_earlyTerminationApproved) ...[
-            // Waiting for client approval
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.amber.withOpacity(0.3)),
-              ),
-              child: Column(
-                children: [
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.amber)),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "Menunggu persetujuan Klien untuk selesai lebih awal...",
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 10),
-                  // Simulation action to trigger client approval
-                  SizedBox(
-                    height: 32,
-                    child: ElevatedButton(
-                      onPressed: () async {
-                        setState(() {
-                          _earlyTerminationApproved = true;
-                        });
-                        final success = await provider.updateBookingProgress(
-                          'completed',
-                          authProvider: Provider.of<AuthProvider>(context, listen: false),
-                        );
-                        if (success && context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Sesi diakhiri lebih awal berdasarkan persetujuan bersama!"),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.amber,
-                        foregroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      child: Text(
-                        "Simulasi Klien Setujui Selesai Awal",
-                        style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold),
-                      ),
+          // Complete Service Session Action
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    backgroundColor: const Color(0xFF16151A),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(color: AppTheme.primaryPink.withOpacity(0.3)),
                     ),
-                  ),
-                ],
-              ),
-            ),
-          ] else if (_earlyTerminationRequestedByClient && !_earlyTerminationApproved) ...[
-            // Client requested early termination, driver needs to approve
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF2E93).withOpacity(0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFFF2E93).withOpacity(0.3)),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    "Klien mengajukan selesai sesi lebih awal. Apakah Anda menyetujuinya?",
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () {
-                            setState(() {
-                              _earlyTerminationRequestedByClient = false;
-                            });
-                          },
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.white24),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          child: Text("Tolak", style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11)),
-                        ),
+                    title: Text(
+                      "Selesaikan Sesi Layanan?",
+                      style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    content: Text(
+                      "Apakah Anda yakin ingin menyelesaikan sesi pendampingan sekarang? Tagihan sisa akan diterbitkan ke klien.",
+                      style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: Text("Batal", style: GoogleFonts.poppins(color: Colors.white38)),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            setState(() {
-                              _earlyTerminationApproved = true;
-                            });
-                            final success = await provider.updateBookingProgress(
-                              'completed',
-                              authProvider: Provider.of<AuthProvider>(context, listen: false),
+                      ElevatedButton(
+                        onPressed: () async {
+                          Navigator.pop(ctx);
+                          final success = await provider.updateBookingProgress(
+                            'completed',
+                            authProvider: Provider.of<AuthProvider>(context, listen: false),
+                          );
+                          if (success && mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("Sesi layanan berhasil diselesaikan! Menunggu pelunasan klien."),
+                                backgroundColor: Colors.green,
+                              ),
                             );
-                            if (success && context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text("Sesi diakhiri lebih awal berdasarkan persetujuan bersama!"),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF2E93),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          child: Text("Setuju Selesai", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 11)),
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryPink,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
+                        child: Text("Ya, Selesaikan", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-          ],
-          
-          // Simulation option to trigger client early termination request
-          if (!_earlyTerminationRequestedByDriver && !_earlyTerminationRequestedByClient) ...[
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: () {
-                setState(() {
-                  _earlyTerminationRequestedByClient = true;
-                });
+                );
               },
-              child: Text(
-                "Simulasi Klien Minta Selesai Awal",
-                style: GoogleFonts.poppins(color: Colors.white30, fontSize: 10, decoration: TextDecoration.underline),
+              icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+              label: Text(
+                "Selesaikan Sesi Pendampingan",
+                style: GoogleFonts.poppins(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryPink,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -1012,7 +947,51 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
     String actionText, 
     String nextStatus
   ) {
-    if (nextStatus.isEmpty) return const SizedBox.shrink();
+    if (nextStatus.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(20, 15, 20, 30),
+        decoration: const BoxDecoration(
+          color: AppTheme.surface,
+          border: Border(top: BorderSide(color: AppTheme.border, width: 1.0)),
+        ),
+        child: SizedBox(
+          width: double.infinity,
+          height: 56,
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppTheme.cardDeep,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFFFA500).withOpacity(0.4)),
+            ),
+            child: Center(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFFFFA500)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    actionText,
+                    style: GoogleFonts.poppins(
+                      color: const Color(0xFFFFA500),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 15, 20, 30),
       decoration: const BoxDecoration(
@@ -1040,21 +1019,56 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                 : () async {
                     if (nextStatus == 'started') {
                       final active = provider.activeBooking;
-                      final expectedPin = active?.additionalDetails?['otp']?.toString() ?? '4892';
-                      _showPinVerificationDialog(context, provider, expectedPin);
+                      // Ambil OTP dari active booking
+                      dynamic rawOtp = _extractOtp(active?.additionalDetails) ?? _extractOtp(active);
+                      
+                      // Fetch directly from Supabase for this booking to be 100% up-to-date
+                      if (active != null) {
+                        try {
+                          final dynamic queryId = int.tryParse(active.id) ?? active.id;
+                          final freshData = await Supabase.instance.client
+                              .from('bookings')
+                              .select('additional_details')
+                              .eq('id', queryId)
+                              .maybeSingle();
+                          if (freshData != null) {
+                            final fOtp = _extractOtp(freshData['additional_details']) ?? _extractOtp(freshData);
+                            if (fOtp != null && fOtp.isNotEmpty) {
+                              rawOtp = fOtp;
+                            }
+                          }
+                        } catch (e) {
+                          debugPrint("Error fetching latest OTP from Supabase: $e");
+                        }
+                      }
+                      
+                      final expectedPin = (rawOtp != null && rawOtp.toString().trim().isNotEmpty)
+                          ? rawOtp.toString().trim()
+                          : '';
+                      debugPrint("🔑 Real Client PIN from DB for booking ${active?.id}: '$expectedPin'");
+                      if (context.mounted) {
+                        _showPinVerificationDialog(context, provider, expectedPin);
+                      }
                     } else {
                       final success = await provider.updateBookingProgress(
                         nextStatus,
                         authProvider: Provider.of<AuthProvider>(context, listen: false),
                       );
                       if (success && nextStatus == 'closed' && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text("Pelunasan sisa tagihan dikonfirmasi. Sesi ditutup!"),
-                            backgroundColor: Colors.green,
+                        final activeBooking = provider.activeBooking;
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DriverOrderSummaryScreen(booking: activeBooking),
                           ),
                         );
-                        Navigator.pop(context);
+                      } else if (success && nextStatus == 'completion_requested' && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Permintaan penyelesaian telah dikirim ke Klien. Menunggu konfirmasi..."),
+                            backgroundColor: Colors.blue,
+                          ),
+                        );
                       }
                     }
                   },
@@ -1083,6 +1097,263 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                   ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _showDriverReviewClientDialog(BuildContext context, String clientName) {
+    double rating = 5.0;
+    final reviewController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              decoration: const BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "Beri Rating & Ulasan Klien",
+                    style: GoogleFonts.poppins(color: AppTheme.textHighContrast, fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Bagaimana pengalaman Anda mendampingi $clientName?",
+                    style: GoogleFonts.poppins(color: AppTheme.textMuted, fontSize: 13),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(5, (index) {
+                      final starIndex = index + 1;
+                      return IconButton(
+                        icon: Icon(
+                          starIndex <= rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                          color: const Color(0xFFFFB800),
+                          size: 36,
+                        ),
+                        onPressed: () {
+                          setModalState(() {
+                            rating = starIndex.toDouble();
+                          });
+                        },
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: reviewController,
+                    maxLines: 2,
+                    style: const TextStyle(color: AppTheme.textHighContrast),
+                    decoration: InputDecoration(
+                      hintText: "Tulis ulasan klien (sopan, tepat waktu, dll)...",
+                      hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 13),
+                      filled: true,
+                      fillColor: AppTheme.cardDeep,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppTheme.border),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Ulasan untuk Klien berhasil dikirim! Terima kasih."),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                        try {
+                          Navigator.of(context).popUntil((route) => route.isFirst);
+                        } catch (_) {
+                          Navigator.pop(context);
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryPink,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: Text("KIRIM ULASAN & SELESAIKAN", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showDpPaymentSuccessNotification() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF16181D),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: const BorderSide(color: Color(0xFF00FF7F), width: 1.5),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00FF7F).withOpacity(0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_circle_rounded, color: Color(0xFF00FF7F), size: 28),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                "DP Berhasil Diterima!",
+                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Klien telah menyelesaikan pembayaran DP 50%. Pesanan telah dikonfirmasi.",
+              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              "Anda sekarang dapat bersiap dan memulai perjalanan menuju lokasi penjemputan klien.",
+              style: GoogleFonts.poppins(color: Colors.white54, fontSize: 12, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final provider = Provider.of<BookingProvider>(context, listen: false);
+              await provider.updateBookingProgress(
+                'on_the_way',
+                authProvider: Provider.of<AuthProvider>(context, listen: false),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00FF7F),
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            child: Text("MULAI PERJALANAN ➔", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWaitingForDpCard(dynamic active) {
+    final double total = active.totalPrice.toDouble();
+    final double dp = total * 0.5;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFFFFA500).withOpacity(0.35), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFFFA500).withOpacity(0.08),
+            blurRadius: 15,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFA500).withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.hourglass_top_rounded, color: Color(0xFFFFA500), size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "MENUNGGU PEMBAYARAN DP",
+                      style: GoogleFonts.poppins(
+                        color: const Color(0xFFFFA500),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      "Klien sedang memproses DP 50%",
+                      style: GoogleFonts.poppins(
+                        color: AppTheme.textHighContrast,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(color: Colors.white10),
+          const SizedBox(height: 12),
+          _infoItem("Total Tarif Layanan", "Rp ${total.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}"),
+          _infoItem("DP Wajib (50%)", "Rp ${dp.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}"),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.cardDeep,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded, color: Colors.white70, size: 18),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "Setelah klien berhasil membayar DP, layar ini akan otomatis membuka tombol Mulai Perjalanan (OTW).",
+                    style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11, height: 1.4),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1406,48 +1677,53 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                 onPressed: () => Navigator.pop(context),
                 child: Text("Batal", style: GoogleFonts.poppins(color: Colors.white30)),
               ),
-              ElevatedButton(
-                onPressed: provider.isLoading
-                    ? null
-                    : () async {
-                        final inputPin = controller.text.trim();
-                        if (inputPin == expectedPin || inputPin == '4892' || inputPin == '1234') {
-                          Navigator.pop(context);
-                          
-                          final success = await provider.updateBookingProgress(
-                            'started',
-                            authProvider: Provider.of<AuthProvider>(context, listen: false),
-                          );
-                          if (success && context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text("Layanan pendampingan dimulai!"),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-                          }
-                        } else {
-                          setState(() {
-                            errorMessage = "PIN tidak cocok! Silakan tanyakan ke klien.";
-                          });
-                        }
-                      },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFFF2E93),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: provider.isLoading
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ElevatedButton(
+                        onPressed: provider.isLoading
+                            ? null
+                            : () async {
+                                final inputPin = controller.text.trim();
+                                debugPrint("Verifying PIN: input='$inputPin', expected='$expectedPin'");
+                                
+                                final isMatch = (expectedPin.isNotEmpty && inputPin == expectedPin) ||
+                                                (expectedPin.isEmpty && inputPin.length == 4);
+                                
+                                if (isMatch) {
+                                  Navigator.pop(context);
+                                  
+                                  final success = await provider.updateBookingProgress(
+                                    'started',
+                                    authProvider: Provider.of<AuthProvider>(context, listen: false),
+                                  );
+                                  if (success && context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text("PIN Terverifikasi! Layanan pendampingan dimulai."),
+                                        backgroundColor: Colors.green,
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  setState(() {
+                                    errorMessage = "PIN tidak sesuai dengan PIN di aplikasi Klien. Silakan cek kembali.";
+                                  });
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFF2E93),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                      )
-                    : Text("Verifikasi", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-              ),
+                        child: provider.isLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : Text("Verifikasi", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                      ),
             ],
           );
         },
@@ -1503,6 +1779,284 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
             style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11, height: 1.4),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class DriverOrderSummaryScreen extends StatefulWidget {
+  final BookingModel? booking;
+  const DriverOrderSummaryScreen({super.key, this.booking});
+
+  @override
+  State<DriverOrderSummaryScreen> createState() => _DriverOrderSummaryScreenState();
+}
+
+class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
+  double _rating = 5.0;
+  final _reviewController = TextEditingController();
+  bool _isSaved = false;
+  bool _isSaving = false;
+
+  @override
+  void dispose() {
+    _reviewController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitClientReview() async {
+    final bId = widget.booking?.id;
+    final reviewText = _reviewController.text.trim();
+    if (reviewText.isEmpty) return;
+
+    setState(() { _isSaving = true; });
+
+    try {
+      if (bId != null && !bId.startsWith('mock')) {
+        final dynamic queryId = int.tryParse(bId) ?? bId;
+        final currentRec = await Supabase.instance.client
+            .from('bookings')
+            .select('additional_details')
+            .eq('id', queryId)
+            .maybeSingle();
+
+        final updatedDetails = currentRec != null && currentRec['additional_details'] is Map
+            ? Map<String, dynamic>.from(currentRec['additional_details'] as Map)
+            : Map<String, dynamic>.from(widget.booking?.additionalDetails ?? {});
+
+        updatedDetails['client_review'] = {
+          'rating': _rating,
+          'comment': reviewText,
+          'driver_id': Supabase.instance.client.auth.currentUser?.id,
+          'created_at': DateTime.now().toIso8601String(),
+        };
+
+        await Supabase.instance.client
+            .from('bookings')
+            .update({'additional_details': updatedDetails})
+            .eq('id', queryId);
+      }
+    } catch (e) {
+      debugPrint("Error saving client review: $e");
+    }
+
+    if (mounted) {
+      setState(() {
+        _isSaving = false;
+        _isSaved = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("✅ Ulasan & rekomendasi Klien berhasil disimpan! Terima kasih."),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final clientName = widget.booking?.client?.fullName ?? widget.booking?.additionalDetails?['driverName'] ?? 'Klien';
+    final totalPrice = widget.booking?.totalPrice ?? 150000.0;
+    final pickup = widget.booking?.pickupLocation ?? 'Lokasi Penjemputan';
+    final dropoff = widget.booking?.dropoffLocation ?? 'Tujuan';
+
+    String fmt(double val) => "Rp ${val.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
+
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      appBar: AppBar(
+        title: Text("Ringkasan Order Selesai", style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17)),
+        backgroundColor: AppTheme.surface,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            // Success Hero Card
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF10B981).withOpacity(0.3),
+                    blurRadius: 15,
+                    offset: const Offset(0, 5),
+                  )
+                ],
+              ),
+              child: Column(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Colors.white, size: 54),
+                  const SizedBox(height: 10),
+                  Text("ORDER BERHASIL DISLESAIKAN!", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  const SizedBox(height: 4),
+                  Text("Pendapatan Anda telah ditambahkan ke dompet", style: GoogleFonts.inter(color: Colors.white70, fontSize: 12)),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(fmt(totalPrice), style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Order Detail Card
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("DETAIL SESI PENDAMPINGAN", style: GoogleFonts.poppins(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Icon(Icons.person_outline_rounded, color: AppTheme.primaryPink, size: 18),
+                      const SizedBox(width: 10),
+                      Text("Klien: ", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13)),
+                      Text(clientName, style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.location_on_outlined, color: AppTheme.primaryPink, size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(child: Text("$pickup ➔ $dropoff", style: GoogleFonts.inter(color: Colors.white70, fontSize: 12))),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Client Recommendation & Review Form
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.rate_review_rounded, color: AppTheme.primaryPink, size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        "Beri Ulasan & Rekomendasi Klien",
+                        style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "ℹ️ Ulasan ini akan disimpan sebagai rekomendasi bagi Mitra Driver lain sebelum menerima pesanan Klien ini.",
+                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11, height: 1.4),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(5, (index) {
+                      final starIndex = index + 1;
+                      return IconButton(
+                        icon: Icon(
+                          starIndex <= _rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                          color: const Color(0xFFFFB800),
+                          size: 32,
+                        ),
+                        onPressed: _isSaved ? null : () => setState(() => _rating = starIndex.toDouble()),
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _reviewController,
+                    enabled: !_isSaved,
+                    maxLines: 2,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    decoration: InputDecoration(
+                      hintText: "Tulis ulasan/rekomendasi (contoh: Klien sangat ramah, tepat waktu)...",
+                      hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                      filled: true,
+                      fillColor: AppTheme.cardDeep,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: const BorderSide(color: AppTheme.border),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 44,
+                    child: ElevatedButton(
+                      onPressed: (_isSaved || _isSaving) ? null : _submitClientReview,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryPink,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: _isSaving
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text(_isSaved ? "✅ REKOMENDASI TERBIT" : "SIMPAN REKOMENDASI KLIEN", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 25),
+
+            // Navigation Buttons
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.of(context).popUntil((route) => route.isFirst);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppTheme.border),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: Text("Kembali ke Beranda", style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).popUntil((route) => route.isFirst);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: Text("Lihat di Pendapatan", style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 30),
+          ],
+        ),
       ),
     );
   }

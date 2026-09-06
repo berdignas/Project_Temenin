@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/constants/api_constants.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/booking_provider.dart';
 import '../../../data/models/booking_model.dart';
@@ -29,16 +31,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Fetch initial profile and subscribe if online
+    // Fetch initial profile and subscribe to realtime orders
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final auth = Provider.of<AuthProvider>(context, listen: false);
       final booking = Provider.of<BookingProvider>(context, listen: false);
 
       auth.refreshProfile().then((_) {
-        final driverId = auth.driverProfileData?['id'] as String?;
-        if (auth.isAvailable && driverId != null) {
-          booking.subscribeToBookings(driverId);
-        }
+        final driverId = auth.driverProfileData?['id']?.toString() ?? 
+                         auth.user?.id ?? 
+                         Supabase.instance.client.auth.currentUser?.id ?? 
+                         'active-driver';
+        booking.subscribeToBookings(driverId, userId: auth.user?.id);
       });
     });
   }
@@ -91,7 +94,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
     return Container(
       decoration: const BoxDecoration(
-        color: AppTheme.surface,
+        color: Colors.black, // Changed to black
         border: Border(
           top: BorderSide(
             color: AppTheme.border,
@@ -115,8 +118,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 });
               },
               behavior: HitTestBehavior.opaque,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
+              child: Container( // Changed from AnimatedContainer to Container to remove delay
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
                   color: isSelected ? AppTheme.primaryPink.withOpacity(0.12) : Colors.transparent,
@@ -215,7 +217,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             radius: 24,
                             backgroundColor: AppTheme.cardDeep,
                             backgroundImage: (auth.user?.avatarUrl != null && auth.user!.avatarUrl!.isNotEmpty)
-                                ? NetworkImage(auth.user!.avatarUrl!)
+                                ? NetworkImage(_resolveImageUrl(auth.user!.avatarUrl!))
                                 : null,
                             child: (auth.user?.avatarUrl == null || auth.user!.avatarUrl!.isEmpty)
                                 ? const Icon(Icons.person, color: AppTheme.primaryPink, size: 24)
@@ -353,12 +355,11 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             onSwitchChanged: (val) async {
                               final success = await auth.toggleAvailability();
                               if (success && mounted) {
-                                final driverId = auth.driverProfileData?['id'] as String?;
-                                if (auth.isAvailable && driverId != null) {
-                                  booking.subscribeToBookings(driverId);
-                                } else {
-                                  booking.unsubscribeFromBookings();
-                                }
+                                final driverId = auth.driverProfileData?['id']?.toString() ?? 
+                                                 auth.user?.id ?? 
+                                                 Supabase.instance.client.auth.currentUser?.id ?? 
+                                                 'active-driver';
+                                booking.subscribeToBookings(driverId, userId: auth.user?.id);
                               }
                             },
                           ),
@@ -943,7 +944,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   radius: 20,
                   backgroundColor: AppTheme.cardDeep,
                   backgroundImage: (bookingData.client?.avatarUrl != null && bookingData.client!.avatarUrl!.isNotEmpty)
-                      ? NetworkImage(bookingData.client!.avatarUrl!)
+                      ? NetworkImage(_resolveImageUrl(bookingData.client!.avatarUrl!))
                       : null,
                   child: (bookingData.client?.avatarUrl == null || bookingData.client!.avatarUrl!.isEmpty)
                       ? const Icon(Icons.person, color: AppTheme.textMuted, size: 18)
@@ -1157,7 +1158,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                       radius: 24,
                                       backgroundColor: AppTheme.border,
                                       backgroundImage: (request.client?.avatarUrl != null && request.client!.avatarUrl!.isNotEmpty)
-                                          ? NetworkImage(request.client!.avatarUrl!)
+                                          ? NetworkImage(_resolveImageUrl(request.client!.avatarUrl!))
                                           : const NetworkImage('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'),
                                     ),
                                     Positioned(
@@ -1409,7 +1410,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           child: OutlinedButton(
                             onPressed: () {
                               bookingProvider.rejectBooking(request.id);
-                              Navigator.pop(dialogContext);
+                              if (dialogContext.mounted) {
+                                Navigator.pop(dialogContext);
+                              }
                             },
                             style: OutlinedButton.styleFrom(
                               side: const BorderSide(color: AppTheme.danger),
@@ -1423,7 +1426,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         Expanded(
                           child: OutlinedButton(
                             onPressed: () {
-                              Navigator.pop(dialogContext);
+                              if (dialogContext.mounted) {
+                                Navigator.pop(dialogContext);
+                              }
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
@@ -1458,7 +1463,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                               onPressed: () async {
                                 final success = await bookingProvider.acceptBooking(request.id);
                                 if (success && mounted) {
-                                  Navigator.pop(dialogContext);
+                                  if (dialogContext.mounted) {
+                                    Navigator.pop(dialogContext);
+                                  }
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(builder: (context) => const DriverActiveBookingScreen()),
@@ -1541,7 +1548,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         radius: 32,
                         backgroundColor: AppTheme.cardDeep,
                         backgroundImage: (request.client?.avatarUrl != null && request.client!.avatarUrl!.isNotEmpty)
-                            ? NetworkImage(request.client!.avatarUrl!)
+                            ? NetworkImage(_resolveImageUrl(request.client!.avatarUrl!))
                             : const NetworkImage('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'),
                       ),
                       const SizedBox(width: 16),
@@ -1720,6 +1727,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         style: GoogleFonts.inter(color: color, fontSize: 10, fontWeight: FontWeight.w700),
       ),
     );
+  }
+
+  String _resolveImageUrl(String url) {
+    if (url.startsWith('/uploads')) {
+      return '${ApiConstants.baseUrl}$url';
+    }
+    return url;
   }
 }
 

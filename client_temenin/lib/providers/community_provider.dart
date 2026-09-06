@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'dart:math' as dart_math;
 import 'package:flutter/material.dart';
@@ -69,7 +70,7 @@ class CommunityProvider extends ChangeNotifier {
   Future<String?> _uploadFileToSupabaseStorage(String localFilePath, {required String folder}) async {
     try {
       final file = File(localFilePath);
-      if (!file.existsSync()) return null;
+      if (kIsWeb || !file.existsSync()) return null;
 
       final extension = localFilePath.split('.').last.toLowerCase();
       final fileName = '${folder}_${DateTime.now().millisecondsSinceEpoch}_${dart_math.Random().nextInt(9999)}.$extension';
@@ -303,7 +304,7 @@ class CommunityProvider extends ChangeNotifier {
     await _saveToLocalStorage();
 
     String finalImageUrl = image;
-    if (localFilePath != null && File(localFilePath).existsSync()) {
+    if (!kIsWeb && localFilePath != null && File(localFilePath).existsSync()) {
       final publicCloudUrl = await _uploadFileToSupabaseStorage(localFilePath, folder: 'posts');
       if (publicCloudUrl != null) {
         finalImageUrl = publicCloudUrl;
@@ -315,8 +316,11 @@ class CommunityProvider extends ChangeNotifier {
 
     final effectiveUserId = userId ?? await _getSavedUserId();
 
+    bool savedToBackend = false;
     try {
       final candidateUrls = [
+        'http://192.168.1.4:3002/api/community/posts',
+        'http://10.0.2.2:3002/api/community/posts',
         '${ApiConstants.baseUrl}/api/community/posts',
         'http://127.0.0.1:3002/api/community/posts',
         'http://localhost:3002/api/community/posts',
@@ -339,12 +343,44 @@ class CommunityProvider extends ChangeNotifier {
 
           if (res.statusCode == 200 || res.statusCode == 201) {
             debugPrint('Customer post successfully stored to database');
+            savedToBackend = true;
             break;
           }
         } catch (_) {}
       }
     } catch (e) {
       debugPrint('Customer post insert info: $e');
+    }
+
+    if (!savedToBackend) {
+      try {
+        final supabase = Supabase.instance.client;
+        String? dbUserId = effectiveUserId;
+        if (dbUserId == null || dbUserId.isEmpty || !RegExp(r'^[0-9a-fA-F\-]{36}$').hasMatch(dbUserId)) {
+          try {
+            final firstUser = await supabase.from('users').select('id').limit(1).maybeSingle();
+            if (firstUser != null && firstUser['id'] != null) {
+              dbUserId = firstUser['id'].toString();
+            }
+          } catch (_) {}
+        }
+
+        if (dbUserId != null) {
+          await supabase.from('community_posts').insert({
+            'user_id': dbUserId,
+            'author_name': partnerName,
+            'author_avatar': avatar,
+            'image_url': finalImageUrl,
+            'media_type': mediaType,
+            'caption': caption,
+            'location': location ?? 'Jakarta',
+            'likes_count': 0,
+          });
+          debugPrint('✅ Customer post successfully inserted directly to Supabase DB');
+        }
+      } catch (supaErr) {
+        debugPrint('⚠️ Direct Supabase post insert failed: $supaErr');
+      }
     }
   }
 
@@ -374,7 +410,7 @@ class CommunityProvider extends ChangeNotifier {
     await _saveToLocalStorage();
 
     String finalImageUrl = image;
-    if (localFilePath != null && File(localFilePath).existsSync()) {
+    if (!kIsWeb && localFilePath != null && File(localFilePath).existsSync()) {
       final publicCloudUrl = await _uploadFileToSupabaseStorage(localFilePath, folder: 'stories');
       if (publicCloudUrl != null) {
         finalImageUrl = publicCloudUrl;

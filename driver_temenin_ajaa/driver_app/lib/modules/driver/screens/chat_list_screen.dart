@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../providers/auth_provider.dart';
 import 'chat_room_screen.dart';
@@ -50,15 +51,82 @@ class _DriverChatListScreenState extends State<DriverChatListScreen> {
       _isLoading = true;
     });
 
-    _loadMockChats();
-  }
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final driverId = auth.driverProfileData?['id']?.toString() ?? auth.user?.id;
+      
+      final data = await Supabase.instance.client
+          .from('bookings')
+          .select()
+          .order('created_at', ascending: false)
+          .limit(15);
 
-  void _loadMockChats() {
-    if (!mounted) return;
-    setState(() {
-      _conversations = [];
-      _isLoading = false;
-    });
+      final List<_ChatRoomItem> items = [];
+      if (data is List && data.isNotEmpty) {
+        for (final b in data) {
+          final bDriverId = b['driver_id']?.toString();
+          // Filter if matching this driver or open
+          if (driverId != null && bDriverId != null && bDriverId.isNotEmpty && bDriverId != driverId && bDriverId != auth.user?.id) {
+            continue;
+          }
+
+          final details = b['additional_details'] as Map<String, dynamic>?;
+          final msgs = (details?['chat_messages'] as List<dynamic>?)
+              ?.map((m) => Map<String, dynamic>.from(m as Map))
+              .toList() ?? [];
+
+          final clientId = b['user_id']?.toString();
+          String clientName = details?['clientName'] ?? 'Klien Temenin';
+          String clientImg = details?['clientAvatar'] ?? 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150';
+
+          if (clientId != null && clientId.contains('-')) {
+            try {
+              final userRow = await Supabase.instance.client
+                  .from('users')
+                  .select('full_name, avatar_url')
+                  .eq('id', clientId)
+                  .maybeSingle();
+              if (userRow != null) {
+                if (userRow['full_name'] != null) clientName = userRow['full_name'];
+                if (userRow['avatar_url'] != null && (userRow['avatar_url'] as String).isNotEmpty) {
+                  clientImg = userRow['avatar_url'];
+                }
+              }
+            } catch (e) {
+              debugPrint("Error loading client info: $e");
+            }
+          }
+
+          final lastText = msgs.isNotEmpty ? msgs.last['text']?.toString() ?? 'Mulai chat...' : 'Order baru aktif';
+          final lastTime = msgs.isNotEmpty ? msgs.last['time']?.toString() ?? 'Baru saja' : 'Baru saja';
+
+          items.add(_ChatRoomItem(
+            bookingId: b['id'].toString(),
+            name: clientName,
+            msg: lastText,
+            time: lastTime,
+            unread: 0,
+            img: clientImg,
+            tag: b['status'] == 'accepted' || b['status'] == 'started' ? 'Sedang Berjalan' : 'Order Masuk',
+          ));
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _conversations = items;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading driver chats: $e");
+      if (mounted) {
+        setState(() {
+          _conversations = [];
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override

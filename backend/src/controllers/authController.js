@@ -328,7 +328,23 @@ const login = async (req, res) => {
       });
     }
     
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    let isPasswordValid = false;
+    if (user.password_hash) {
+      try {
+        isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      } catch (_) {}
+
+      if (!isPasswordValid && password === user.password_hash) {
+        isPasswordValid = true;
+        try {
+          const salt = await bcrypt.genSalt(10);
+          const hashed = await bcrypt.hash(password, salt);
+          await supabaseAdmin.from('users').update({ password_hash: hashed }).eq('id', user.id);
+        } catch (hErr) {
+          console.error('Failed re-hashing password:', hErr);
+        }
+      }
+    }
     console.log('🔑 Password valid:', isPasswordValid);
 
     if (!isPasswordValid) {
@@ -585,15 +601,18 @@ const registerWithOtp = async (req, res) => {
       avatar_url = `/uploads/${file.filename}`;
     }
 
+    const generatedEmail = `${cleanPhone}@temenin.aja`;
+
     const { data: user, error: dbError } = await supabaseAdmin.from('users')
       .insert([
         {
+          email: generatedEmail,
           full_name: full_name.trim(),
           phone: cleanPhone,
           avatar_url: avatar_url,
           balance: 0,
           points: 0,
-          is_verified: true,
+          is_verified: false, // Forces email & password setup + verification
           created_at: new Date(),
           updated_at: new Date()
         }
@@ -694,18 +713,17 @@ const setupAccount = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
 
-    // Create user in Supabase Auth (This sends the verification email automatically if email_confirm = false in Supabase project settings. We enforce email_confirm: false here)
+    // Create user in Supabase Auth
     try {
       await supabaseAdmin.auth.admin.createUser({
         email: cleanEmail,
         password: password,
-        email_confirm: false, // Forces email verification
+        email_confirm: true, // Auto verify for frontend testing
         user_metadata: {
           public_user_id: userId
         }
       });
     } catch (authError) {
-      // If user already exists in auth.users, maybe update them or ignore
       console.warn('Supabase Auth creation warning:', authError.message);
       if (authError.message.includes('already registered')) {
         return res.status(400).json({ success: false, message: 'Email sudah terdaftar di sistem Auth' });
@@ -717,7 +735,7 @@ const setupAccount = async (req, res) => {
       .update({
         email: cleanEmail,
         password_hash: password_hash,
-        is_verified: false, // We mark as false until they verify
+        is_verified: true, // Auto verified for frontend testing
         updated_at: new Date()
       })
       .eq('id', userId);

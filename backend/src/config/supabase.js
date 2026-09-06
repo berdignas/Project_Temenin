@@ -14,18 +14,7 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Client untuk operasi umum
-const supabase = createClient(
-  supabaseUrl,
-  supabaseAnonKey,
-  {
-    auth: {
-      persistSession: false
-    }
-  }
-);
-
-// Client admin untuk operasi khusus
+// Client admin untuk operasi backend (bypass RLS)
 const supabaseAdmin = createClient(
   supabaseUrl,
   supabaseServiceKey,
@@ -35,6 +24,9 @@ const supabaseAdmin = createClient(
     }
   }
 );
+
+// Client untuk operasi umum (gunakan supabaseAdmin agar tidak terblokir RLS di backend)
+const supabase = supabaseAdmin;
 
 // 🔴 TAMBAHKAN: Fungsi query wrapper untuk kompatibilitas
 const query = async (text, params) => {

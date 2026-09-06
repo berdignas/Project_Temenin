@@ -208,6 +208,33 @@ class _DriverNegotiationScreenState extends State<DriverNegotiationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bookingProvider = context.watch<BookingProvider>();
+    final active = bookingProvider.activeBooking;
+    
+    // Check if client paid DP or accepted this booking in real-time
+    if (active != null && (active.id.toString() == widget.bookingData.id.toString() || _negotiationState == 'waiting_client')) {
+      final sub = active.additionalDetails?['sub_status']?.toString();
+      final status = active.status;
+      if (status == 'ongoing' || status == 'accepted' || status == 'dp_paid' || sub == 'dp_paid') {
+        if (_negotiationState != 'client_accepted') {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              setState(() {
+                _negotiationState = 'client_accepted';
+                _chatMessages.add({
+                  'sender': 'system',
+                  'text': 'Klien telah mengunci harga dan membayar DP. Negosiasi Selesai.',
+                  'time': DateTime.now().hour.toString().padLeft(2, '0') + ':' + DateTime.now().minute.toString().padLeft(2, '0'),
+                  'isBid': false,
+                });
+              });
+              _scrollToBottom();
+            }
+          });
+        }
+      }
+    }
+
     final clientName = widget.bookingData.client?.fullName ?? 'Client';
     final clientAvatar = widget.bookingData.client?.avatarUrl ?? '';
     

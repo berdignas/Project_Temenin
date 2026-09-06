@@ -9,11 +9,11 @@ export const AuthProvider = ({ children }) => {
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem('admin_token') ? true : true; // Default logged in for easy review
+    return !!localStorage.getItem('admin_token');
   });
 
   const login = (email, password) => {
-    if (email && password) {
+    if (email === 'admin@temenin.aja' && password === 'admin123') {
       const user = { name: 'Super Admin', email, role: 'Super Admin' };
       localStorage.setItem('admin_token', 'token_admin_temenin_ajaa_secret');
       localStorage.setItem('admin_user', JSON.stringify(user));

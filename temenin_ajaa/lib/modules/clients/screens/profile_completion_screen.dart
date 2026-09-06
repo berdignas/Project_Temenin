@@ -74,19 +74,9 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
 
   void _nextStep() {
     final name = _nameController.text.trim();
-    final nik = _nikController.text.trim();
-    final address = _addressController.text.trim();
 
     if (name.isEmpty) {
       setState(() => _errorMsg = 'Nama Lengkap wajib diisi.');
-      return;
-    }
-    if (nik.length != 16) {
-      setState(() => _errorMsg = 'NIK wajib berisi 16 digit angka.');
-      return;
-    }
-    if (address.isEmpty) {
-      setState(() => _errorMsg = 'Alamat wajib diisi.');
       return;
     }
 
@@ -155,8 +145,8 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
       email: _emailController.text.trim(),
       fullName: _nameController.text.trim(),
       phone: widget.user.phone ?? '',
-      nik: _nikController.text.trim(),
-      address: _addressController.text.trim(),
+      nik: '',
+      address: '',
     );
 
     if (!mounted) return;
@@ -298,49 +288,6 @@ class _ProfileCompletionScreenState extends State<ProfileCompletionScreen> {
           ),
         ),
         const SizedBox(height: 16),
-
-        Text(
-          'Nomor KTP / NIK (16 Digit)',
-          style: GoogleFonts.inter(color: AppColors.textHighContrast, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _nikController,
-          keyboardType: TextInputType.number,
-          maxLength: 16,
-          style: const TextStyle(color: AppColors.textHighContrast, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: 'Masukkan 16 digit NIK Anda',
-            hintStyle: TextStyle(color: AppColors.textMuted.withOpacity(0.5)),
-            counterText: '',
-            filled: true,
-            fillColor: AppColors.obsidian,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.elevatedDark)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.elevatedDark)),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        Text(
-          'Alamat Lengkap',
-          style: GoogleFonts.inter(color: AppColors.textHighContrast, fontSize: 12, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _addressController,
-          maxLines: 3,
-          style: const TextStyle(color: AppColors.textHighContrast, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: 'Contoh: Jalan Senopati No. 12, Jakarta Selatan',
-            hintStyle: TextStyle(color: AppColors.textMuted.withOpacity(0.5)),
-            filled: true,
-            fillColor: AppColors.obsidian,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.elevatedDark)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.elevatedDark)),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          ),
-        ),
         
         if (_errorMsg != null) ...[
           const SizedBox(height: 24),

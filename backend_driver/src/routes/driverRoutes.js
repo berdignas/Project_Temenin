@@ -20,6 +20,7 @@ router.put('/profile', protect, updateDriverProfile);
 router.put('/status', protect, updateDriverStatus);
 router.get('/bookings', protect, getDriverBookings);
 router.put('/bookings/:bookingId/status', protect, updateBookingStatus);
+router.patch('/bookings/:bookingId/status', protect, updateBookingStatus);
 router.get('/earnings', protect, getDriverEarnings);
 
 module.exports = router;

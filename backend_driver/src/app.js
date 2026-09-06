@@ -6,6 +6,7 @@ require('dotenv').config({ path: path.join(__dirname, '../.env') });
 // Import routes
 const authRoutes = require('./routes/authRoutes');
 const driverRoutes = require('./routes/driverRoutes');
+const communityRoutes = require('../../backend/src/routes/communityRoutes');
 
 const app = express();
 
@@ -17,6 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/drivers', driverRoutes);
+app.use('/api/community', communityRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

@@ -147,16 +147,47 @@ const login = async (req, res) => {
       });
     }
 
-    // Check role (Must be driver)
-    if (user.role && user.role !== 'driver') {
+    // Check if driver profile exists
+    const { data: existingDriver } = await supabase
+      .from('drivers')
+      .select('id')
+      .or(`user_id.eq.${user.id},id.eq.${user.id}`)
+      .maybeSingle();
+
+    // Check role (Must be driver or exist in drivers table)
+    if (user.role && user.role !== 'driver' && !existingDriver) {
       return res.status(403).json({
         success: false,
         message: 'Akun ini terdaftar sebagai Klien/Penumpang, bukan sebagai Mitra Driver.'
       });
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    // If role wasn't driver, update user role to driver
+    if (user.role !== 'driver') {
+      await supabase.from('users').update({ role: 'driver' }).eq('id', user.id);
+      user.role = 'driver';
+    }
+
+    // Verify password (bcrypt + plaintext fallback)
+    let isPasswordValid = false;
+    if (user.password_hash) {
+      try {
+        isPasswordValid = await bcrypt.compare(password, user.password_hash);
+      } catch (_) {}
+
+      if (!isPasswordValid && password === user.password_hash) {
+        isPasswordValid = true;
+        // Upgrade plaintext password hash to bcrypt hash in DB
+        try {
+          const salt = await bcrypt.genSalt(10);
+          const hashed = await bcrypt.hash(password, salt);
+          await supabase.from('users').update({ password_hash: hashed }).eq('id', user.id);
+        } catch (hErr) {
+          console.error('Failed re-hashing password:', hErr);
+        }
+      }
+    }
+
     if (!isPasswordValid) {
       return res.status(401).json({
         success: false,
@@ -165,13 +196,17 @@ const login = async (req, res) => {
     }
 
     // Ensure driver profile exists in drivers table (auto-create if missing)
-    const { data: existingDriver } = await supabase
-      .from('drivers')
-      .select('id')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    let driverCheck = existingDriver;
+    if (!driverCheck) {
+      const { data: fetchedDriver } = await supabase
+        .from('drivers')
+        .select('id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      driverCheck = fetchedDriver;
+    }
 
-    if (!existingDriver) {
+    if (!driverCheck) {
       console.log(`[DriverAuth] Auto-creating missing driver profile for user ${user.id}...`);
       await supabase
         .from('drivers')

@@ -241,14 +241,109 @@ exports.getBookings = async (req, res) => {
   }
 };
 
+exports.createBooking = async (req, res) => {
+  try {
+    const { user_id, driver_id, pickup_location, dropoff_location, total_price, duration, status } = req.body;
+
+    const { data, error } = await supabaseAdmin
+      .from('bookings')
+      .insert({
+        user_id: user_id || null,
+        driver_id: driver_id || null,
+        pickup_location: pickup_location || 'Lokasi Penjemputan',
+        dropoff_location: dropoff_location || 'Lokasi Tujuan',
+        total_price: parseFloat(total_price) || 50000,
+        duration: parseInt(duration) || 60,
+        status: status || 'pending',
+        additional_details: {
+          sub_status: status === 'cancelled' ? 'cancelled' : (status === 'ongoing' ? 'dp_paid' : 'pending')
+        },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json({ success: true, message: 'Pesanan berhasil dibuat oleh Admin', data });
+  } catch (error) {
+    console.error('Error creating booking:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.updateBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { pickup_location, dropoff_location, total_price, duration, status, driver_id } = req.body;
+
+    const updatePayload = {
+      updated_at: new Date().toISOString()
+    };
+    if (pickup_location !== undefined) updatePayload.pickup_location = pickup_location;
+    if (dropoff_location !== undefined) updatePayload.dropoff_location = dropoff_location;
+    if (total_price !== undefined) updatePayload.total_price = parseFloat(total_price);
+    if (duration !== undefined) updatePayload.duration = parseInt(duration);
+    if (driver_id !== undefined) updatePayload.driver_id = driver_id || null;
+    if (status !== undefined) {
+      updatePayload.status = status;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('bookings')
+      .update(updatePayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(200).json({ success: true, message: 'Data pesanan berhasil diperbarui', data });
+  } catch (error) {
+    console.error('Error updating booking:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.deleteBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabaseAdmin.from('bookings').delete().eq('id', id);
+    if (error) throw error;
+
+    res.status(200).json({ success: true, message: 'Pesanan berhasil dihapus' });
+  } catch (error) {
+    console.error('Error deleting booking:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.updateBookingStatus = async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
 
+    // Fetch existing details
+    const { data: existing } = await supabaseAdmin
+      .from('bookings')
+      .select('additional_details')
+      .eq('id', id)
+      .single();
+
+    const addDetails = Map && existing?.additional_details ? { ...existing.additional_details } : {};
+    addDetails.sub_status = status;
+    if (status === 'cancelled') {
+      addDetails.cancelled_by = 'admin';
+    }
+
     const { data, error } = await supabaseAdmin
       .from('bookings')
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ 
+        status, 
+        additional_details: addDetails,
+        updated_at: new Date().toISOString() 
+      })
       .eq('id', id)
       .select()
       .single();

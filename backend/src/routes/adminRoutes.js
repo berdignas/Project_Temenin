@@ -9,6 +9,9 @@ const {
   verifyDriverStatus,
   updateDriver,
   getBookings,
+  createBooking,
+  updateBooking,
+  deleteBooking,
   updateBookingStatus,
   topUpUserBalance,
   getCommunityPosts,
@@ -30,6 +33,9 @@ router.put('/drivers/:id', updateDriver);
 
 // Booking Management
 router.get('/bookings', getBookings);
+router.post('/bookings', createBooking);
+router.put('/bookings/:id', updateBooking);
+router.delete('/bookings/:id', deleteBooking);
 router.put('/bookings/:id/status', updateBookingStatus);
 
 // Finance & Top-Up

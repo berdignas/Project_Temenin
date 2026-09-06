@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:math' as dart_math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,8 +9,8 @@ import 'package:http/http.dart' as http;
 import '../core/constants/api_constants.dart';
 
 class CommunityProvider extends ChangeNotifier {
-  static const String _postsCacheKey = 'driver_community_posts_cache_v5';
-  static const String _storiesCacheKey = 'driver_community_stories_cache_v5';
+  static const String _postsCacheKey = 'driver_community_posts_cache_v6';
+  static const String _storiesCacheKey = 'driver_community_stories_cache_v6';
 
   final List<Map<String, dynamic>> _posts = [];
   final List<Map<String, dynamic>> _stories = [];
@@ -96,7 +97,7 @@ class CommunityProvider extends ChangeNotifier {
   Future<String?> _uploadFileToSupabaseStorage(String localFilePath, {required String folder}) async {
     try {
       final file = File(localFilePath);
-      if (!file.existsSync()) return null;
+      if (kIsWeb || !file.existsSync()) return null;
 
       final extension = localFilePath.split('.').last.toLowerCase();
       final fileName = '${folder}_${DateTime.now().millisecondsSinceEpoch}_${dart_math.Random().nextInt(9999)}.$extension';
@@ -157,8 +158,13 @@ class CommunityProvider extends ChangeNotifier {
       try {
         final candidateUrls = [
           '${ApiConstants.baseUrl}/api/community/posts',
+          '${ApiConstants.baseUrl.replaceAll(':3004', ':3002')}/api/community/posts',
+          'http://192.168.1.4:3004/api/community/posts',
+          'http://192.168.1.4:3002/api/community/posts',
+          'http://10.0.2.2:3004/api/community/posts',
+          'http://10.0.2.2:3002/api/community/posts',
+          'http://127.0.0.1:3004/api/community/posts',
           'http://127.0.0.1:3002/api/community/posts',
-          'http://localhost:3002/api/community/posts',
         ];
         for (final url in candidateUrls) {
           try {
@@ -228,8 +234,13 @@ class CommunityProvider extends ChangeNotifier {
       try {
         final candidateUrls = [
           '${ApiConstants.baseUrl}/api/community/stories',
+          '${ApiConstants.baseUrl.replaceAll(':3004', ':3002')}/api/community/stories',
+          'http://192.168.1.4:3004/api/community/stories',
+          'http://192.168.1.4:3002/api/community/stories',
+          'http://10.0.2.2:3004/api/community/stories',
+          'http://10.0.2.2:3002/api/community/stories',
+          'http://127.0.0.1:3004/api/community/stories',
           'http://127.0.0.1:3002/api/community/stories',
-          'http://localhost:3002/api/community/stories',
         ];
         for (final url in candidateUrls) {
           try {
@@ -331,7 +342,7 @@ class CommunityProvider extends ChangeNotifier {
 
     // 2. Upload file to Supabase Storage & persist to Database
     String finalImageUrl = image;
-    if (primaryPath != null && File(primaryPath).existsSync()) {
+    if (!kIsWeb && primaryPath != null && File(primaryPath).existsSync()) {
       final publicCloudUrl = await _uploadFileToSupabaseStorage(primaryPath, folder: 'posts');
       if (publicCloudUrl != null) {
         finalImageUrl = publicCloudUrl;
@@ -344,8 +355,11 @@ class CommunityProvider extends ChangeNotifier {
     final effectiveUserId = userId ?? await _getSavedUserId();
 
     // Persist via Backend API (uses supabaseAdmin)
+    bool savedToBackend = false;
     try {
       final candidateUrls = [
+        'http://192.168.1.4:3002/api/community/posts',
+        'http://10.0.2.2:3002/api/community/posts',
         '${ApiConstants.baseUrl}/api/community/posts',
         'http://127.0.0.1:3002/api/community/posts',
         'http://localhost:3002/api/community/posts',
@@ -368,12 +382,45 @@ class CommunityProvider extends ChangeNotifier {
 
           if (res.statusCode == 200 || res.statusCode == 201) {
             debugPrint('✅ Post successfully stored to database via backend API');
+            savedToBackend = true;
             break;
           }
         } catch (_) {}
       }
     } catch (e) {
       debugPrint('ℹ️ Backend post insert info: $e');
+    }
+
+    // Direct Supabase Fallback if Backend API was not reachable
+    if (!savedToBackend) {
+      try {
+        final supabase = Supabase.instance.client;
+        String? dbUserId = effectiveUserId;
+        if (dbUserId == null || dbUserId.isEmpty || !RegExp(r'^[0-9a-fA-F\-]{36}$').hasMatch(dbUserId)) {
+          try {
+            final firstUser = await supabase.from('users').select('id').limit(1).maybeSingle();
+            if (firstUser != null && firstUser['id'] != null) {
+              dbUserId = firstUser['id'].toString();
+            }
+          } catch (_) {}
+        }
+
+        if (dbUserId != null) {
+          await supabase.from('community_posts').insert({
+            'user_id': dbUserId,
+            'author_name': partnerName,
+            'author_avatar': avatar,
+            'image_url': finalImageUrl,
+            'media_type': mediaType,
+            'caption': caption,
+            'location': location ?? 'Jakarta',
+            'likes_count': 0,
+          });
+          debugPrint('✅ Post successfully inserted directly to Supabase DB');
+        }
+      } catch (supaErr) {
+        debugPrint('⚠️ Direct Supabase post insert failed: $supaErr');
+      }
     }
   }
 
@@ -404,7 +451,7 @@ class CommunityProvider extends ChangeNotifier {
     await _saveToLocalStorage();
 
     String finalImageUrl = image;
-    if (localFilePath != null && File(localFilePath).existsSync()) {
+    if (!kIsWeb && localFilePath != null && File(localFilePath).existsSync()) {
       final publicCloudUrl = await _uploadFileToSupabaseStorage(localFilePath, folder: 'stories');
       if (publicCloudUrl != null) {
         finalImageUrl = publicCloudUrl;
@@ -417,8 +464,11 @@ class CommunityProvider extends ChangeNotifier {
     final effectiveUserId = userId ?? await _getSavedUserId();
 
     // Persist via Backend API (uses supabaseAdmin)
+    bool savedToBackend = false;
     try {
       final candidateUrls = [
+        'http://192.168.1.4:3002/api/community/stories',
+        'http://10.0.2.2:3002/api/community/stories',
         '${ApiConstants.baseUrl}/api/community/stories',
         'http://127.0.0.1:3002/api/community/stories',
         'http://localhost:3002/api/community/stories',
@@ -440,12 +490,44 @@ class CommunityProvider extends ChangeNotifier {
 
           if (res.statusCode == 200 || res.statusCode == 201) {
             debugPrint('✅ Story successfully stored to database via backend API');
+            savedToBackend = true;
             break;
           }
         } catch (_) {}
       }
     } catch (e) {
       debugPrint('ℹ️ Backend story insert info: $e');
+    }
+
+    // Direct Supabase Fallback if Backend API was not reachable
+    if (!savedToBackend) {
+      try {
+        final supabase = Supabase.instance.client;
+        String? dbUserId = effectiveUserId;
+        if (dbUserId == null || dbUserId.isEmpty || !RegExp(r'^[0-9a-fA-F\-]{36}$').hasMatch(dbUserId)) {
+          try {
+            final firstUser = await supabase.from('users').select('id').limit(1).maybeSingle();
+            if (firstUser != null && firstUser['id'] != null) {
+              dbUserId = firstUser['id'].toString();
+            }
+          } catch (_) {}
+        }
+
+        if (dbUserId != null) {
+          await supabase.from('community_stories').insert({
+            'user_id': dbUserId,
+            'author_name': name,
+            'author_avatar': avatar,
+            'image_url': finalImageUrl,
+            'title': title,
+            'caption': caption ?? '',
+            'views_count': 1,
+          });
+          debugPrint('✅ Story successfully inserted directly to Supabase DB');
+        }
+      } catch (supaErr) {
+        debugPrint('⚠️ Direct Supabase story insert failed: $supaErr');
+      }
     }
   }
 

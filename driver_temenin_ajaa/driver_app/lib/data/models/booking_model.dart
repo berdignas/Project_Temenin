@@ -38,11 +38,37 @@ class BookingModel {
   });
 
   factory BookingModel.fromJson(Map<String, dynamic> json) {
+    final addDetails = json['additional_details'] is Map<String, dynamic>
+        ? json['additional_details'] as Map<String, dynamic>
+        : (json['additionalDetails'] is Map<String, dynamic>
+            ? json['additionalDetails'] as Map<String, dynamic>
+            : (json['additional_details'] != null
+                ? Map<String, dynamic>.from(json['additional_details'])
+                : (json['additionalDetails'] != null
+                    ? Map<String, dynamic>.from(json['additionalDetails'])
+                    : null)));
+
+    final rawStatus = json['status']?.toString() ?? 'pending';
+    final subStatus = addDetails?['sub_status']?.toString();
+    final isDpPaid = addDetails?['dp_paid'] == true || subStatus == 'dp_paid' || json['dp_paid'] == true;
+
+    final isAdvanced = subStatus == 'on_the_way' || 
+                       subStatus == 'arrived' || 
+                       subStatus == 'started' || 
+                       subStatus == 'ongoing' || 
+                       subStatus == 'completed' || 
+                       subStatus == 'paid';
+
+    String effectiveStatus = subStatus ?? rawStatus;
+    if (isDpPaid && !isAdvanced) {
+      effectiveStatus = 'dp_paid';
+    }
+
     return BookingModel(
-      id: json['id'] ?? '',
-      userId: json['user_id'] ?? json['userId'] ?? '',
-      driverId: json['driver_id'] ?? json['driverId'],
-      status: json['status'] ?? 'pending',
+      id: json['id']?.toString() ?? '',
+      userId: json['user_id']?.toString() ?? json['userId']?.toString() ?? '',
+      driverId: json['driver_id']?.toString() ?? json['driverId']?.toString(),
+      status: effectiveStatus,
       pickupLocation: json['pickup_location'] ?? json['pickupLocation'] ?? '',
       dropoffLocation: json['dropoff_location'] ?? json['dropoffLocation'] ?? '',
       pickupLatitude: json['pickup_latitude'] != null ? (json['pickup_latitude'] as num).toDouble() : null,
@@ -51,9 +77,9 @@ class BookingModel {
       dropoffLongitude: json['dropoff_longitude'] != null ? (json['dropoff_longitude'] as num).toDouble() : null,
       duration: json['duration'] ?? 0,
       totalPrice: (json['total_price'] ?? json['totalPrice'] ?? 0.0).toDouble(),
-      bookingDate: json['booking_date'] != null ? DateTime.parse(json['booking_date']) : null,
-      additionalDetails: json['additional_details'] ?? json['additionalDetails'],
-      createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.now(),
+      bookingDate: json['booking_date'] != null ? DateTime.tryParse(json['booking_date'].toString()) : null,
+      additionalDetails: addDetails,
+      createdAt: json['created_at'] != null ? (DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()) : DateTime.now(),
       client: json['users'] != null ? UserModel.fromJson(json['users']) : null,
     );
   }
@@ -76,5 +102,43 @@ class BookingModel {
       'additional_details': additionalDetails,
       'created_at': createdAt.toIso8601String(),
     };
+  }
+
+  BookingModel copyWith({
+    String? id,
+    String? userId,
+    String? driverId,
+    String? status,
+    String? pickupLocation,
+    String? dropoffLocation,
+    double? pickupLatitude,
+    double? pickupLongitude,
+    double? dropoffLatitude,
+    double? dropoffLongitude,
+    int? duration,
+    double? totalPrice,
+    DateTime? bookingDate,
+    Map<String, dynamic>? additionalDetails,
+    DateTime? createdAt,
+    UserModel? client,
+  }) {
+    return BookingModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      driverId: driverId ?? this.driverId,
+      status: status ?? this.status,
+      pickupLocation: pickupLocation ?? this.pickupLocation,
+      dropoffLocation: dropoffLocation ?? this.dropoffLocation,
+      pickupLatitude: pickupLatitude ?? this.pickupLatitude,
+      pickupLongitude: pickupLongitude ?? this.pickupLongitude,
+      dropoffLatitude: dropoffLatitude ?? this.dropoffLatitude,
+      dropoffLongitude: dropoffLongitude ?? this.dropoffLongitude,
+      duration: duration ?? this.duration,
+      totalPrice: totalPrice ?? this.totalPrice,
+      bookingDate: bookingDate ?? this.bookingDate,
+      additionalDetails: additionalDetails ?? this.additionalDetails,
+      createdAt: createdAt ?? this.createdAt,
+      client: client ?? this.client,
+    );
   }
 }

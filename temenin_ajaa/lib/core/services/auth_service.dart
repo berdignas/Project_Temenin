@@ -626,11 +626,12 @@ class AuthService {
       }
       return {
         'success': false,
+        'statusCode': response.statusCode,
         'message': data['message'] ?? 'Gagal mengambil profil',
       };
     } catch (e) {
       Log.e('Get user profile error: $e');
-      return {'success': false, 'message': 'Gagal menghubungkan ke server: $e'};
+      return {'success': false, 'statusCode': 500, 'message': 'Gagal menghubungkan ke server: $e'};
     }
   }
 

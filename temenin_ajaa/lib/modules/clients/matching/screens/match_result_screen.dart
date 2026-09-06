@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:provider/provider.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
+import 'package:temenin_ajaa/providers/driver_provider.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/antar_jemput_booking_screen.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/hangout_booking_screen.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/freedom_request_booking_screen.dart';
@@ -206,14 +208,27 @@ class MatchResultScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final matchedPartner = {
-      'name': 'Kiara Putri',
-      'avatar': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=300&q=80',
-      'rating': 4.9,
-      'matchPercentage': 98,
-      'hobbies': ['Ngafe', 'Deep Talk', 'Vespa Riding'],
-      'price': 'Rp 150.000',
-    };
+    final driverProvider = context.watch<DriverProvider>();
+    final realDrivers = driverProvider.drivers;
+    final Map<String, dynamic> matchedPartner = realDrivers.isNotEmpty
+        ? {
+            'id': realDrivers.first['id'],
+            'name': realDrivers.first['name'] ?? 'Driver Partner',
+            'avatar': realDrivers.first['image'] ?? 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=300&q=80',
+            'rating': double.tryParse(realDrivers.first['rating'].toString()) ?? 5.0,
+            'matchPercentage': 98,
+            'hobbies': ['Ngafe', 'Deep Talk', realDrivers.first['vehicle'] ?? 'Riding'],
+            'price': 'Rp ${realDrivers.first['price'] ?? 50000}',
+          }
+        : {
+            'id': 'mock-1',
+            'name': 'Kiara Putri',
+            'avatar': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=300&q=80',
+            'rating': 4.9,
+            'matchPercentage': 98,
+            'hobbies': ['Ngafe', 'Deep Talk', 'Vespa Riding'],
+            'price': 'Rp 150.000',
+          };
 
     return Scaffold(
       backgroundColor: AppTheme.background,

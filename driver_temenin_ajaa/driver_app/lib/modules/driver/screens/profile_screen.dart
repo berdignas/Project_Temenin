@@ -1,11 +1,14 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../providers/booking_provider.dart';
+import '../../../data/models/booking_model.dart';
 import '../../../providers/community_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
@@ -107,7 +110,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     final userPosts = community.posts;
     final userStories = community.stories;
 
-    final bool hasLocalAvatar = avatar.isNotEmpty && File(avatar).existsSync();
+    final bool hasLocalAvatar = !kIsWeb && avatar.isNotEmpty && File(avatar).existsSync();
     final ImageProvider avatarImageProvider = hasLocalAvatar
         ? FileImage(File(avatar))
         : NetworkImage(avatar.isNotEmpty ? avatar : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300') as ImageProvider;
@@ -432,7 +435,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     bool isAddButton = false,
     VoidCallback? onTap,
   }) {
-    final bool hasLocalFile = localFilePath != null && localFilePath.isNotEmpty && File(localFilePath).existsSync();
+    final bool hasLocalFile = !kIsWeb && localFilePath != null && localFilePath.isNotEmpty && File(localFilePath).existsSync();
 
     return GestureDetector(
       onTap: onTap,
@@ -709,7 +712,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                                       itemCount: multiPhotos.length,
                                       itemBuilder: (context, photoIndex) {
                                         final path = multiPhotos[photoIndex];
-                                        return File(path).existsSync()
+                                        return (!kIsWeb && File(path).existsSync())
                                             ? Image.file(File(path), fit: BoxFit.cover)
                                             : Image.network(imgUrl, fit: BoxFit.cover);
                                       },
@@ -731,7 +734,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                                     ),
                                   ],
                                 )
-                              : (localPath != null && File(localPath).existsSync())
+                              : (!kIsWeb && localPath != null && File(localPath).existsSync())
                                   ? Image.file(File(localPath), fit: BoxFit.cover)
                                   : (imgUrl.isNotEmpty)
                                       ? Image.network(
@@ -876,7 +879,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                 : 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?w=600');
 
             return GestureDetector(
-              onTap: () => _showVehicleDetailModal(context, v, isCar, isActive, idx),
+              onTap: () => _showVehicleDetailModal(context, v, isCar, isActive, idx, vehicles),
               child: Container(
                 margin: const EdgeInsets.only(bottom: 14),
                 padding: const EdgeInsets.all(14),
@@ -975,6 +978,29 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                                     ),
                                   ),
                                   const Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.primaryPink, size: 10),
+                                  const Spacer(),
+                                  InkWell(
+                                    onTap: () => _pickCropAndSaveVehiclePhoto(idx, vehicles),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.fuchsiaLight,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: AppTheme.primaryPink.withValues(alpha: 0.4)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.crop_original_rounded, size: 12, color: AppTheme.primaryPink),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            "Edit Foto",
+                                            style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
                                 ],
                               ),
                             ],
@@ -1009,223 +1035,205 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     );
   }
 
-  // ================= TAB 3: JADWAL DRIVER (FULL MONTH SQUARE DATE BOXES) =================
+  // Helper method to get real bookings for a specific date from Supabase/BookingProvider
+  List<BookingModel> _getBookingsForDate(DateTime date, BookingProvider provider) {
+    final all = <BookingModel>[];
+    if (provider.activeBooking != null) {
+      all.add(provider.activeBooking!);
+    }
+    for (final b in provider.bookings) {
+      if (!all.any((x) => x.id == b.id)) {
+        all.add(b);
+      }
+    }
+
+    return all.where((b) {
+      if (b.status == 'cancelled') return false;
+      final bDate = b.bookingDate ?? b.createdAt;
+      return bDate.year == date.year && bDate.month == date.month && bDate.day == date.day;
+    }).toList();
+  }
+
+  // ================= TAB 3: JADWAL DRIVER (7-COLUMN REAL MONTH CALENDAR GRID) =================
   Widget _buildTabSchedule() {
     final bookingProvider = context.watch<BookingProvider>();
-    final activeBooking = bookingProvider.activeBooking;
-    final bookingsList = bookingProvider.bookings;
 
     final now = DateTime.now();
     final totalDaysInMonth = DateTime(now.year, now.month + 1, 0).day;
-    final monthName = _getMonthName(now.month);
     final monthFullName = _getFullMonthName(now.month);
 
-    final days = List.generate(totalDaysInMonth, (i) {
-      final date = DateTime(now.year, now.month, i + 1);
-      final dayName = _getDayName(date.weekday);
-      final shortDay = _getShortDayName(date.weekday);
-      final dateNum = (i + 1).toString().padLeft(2, '0');
-      final isBooked = (i == 3 || i == 6 || i == 14 || i == 21);
-
-      return {
-        'day': dayName,
-        'shortDay': shortDay,
-        'dateNum': dateNum,
-        'date': '$dateNum $monthName',
-        'fullDate': '$dayName, $dateNum $monthFullName ${now.year}',
-        'hours': isBooked ? '09:00 - 17:00 WIB (Terisi Penugasan)' : '08:00 - 22:00 WIB (Siap Order)',
-        'status': isBooked ? 'Booked' : 'Available',
-      };
-    });
-
-    final safeIndex = _selectedScheduleDayIndex < days.length ? _selectedScheduleDayIndex : 0;
-    final selectedDay = days[safeIndex];
+    final weekdaysHeader = ['SEN', 'SEL', 'RAB', 'KAM', 'JUM', 'SAB', 'MING'];
+    final firstDayWeekday = DateTime(now.year, now.month, 1).weekday; // 1 = Mon, 7 = Sun
+    final leadingEmptyCount = firstDayWeekday - 1;
+    final totalGridCells = leadingEmptyCount + totalDaysInMonth;
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
-      padding: EdgeInsets.fromLTRB(20.0, 20.0, 20.0, 100.0 + MediaQuery.of(context).padding.bottom),
+      padding: EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 100.0 + MediaQuery.of(context).padding.bottom),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Jadwal & Ketersediaan Jam Kerja",
-            style: GoogleFonts.plusJakartaSans(
-              color: AppTheme.textHighContrast,
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
-          ),
-          Text(
-            "Klik kotak tanggal di bawah untuk melihat deskripsi jam operasional",
-            style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Kalender Jadwal Driver 🗓️",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: AppTheme.textHighContrast,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      "$monthFullName ${now.year} • Data Booking Realtime",
+                      style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppTheme.cardDeep,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFFEF4444), shape: BoxShape.circle)),
+                    const SizedBox(width: 4),
+                    Text("Ada Booking", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 10, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 8),
+                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
+                    const SizedBox(width: 4),
+                    Text("Kosong/Ready", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 10, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 16),
 
-          // SQUARE DATE BOXES ROW
-          SizedBox(
-            height: 80,
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              itemCount: days.length,
-              itemBuilder: (context, index) {
-                final isSelected = index == _selectedScheduleDayIndex;
-                final d = days[index];
-                final isBooked = d['status'] == 'Booked';
-
-                return GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _selectedScheduleDayIndex = index;
-                    });
-                    // Open detailed schedule modal on click
-                    _showScheduleHoursModal(context, d, activeBooking, bookingsList);
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 72,
-                    margin: const EdgeInsets.only(right: 10),
-                    decoration: BoxDecoration(
-                      color: isSelected ? AppTheme.primaryPink : AppTheme.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: isSelected
-                            ? AppTheme.primaryPink
-                            : (isBooked ? AppTheme.primaryPink.withOpacity(0.5) : AppTheme.border),
-                        width: isSelected ? 2.0 : 1.0,
-                      ),
-                      boxShadow: isSelected
-                          ? [
-                              BoxShadow(
-                                color: AppTheme.primaryPink.withOpacity(0.35),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              )
-                            ]
-                          : [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.02),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              )
-                            ],
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          d['shortDay']!,
-                          style: GoogleFonts.plusJakartaSans(
-                            color: isSelected ? Colors.white70 : AppTheme.textMuted,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 10,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          d['dateNum']!,
-                          style: GoogleFonts.plusJakartaSans(
-                            color: isSelected ? Colors.white : AppTheme.textHighContrast,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 18,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isSelected
-                                ? Colors.white
-                                : (isBooked ? AppTheme.primaryPink : AppTheme.success),
-                          ),
-                        ),
-                      ],
+          // 7-Column Day Names Header Row
+          Row(
+            children: weekdaysHeader.map((w) {
+              return Expanded(
+                child: Center(
+                  child: Text(
+                    w,
+                    style: GoogleFonts.plusJakartaSans(
+                      color: AppTheme.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Selected Square Date Summary Card
-          GestureDetector(
-            onTap: () => _showScheduleHoursModal(context, selectedDay, activeBooking, bookingsList),
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: selectedDay['status'] == 'Booked'
-                      ? AppTheme.primaryPink.withOpacity(0.5)
-                      : AppTheme.border,
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.03),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 8),
+
+          // 7-Column Big Square Dates Grid (1 to totalDaysInMonth)
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: totalGridCells,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              crossAxisSpacing: 6,
+              mainAxisSpacing: 6,
+              childAspectRatio: 0.85,
+            ),
+            itemBuilder: (context, index) {
+              if (index < leadingEmptyCount) {
+                return const SizedBox();
+              }
+              final dayNum = index - leadingEmptyCount + 1;
+              final dateObj = DateTime(now.year, now.month, dayNum);
+              final dayBookings = _getBookingsForDate(dateObj, bookingProvider);
+              final isBooked = dayBookings.isNotEmpty;
+              final isToday = now.day == dayNum && now.month == dateObj.month && now.year == dateObj.year;
+
+              final Color boxColor = isBooked ? const Color(0xFFEF4444) : const Color(0xFF10B981);
+
+              return GestureDetector(
+                onTap: () {
+                  _showScheduleHoursModalForDate(context, dateObj, dayBookings);
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: boxColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: isToday
+                        ? Border.all(color: Colors.white, width: 2.5)
+                        : null,
+                    boxShadow: [
+                      BoxShadow(
+                        color: boxColor.withValues(alpha: 0.35),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      )
+                    ],
                   ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.access_time_filled_rounded, color: AppTheme.primaryPink, size: 20),
-                          const SizedBox(width: 8),
-                          Text(
-                            "${selectedDay['day']}, ${selectedDay['date']}",
-                            style: GoogleFonts.plusJakartaSans(
-                              color: AppTheme.textHighContrast,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        "$dayNum",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                        ),
                       ),
+                      const SizedBox(height: 2),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
                         decoration: BoxDecoration(
-                          color: selectedDay['status'] == 'Booked'
-                              ? AppTheme.primaryPink.withOpacity(0.12)
-                              : AppTheme.success.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(10),
+                          color: Colors.black26,
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
-                          selectedDay['status'] == 'Booked' ? "ADA PENUGASAN" : "KOSONG / READY",
+                          isBooked ? "BOOKING" : "READY",
                           style: GoogleFonts.plusJakartaSans(
-                            color: selectedDay['status'] == 'Booked' ? AppTheme.primaryPink : AppTheme.success,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 8,
                           ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    "⏰ Jam Kerja: ${selectedDay['hours']}",
-                    style: GoogleFonts.plusJakartaSans(
-                      color: AppTheme.textHighContrast,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 20),
+
+          // Informational Banner at bottom of schedule
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.touch_app_rounded, color: AppTheme.primaryPink, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    "Tekan salah satu kotak tanggal berwarna di atas untuk melihat rincian jam operasional atau detail pesanan yang masuk pada tanggal tersebut.",
+                    style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 12, height: 1.4),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    "Klik di sini untuk melihat deskripsi lengkap jam operasional untuk Driver & Klien ➔",
-                    style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1242,20 +1250,24 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     bool isCar,
     bool isActive,
     int vehicleIndex,
+    List<Map<String, dynamic>> allVehicles,
   ) {
-    final photos = isCar
+    final List<String> photos = [];
+    if (vehicle['image'] != null && (vehicle['image'] as String).isNotEmpty) {
+      photos.add(vehicle['image'] as String);
+    }
+    photos.addAll(isCar
         ? [
             'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=800',
             'https://images.unsplash.com/photo-1552519507-da3b142c6e3d?w=800',
-            'https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800',
           ]
         : [
             'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?w=800',
             'https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?w=800',
-            'https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=800',
-          ];
+          ]);
 
     int currentPhotoIndex = 0;
+    bool isUploading = false;
 
     showModalBottomSheet(
       context: context,
@@ -1348,6 +1360,10 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                                 photos[idx],
                                 fit: BoxFit.cover,
                                 width: double.infinity,
+                                errorBuilder: (ctx, err, stack) => Container(
+                                  color: AppTheme.cardDeep,
+                                  child: const Center(child: Icon(Icons.directions_car_rounded, color: AppTheme.textMuted, size: 48)),
+                                ),
                               );
                             },
                           ),
@@ -1398,7 +1414,69 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                       ],
                     ),
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 14),
+
+                  // Button to Upload / Change Vehicle Image
+                  OutlinedButton.icon(
+                    onPressed: isUploading
+                        ? null
+                        : () async {
+                            final picker = ImagePicker();
+                            final image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+                            if (image != null) {
+                              setModalState(() => isUploading = true);
+                              String finalPath = image.path;
+                              try {
+                                final cropped = await ImageCropper().cropImage(
+                                  sourcePath: image.path,
+                                  uiSettings: [
+                                    AndroidUiSettings(
+                                      toolbarTitle: 'Potong & Sesuaikan Foto Kendaraan',
+                                      toolbarColor: AppTheme.surface,
+                                      toolbarWidgetColor: AppTheme.textHighContrast,
+                                      activeControlsWidgetColor: AppTheme.primaryPink,
+                                      initAspectRatio: CropAspectRatioPreset.ratio4x3,
+                                      aspectRatioPresets: [CropAspectRatioPreset.ratio4x3, CropAspectRatioPreset.square],
+                                    ),
+                                    IOSUiSettings(title: 'Potong Foto Kendaraan'),
+                                  ],
+                                );
+                                if (cropped != null) finalPath = cropped.path;
+                              } catch (_) {}
+
+                              final uploadedUrl = await context.read<AuthProvider>().uploadImageFile(File(finalPath), folder: 'vehicles');
+                              vehicle['image'] = uploadedUrl;
+                              allVehicles[vehicleIndex]['image'] = uploadedUrl;
+
+                              await _saveVehiclesMetadata(allVehicles, vehicleIndex);
+                              if (mounted) {
+                                setState(() {});
+                                setModalState(() {
+                                  if (!photos.contains(uploadedUrl)) {
+                                    photos.insert(0, uploadedUrl);
+                                  }
+                                  isUploading = false;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text("✨ Foto kendaraan berhasil diubah & disimpan!"), backgroundColor: AppTheme.success),
+                                );
+                              }
+                            }
+                          },
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: AppTheme.primaryPink),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      minimumSize: const Size(double.infinity, 44),
+                    ),
+                    icon: isUploading
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryPink))
+                        : const Icon(Icons.add_a_photo_rounded, color: AppTheme.primaryPink, size: 16),
+                    label: Text(
+                      isUploading ? "Mengunggah Gambar..." : "Ubah / Upload Foto Unit 📸",
+                      style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
 
                   // Vehicle Specifications Grid
                   Text(
@@ -1428,9 +1506,10 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                     width: double.infinity,
                     height: 50,
                     child: ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         if (!isActive) {
-                          setState(() {});
+                          await _saveVehiclesMetadata(allVehicles, vehicleIndex);
+                          if (mounted) setState(() {});
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
@@ -1498,14 +1577,58 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     );
   }
 
-  // 2. SCHEDULE HOURS MODAL (Operational Description for Driver & Client)
-  void _showScheduleHoursModal(
+  Future<void> _pickCropAndSaveVehiclePhoto(int vehicleIndex, List<Map<String, dynamic>> allVehicles) async {
+    final picker = ImagePicker();
+    final image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    if (image != null) {
+      String finalPath = image.path;
+      try {
+        final cropped = await ImageCropper().cropImage(
+          sourcePath: image.path,
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Potong & Sesuaikan Foto Kendaraan',
+              toolbarColor: AppTheme.surface,
+              toolbarWidgetColor: AppTheme.textHighContrast,
+              activeControlsWidgetColor: AppTheme.primaryPink,
+              initAspectRatio: CropAspectRatioPreset.ratio4x3,
+              aspectRatioPresets: [CropAspectRatioPreset.ratio4x3, CropAspectRatioPreset.square],
+            ),
+            IOSUiSettings(title: 'Potong Foto Kendaraan'),
+          ],
+        );
+        if (cropped != null) finalPath = cropped.path;
+      } catch (e) {
+        debugPrint('Cropping error: $e');
+      }
+
+      final uploadedUrl = await context.read<AuthProvider>().uploadImageFile(File(finalPath), folder: 'vehicles');
+      if (uploadedUrl != null && uploadedUrl.isNotEmpty) {
+        allVehicles[vehicleIndex]['image'] = uploadedUrl;
+        await _saveVehiclesMetadata(allVehicles, vehicleIndex);
+        if (mounted) {
+          setState(() {});
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("✨ Foto kendaraan berhasil diubah & disimpan!"),
+              backgroundColor: AppTheme.success,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  // 2. SCHEDULE HOURS MODAL (Real booking details or availability for Driver & Client)
+  void _showScheduleHoursModalForDate(
     BuildContext context,
-    Map<String, dynamic> dayData,
-    dynamic activeBooking,
-    List<dynamic> bookingsList,
+    DateTime date,
+    List<BookingModel> dayBookings,
   ) {
-    final isBooked = dayData['status'] == 'Booked' || activeBooking != null || bookingsList.isNotEmpty;
+    final isBooked = dayBookings.isNotEmpty;
+    final dayName = _getDayName(date.weekday);
+    final monthName = _getFullMonthName(date.month);
+    final dateFormatted = "$dayName, ${date.day} $monthName ${date.year}";
 
     showModalBottomSheet(
       context: context,
@@ -1533,42 +1656,44 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
               ),
               const SizedBox(height: 16),
 
-              // Title
+              // Date Title & Status Badge
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "${dayData['day']}, ${dayData['date']}",
-                        style: GoogleFonts.plusJakartaSans(
-                          color: AppTheme.textHighContrast,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 18,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          dateFormatted,
+                          style: GoogleFonts.plusJakartaSans(
+                            color: AppTheme.textHighContrast,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 17,
+                          ),
                         ),
-                      ),
-                      Text(
-                        "Jadwal & Ketersediaan Jam Kerja Driver",
-                        style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
-                      ),
-                    ],
+                        Text(
+                          "Rincian Booking & Jadwal Operasional",
+                          style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+                        ),
+                      ],
+                    ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: isBooked
-                          ? AppTheme.primaryPink.withValues(alpha: 0.12)
-                          : Colors.green.shade50,
+                          ? const Color(0xFFEF4444).withValues(alpha: 0.15)
+                          : const Color(0xFF10B981).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: isBooked ? AppTheme.primaryPink : Colors.green.shade300,
+                        color: isBooked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
                       ),
                     ),
                     child: Text(
-                      isBooked ? "TERISI PENUGASAN" : "READY / KOSONG",
+                      isBooked ? "🔴 TERISI BOOKING" : "🟢 READY / KOSONG",
                       style: GoogleFonts.plusJakartaSans(
-                        color: isBooked ? AppTheme.primaryPink : AppTheme.success,
+                        color: isBooked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
                       ),
@@ -1578,105 +1703,137 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
               ),
               const SizedBox(height: 18),
 
-              // Hours Banner Card
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: AppTheme.heroGradient,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primaryPink.withValues(alpha: 0.25),
-                      blurRadius: 10,
-                    )
-                  ],
+              if (isBooked) ...[
+                Text(
+                  "Daftar Rincian Pesanan Terisi (${dayBookings.length}):",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.textHighContrast,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: const BoxDecoration(
-                        color: Colors.white24,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.alarm_rounded, color: Colors.white, size: 24),
-                    ),
-                    const SizedBox(width: 14),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "JAM OPERASIONAL MITRA",
-                          style: GoogleFonts.inter(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          dayData['hours'] ?? '08:00 - 22:00 WIB',
-                          style: GoogleFonts.plusJakartaSans(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
+                const SizedBox(height: 10),
+                ...dayBookings.map((b) {
+                  final clientName = b.client?.fullName ?? b.additionalDetails?['client_name'] ?? 'Klien Temenin';
+                  final startTimeStr = b.additionalDetails?['start_time'] ?? (b.bookingDate != null ? "${b.bookingDate!.hour.toString().padLeft(2, '0')}:${b.bookingDate!.minute.toString().padLeft(2, '0')}" : "09:00");
+                  final startHour = int.tryParse(startTimeStr.split(':').first) ?? 9;
+                  final endHour = (startHour + (b.duration > 0 ? b.duration : 2)) % 24;
+                  final timeRangeStr = "$startTimeStr - ${endHour.toString().padLeft(2, '0')}:00 WIB";
 
-              // Detailed Description (for both Driver & Client)
-              Text(
-                "Deskripsi Ketersediaan Jam (Driver & Klien)",
-                style: GoogleFonts.plusJakartaSans(
-                  color: AppTheme.textHighContrast,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppTheme.cardDeep,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.border),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+                  final formattedPrice = b.totalPrice.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.');
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.cardDeep,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.5)),
+                    ),
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.info_outline_rounded, color: AppTheme.primaryPink, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            isBooked
-                                ? "Pada tanggal ${dayData['date']}, Mitra Driver telah terisi pesanan penugasan khusus dari pukul 09:00 hingga 17:00 WIB. Pelanggan dapat memesan di luar jam penugasan tersebut."
-                                : "Pada tanggal ${dayData['date']}, Mitra Driver aktif dan siap menerima orderan pendampingan, perjalan lokal, maupun luar kota dari pukul ${dayData['hours']}.",
-                            style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 12, height: 1.4),
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              "👤 $clientName",
+                              style: GoogleFonts.plusJakartaSans(
+                                color: AppTheme.textHighContrast,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryPink.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                b.status.toUpperCase(),
+                                style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Icon(Icons.access_time_filled_rounded, color: AppTheme.primaryPink, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              "Jam: $timeRangeStr (${b.duration} Jam)",
+                              style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.location_on_rounded, color: AppTheme.textMuted, size: 16),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                "${b.pickupLocation} ➔ ${b.dropoffLocation}",
+                                style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 12),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            const Icon(Icons.payments_rounded, color: AppTheme.success, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              "Total Tarif: Rp $formattedPrice",
+                              style: GoogleFonts.plusJakartaSans(color: AppTheme.success, fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    const Divider(color: AppTheme.border, height: 20),
-                    Row(
-                      children: [
-                        const Icon(Icons.check_circle_outline_rounded, color: AppTheme.success, size: 16),
-                        const SizedBox(width: 6),
-                        Text(
-                          "Dapat disesuaikan secara fleksibel dengan Klien",
-                          style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                  );
+                }),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 32),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "HARI INI BEBAS ORDER / KOSONG",
+                              style: GoogleFonts.plusJakartaSans(color: const Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              "Mitra Driver aktif & siap menerima pesanan dari pukul 08:00 - 22:00 WIB.",
+                              style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+              ],
+
               const SizedBox(height: 20),
 
-              // Close / Done Button
+              // Done Button
               SizedBox(
                 width: double.infinity,
                 height: 48,
@@ -1692,7 +1849,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                     ),
                   ),
                   child: Text(
-                    "MENGERTI / TUTUP",
+                    "TUTUP",
                     style: GoogleFonts.plusJakartaSans(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
@@ -1869,10 +2026,35 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     );
   }
 
+  Future<void> _saveVehiclesMetadata(List<Map<String, dynamic>> vehiclesList, int activeIndex) async {
+    final auth = context.read<AuthProvider>();
+    final user = auth.user;
+    if (user != null) {
+      final metadata = {
+        'vehicles': vehiclesList,
+        'active_vehicle_index': activeIndex,
+      };
+      final jsonString = jsonEncode(metadata);
+      try {
+        await Supabase.instance.client.from('drivers').update({
+          'vehicle_stnk': jsonString,
+          'vehicle_name': vehiclesList[activeIndex]['name'],
+          'plate_number': vehiclesList[activeIndex]['plate_number'],
+          'vehicle_type': vehiclesList[activeIndex]['type'],
+        }).or('user_id.eq.${user.id},id.eq.${user.id}');
+        await auth.refreshProfile();
+      } catch (e) {
+        debugPrint('Error updating vehicles metadata: $e');
+      }
+    }
+  }
+
   void _showAddVehicleModal(BuildContext context, List<Map<String, dynamic>> currentVehicles) {
     final nameController = TextEditingController();
     final plateController = TextEditingController();
     String type = 'Motor';
+    String? vehiclePhotoUrl;
+    bool isUploadingPhoto = false;
 
     showModalBottomSheet(
       context: context,
@@ -1961,23 +2143,94 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppTheme.primaryPink, width: 1.5)),
                     ),
                   ),
+                  const SizedBox(height: 12),
+
+                  // Vehicle Photo Input
+                  GestureDetector(
+                    onTap: () async {
+                      final picker = ImagePicker();
+                      final photo = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+                      if (photo != null) {
+                        setModalState(() => isUploadingPhoto = true);
+                        String finalPhotoPath = photo.path;
+                        try {
+                          final cropped = await ImageCropper().cropImage(
+                            sourcePath: photo.path,
+                            uiSettings: [
+                              AndroidUiSettings(
+                                toolbarTitle: 'Potong & Sesuaikan Foto Kendaraan',
+                                toolbarColor: AppTheme.surface,
+                                toolbarWidgetColor: AppTheme.textHighContrast,
+                                activeControlsWidgetColor: AppTheme.primaryPink,
+                                initAspectRatio: CropAspectRatioPreset.ratio4x3,
+                                aspectRatioPresets: [CropAspectRatioPreset.ratio4x3, CropAspectRatioPreset.square],
+                              ),
+                              IOSUiSettings(title: 'Potong Foto Kendaraan'),
+                            ],
+                          );
+                          if (cropped != null) finalPhotoPath = cropped.path;
+                        } catch (_) {}
+
+                        final uploaded = await context.read<AuthProvider>().uploadImageFile(File(finalPhotoPath), folder: 'vehicles');
+                        setModalState(() {
+                          vehiclePhotoUrl = uploaded;
+                          isUploadingPhoto = false;
+                        });
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.cardDeep,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: vehiclePhotoUrl != null ? AppTheme.primaryPink : AppTheme.border),
+                      ),
+                      child: Row(
+                        children: [
+                          if (isUploadingPhoto)
+                            const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryPink))
+                          else if (vehiclePhotoUrl != null)
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: Image.network(vehiclePhotoUrl!, width: 40, height: 32, fit: BoxFit.cover),
+                            )
+                          else
+                            const Icon(Icons.camera_alt_rounded, color: AppTheme.primaryPink, size: 22),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              vehiclePhotoUrl != null ? "Foto Kendaraan Terpilih ✔" : "Unggah & Potong Foto Kendaraan 📸",
+                              style: GoogleFonts.plusJakartaSans(
+                                color: vehiclePhotoUrl != null ? AppTheme.primaryPink : AppTheme.textMediumContrast,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right_rounded, color: AppTheme.textMuted),
+                        ],
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         if (nameController.text.isNotEmpty && plateController.text.isNotEmpty) {
-                          setState(() {
-                            currentVehicles.add({
-                              'type': type,
-                              'name': nameController.text.trim(),
-                              'plate_number': plateController.text.toUpperCase().trim(),
-                              'age': '< 5 Tahun',
-                            });
-                          });
+                          final newV = {
+                            'type': type,
+                            'name': nameController.text.trim(),
+                            'plate_number': plateController.text.toUpperCase().trim(),
+                            'image': vehiclePhotoUrl,
+                            'age': '< 5 Tahun',
+                          };
+                          currentVehicles.add(newV);
+                          await _saveVehiclesMetadata(currentVehicles, 0);
+                          if (mounted) setState(() {});
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text("Kendaraan baru berhasil ditambahkan!"), backgroundColor: AppTheme.primaryPink),
+                            const SnackBar(content: Text("✨ Kendaraan baru berhasil ditambahkan & disimpan!"), backgroundColor: AppTheme.primaryPink),
                           );
                         }
                       },

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -86,7 +87,7 @@ class _DriverStoryViewerScreenState extends State<DriverStoryViewerScreen> with 
 
     if (isVideo) {
       VideoPlayerController controller;
-      if (localFilePath != null && File(localFilePath).existsSync()) {
+      if (!kIsWeb && localFilePath != null && File(localFilePath).existsSync()) {
         controller = VideoPlayerController.file(File(localFilePath));
       } else if (videoUrl != null && videoUrl.isNotEmpty) {
         controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
@@ -233,7 +234,7 @@ class _DriverStoryViewerScreenState extends State<DriverStoryViewerScreen> with 
                     final curStory = widget.stories[idx];
                     final curLocalPath = curStory['localFilePath'];
                     final curImg = curStory['image'] ?? curStory['avatar'] ?? '';
-                    final curHasLocal = curLocalPath != null && curLocalPath.isNotEmpty && File(curLocalPath).existsSync();
+                    final curHasLocal = !kIsWeb && curLocalPath != null && curLocalPath.isNotEmpty && File(curLocalPath).existsSync();
 
                     if (_isVideoInitialized && _videoController != null && idx == _currentIndex) {
                       return SizedBox.expand(

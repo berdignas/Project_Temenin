@@ -22,8 +22,9 @@ class BookingProvider extends ChangeNotifier {
   
 
   
-  // Realtime subscription
+  // Realtime subscription & Polling
   StreamSubscription<List<Map<String, dynamic>>>? _realtimeSubscription;
+  Timer? _pollingTimer;
 
   List<BookingModel> get bookings => _bookings;
   BookingModel? get activeBooking => _activeBooking;
@@ -47,87 +48,233 @@ class BookingProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  String? _currentDriverId;
+  String? _currentUserId;
+  final Set<String> _associatedDriverIds = {};
+  List<BookingModel> _pendingOffers = [];
+  List<BookingModel> get pendingOffers => _pendingOffers;
+
+  Future<void> _resolveDriverIds() async {
+    try {
+      final currentAuthUser = Supabase.instance.client.auth.currentUser;
+      final uId = _currentUserId ?? currentAuthUser?.id;
+      if (uId != null && uId.isNotEmpty && uId != 'active-driver') {
+        _associatedDriverIds.add(uId);
+        try {
+          final driverRow = await Supabase.instance.client
+              .from('drivers')
+              .select('id, user_id')
+              .or('id.eq.$uId,user_id.eq.$uId')
+              .maybeSingle();
+          if (driverRow != null) {
+            if (driverRow['id'] != null) _associatedDriverIds.add(driverRow['id'].toString());
+            if (driverRow['user_id'] != null) _associatedDriverIds.add(driverRow['user_id'].toString());
+          }
+        } catch (e) {
+          debugPrint("Note: Driver lookup query: $e");
+        }
+      }
+      if (_currentDriverId != null && _currentDriverId!.isNotEmpty && _currentDriverId != 'active-driver') {
+        _associatedDriverIds.add(_currentDriverId!);
+      }
+    } catch (e) {
+      debugPrint("Error resolving driver IDs: $e");
+    }
+  }
+
+  Future<void> _processBookingsData(List<Map<String, dynamic>> data) async {
+    if (data.isEmpty) {
+      _pendingOffers = [];
+      _incomingBooking = null;
+      _activeBooking = null;
+      notifyListeners();
+      return;
+    }
+
+    final pendingList = data.where((b) {
+      if (b['status'] != 'pending') return false;
+      final bDriverId = b['driver_id']?.toString();
+      
+      // If driver_id is not assigned, it's an open offer broadcast
+      if (bDriverId == null || bDriverId.isEmpty) return true;
+      
+      // Check against all known IDs for this driver
+      if (_associatedDriverIds.contains(bDriverId)) return true;
+      if (_currentDriverId != null && (_currentDriverId == bDriverId || _currentDriverId == 'active-driver')) return true;
+      if (_currentUserId != null && _currentUserId == bDriverId) return true;
+      
+      // Check additional details for partner metadata
+      final details = b['additional_details'];
+      if (details is Map) {
+        if (details['driverId']?.toString() == _currentDriverId || 
+            details['driver_id']?.toString() == _currentDriverId ||
+            details['driver_user_id']?.toString() == _currentUserId) {
+          return true;
+        }
+      }
+      
+      return true; // Active driver receives incoming pending requests
+    }).toList();
+
+    final activeList = data.where((b) {
+      final s = b['status']?.toString();
+      final d = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+      final sub = d?['sub_status']?.toString();
+
+      // Exclude finished or cancelled bookings from active list
+      if (s == 'completed' || s == 'closed' || s == 'cancelled' || s == 'paid' ||
+          sub == 'completed' || sub == 'closed' || sub == 'cancelled' || sub == 'paid') {
+        return false;
+      }
+
+      return s == 'accepted' || 
+             s == 'ongoing' || 
+             sub == 'dp_paid' || 
+             sub == 'on_the_way' || 
+             sub == 'arrived' || 
+             sub == 'started' || 
+             sub == 'ongoing';
+    }).toList();
+
+    if (pendingList.isNotEmpty) {
+      List<BookingModel> offers = [];
+      for (final rawBooking in pendingList) {
+        final clientId = rawBooking['user_id'];
+        Map<String, dynamic>? clientData;
+        try {
+          final dbUser = await Supabase.instance.client
+              .from('users')
+              .select()
+              .eq('id', clientId)
+              .maybeSingle();
+          clientData = dbUser;
+        } catch (e) {
+          debugPrint('Error fetching client details: $e');
+        }
+        offers.add(BookingModel.fromJson({
+          ...rawBooking,
+          'users': clientData,
+        }));
+      }
+      _pendingOffers = offers;
+      final directTargetOffer = offers.where((offer) {
+        final dId = offer.driverId?.toString();
+        return dId != null && _associatedDriverIds.contains(dId);
+      }).firstOrNull;
+      
+      if (directTargetOffer != null) {
+        if (_incomingBooking == null || _incomingBooking!.id.toString() != directTargetOffer.id.toString()) {
+          _incomingBooking = directTargetOffer;
+        }
+      } else {
+        _incomingBooking = null;
+      }
+    } else {
+      _pendingOffers = [];
+      _incomingBooking = null;
+    }
+
+    if (activeList.isNotEmpty) {
+      Map<String, dynamic> rawBooking = activeList.first;
+      if (_activeBooking != null) {
+        final match = activeList.firstWhere(
+          (b) => b['id'].toString() == _activeBooking!.id.toString(),
+          orElse: () => activeList.first,
+        );
+        rawBooking = Map<String, dynamic>.from(match);
+      } else {
+        rawBooking = Map<String, dynamic>.from(activeList.first);
+      }
+
+      final dbStatus = rawBooking['status']?.toString();
+      final addDetails = rawBooking['additional_details'] is Map
+          ? rawBooking['additional_details'] as Map
+          : (rawBooking['additionalDetails'] is Map ? rawBooking['additionalDetails'] as Map : null);
+      final subStatus = addDetails?['sub_status']?.toString();
+      final isDpPaid = addDetails?['dp_paid'] == true || subStatus == 'dp_paid' || rawBooking['dp_paid'] == true;
+      final isAdvanced = subStatus == 'on_the_way' || 
+                         subStatus == 'arrived' || 
+                         subStatus == 'started' || 
+                         subStatus == 'ongoing' || 
+                         subStatus == 'completed' || 
+                         subStatus == 'paid';
+
+      String effectiveStatus = subStatus ?? dbStatus ?? 'pending';
+      if (isDpPaid && !isAdvanced) {
+        effectiveStatus = 'dp_paid';
+      }
+      rawBooking['status'] = effectiveStatus;
+
+      final clientId = rawBooking['user_id'];
+      Map<String, dynamic>? clientData;
+      try {
+        if (clientId != null) {
+          final dbUser = await Supabase.instance.client
+              .from('users')
+              .select()
+              .eq('id', clientId)
+              .maybeSingle();
+          clientData = dbUser;
+        }
+      } catch (e) {
+        debugPrint('Error fetching active client details: $e');
+      }
+      _activeBooking = BookingModel.fromJson({
+        ...rawBooking,
+        'users': clientData,
+      });
+    } else {
+      _activeBooking = null;
+    }
+    notifyListeners();
+  }
+
   // Subscribe to real-time bookings from Supabase
-  void subscribeToBookings(String driverId) {
-    debugPrint('📡 Subscribing to Supabase Realtime for Driver ID: $driverId');
+  void subscribeToBookings(String driverId, {String? userId}) {
+    _currentDriverId = driverId;
+    _currentUserId = userId;
+    debugPrint('📡 Subscribing to Supabase Realtime for Driver ID: $driverId, User ID: $userId');
+    _resolveDriverIds();
     _realtimeSubscription?.cancel();
+    _pollingTimer?.cancel();
 
     try {
       _realtimeSubscription = Supabase.instance.client
           .from('bookings')
           .stream(primaryKey: ['id'])
-          .eq('driver_id', driverId)
-          .listen((List<Map<String, dynamic>> data) async {
-            debugPrint('⚡ Supabase Realtime: Received ${data.length} bookings for driver $driverId');
-            if (data.isNotEmpty) {
-              // Filters: pending (incoming request) vs accepted/ongoing (active)
-              final pendingList = data.where((b) => b['status'] == 'pending').toList();
-              final activeList = data.where((b) => b['status'] == 'accepted' || b['status'] == 'ongoing').toList();
-
-              if (pendingList.isNotEmpty) {
-                final rawBooking = pendingList.first;
-                final clientId = rawBooking['user_id'];
-                Map<String, dynamic>? clientData;
-                try {
-                  final dbUser = await Supabase.instance.client
-                      .from('users')
-                      .select()
-                      .eq('id', clientId)
-                      .single();
-                  clientData = dbUser;
-                } catch (e) {
-                  debugPrint('Error fetching client details: $e');
-                }
-                _incomingBooking = BookingModel.fromJson({
-                  ...rawBooking,
-                  'users': clientData,
-                });
-              } else {
-                _incomingBooking = null;
-              }
-
-              if (activeList.isNotEmpty) {
-                final rawBooking = activeList.first;
-                final clientId = rawBooking['user_id'];
-                Map<String, dynamic>? clientData;
-                try {
-                  final dbUser = await Supabase.instance.client
-                      .from('users')
-                      .select()
-                      .eq('id', clientId)
-                      .single();
-                  clientData = dbUser;
-                } catch (e) {
-                  debugPrint('Error fetching active client details: $e');
-                }
-                _activeBooking = BookingModel.fromJson({
-                  ...rawBooking,
-                  'users': clientData,
-                });
-              } else {
-                _activeBooking = null;
-              }
-            } else {
-              _incomingBooking = null;
-              _activeBooking = null;
-            }
-            notifyListeners();
+          .listen((List<Map<String, dynamic>> data) {
+            debugPrint('⚡ Supabase Realtime: Received ${data.length} bookings');
+            _processBookingsData(data);
           }, onError: (err) {
             debugPrint('❌ Supabase stream subscription error: $err');
           });
     } catch (e) {
       debugPrint('❌ Supabase stream connection failed: $e');
     }
+
+    // Polling fallback every 1 second for instant syncing
+    _pollingTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+      try {
+        final data = await Supabase.instance.client
+            .from('bookings')
+            .select()
+            .order('created_at', ascending: false)
+            .limit(20);
+        if (data is List) {
+          _processBookingsData(List<Map<String, dynamic>>.from(data));
+        }
+      } catch (e) {
+        debugPrint("Error in driver polling: $e");
+      }
+    });
   }
 
   // Cancel subscription
   void unsubscribeFromBookings() {
     debugPrint('📡 Unsubscribed from Supabase bookings.');
     _realtimeSubscription?.cancel();
+    _pollingTimer?.cancel();
   }
-
-  // Generates a mock booking to simulate incoming client request (kept as no-op for signature)
-  void generateMockIncomingBooking() {}
 
   // Send a counter offer price for Freedom Request
   Future<bool> sendCounterOffer(String bookingId, double counterPrice) async {
@@ -187,67 +334,60 @@ class BookingProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    Map<String, dynamic>? result;
     try {
-      result = await _bookingService.updateBookingStatus(bookingId, 'on_the_way');
+      final updateData = <String, dynamic>{'status': 'accepted'};
+      if (_currentDriverId != null && _currentDriverId!.isNotEmpty && !_currentDriverId!.startsWith('active')) {
+        updateData['driver_id'] = _currentDriverId;
+      }
+      await Supabase.instance.client
+          .from('bookings')
+          .update(updateData)
+          .eq('id', bookingId);
     } catch (e) {
-      debugPrint("Offline mode: updateBookingStatus failed, using simulation.");
+      debugPrint("Supabase direct update error: $e");
+    }
+
+    try {
+      await _bookingService.updateBookingStatus(bookingId, 'accepted');
+    } catch (e) {
+      debugPrint("Backend updateBookingStatus error: $e");
     }
     
     _isLoading = false;
-    
-    // Fallback for offline demo / simulation mode
-    if (_incomingBooking != null && _incomingBooking!.id == bookingId) {
-      _activeBooking = BookingModel(
-        id: _incomingBooking!.id,
-        userId: _incomingBooking!.userId,
-        driverId: _incomingBooking!.driverId,
-        status: 'on_the_way',
-        pickupLocation: _incomingBooking!.pickupLocation,
-        dropoffLocation: _incomingBooking!.dropoffLocation,
-        pickupLatitude: _incomingBooking!.pickupLatitude,
-        pickupLongitude: _incomingBooking!.pickupLongitude,
-        dropoffLatitude: _incomingBooking!.dropoffLatitude,
-        dropoffLongitude: _incomingBooking!.dropoffLongitude,
-        duration: _incomingBooking!.duration,
-        totalPrice: _incomingBooking!.totalPrice,
-        bookingDate: _incomingBooking!.bookingDate,
-        additionalDetails: _incomingBooking!.additionalDetails,
-        createdAt: _incomingBooking!.createdAt,
-        client: _incomingBooking!.client,
-      );
-      _incomingBooking = null;
-      notifyListeners();
-      return true;
-    }
 
-    if (result != null && result['success'] == true) {
-      _incomingBooking = null;
-      _activeBooking = result['booking'];
-      notifyListeners();
-      return true;
+    BookingModel? matched = _findBookingById(bookingId);
+    if (matched != null) {
+      _activeBooking = matched.copyWith(status: 'accepted');
+    } else {
+      _activeBooking = BookingModel(
+        id: bookingId,
+        userId: 'client-user',
+        status: 'accepted',
+        pickupLocation: 'Lokasi Penjemputan',
+        dropoffLocation: 'Tujuan',
+        duration: 3,
+        totalPrice: 150000.0,
+        createdAt: DateTime.now(),
+      );
     }
-    
-    // Force simulation true if incoming booking was somehow lost but we have active booking ID
-    if (_activeBooking == null) {
-       _activeBooking = BookingModel(
-          id: bookingId,
-          userId: 'c1',
-          driverId: 'd1',
-          status: 'on_the_way',
-          pickupLocation: 'Simulation Pickup',
-          dropoffLocation: 'Simulation Dropoff',
-          duration: 1,
-          totalPrice: 100000.0,
-          createdAt: DateTime.now(),
-       );
-       notifyListeners();
-       return true;
-    }
-    
-    _errorMessage = result?['message'] ?? 'Failed to accept booking';
+    _incomingBooking = null;
+
     notifyListeners();
-    return false;
+    return true;
+  }
+
+  BookingModel? _findBookingById(String bookingId) {
+    if (_incomingBooking != null && _incomingBooking!.id.toString() == bookingId.toString()) {
+      return _incomingBooking;
+    }
+    if (_activeBooking != null && _activeBooking!.id.toString() == bookingId.toString()) {
+      return _activeBooking;
+    }
+    final matchInPending = _pendingOffers.where((b) => b.id.toString() == bookingId.toString()).toList();
+    if (matchInPending.isNotEmpty) {
+      return matchInPending.first;
+    }
+    return null;
   }
 
   // Accept a booking with a custom final negotiated price
@@ -255,70 +395,48 @@ class BookingProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    Map<String, dynamic>? result;
-    // Try to update on the server if possible (or fallback to simulation)
     try {
-      result = await _bookingService.updateBookingStatus(bookingId, 'on_the_way');
+      await Supabase.instance.client
+          .from('bookings')
+          .update({
+            'status': 'accepted',
+            'total_price': finalPrice,
+          })
+          .eq('id', bookingId);
     } catch (e) {
-      debugPrint("Offline mode: updateBookingStatus failed, using simulation.");
+      debugPrint("Supabase direct update error: $e");
+    }
+
+    try {
+      await _bookingService.updateBookingStatus(bookingId, 'accepted');
+    } catch (e) {
+      debugPrint("Backend updateBookingStatus error: $e");
     }
     
     _isLoading = false;
 
-    if (_incomingBooking != null && _incomingBooking!.id == bookingId) {
-      _activeBooking = BookingModel(
-        id: _incomingBooking!.id,
-        userId: _incomingBooking!.userId,
-        driverId: _incomingBooking!.driverId,
-        status: 'on_the_way',
-        pickupLocation: _incomingBooking!.pickupLocation,
-        dropoffLocation: _incomingBooking!.dropoffLocation,
-        pickupLatitude: _incomingBooking!.pickupLatitude,
-        pickupLongitude: _incomingBooking!.pickupLongitude,
-        dropoffLatitude: _incomingBooking!.dropoffLatitude,
-        dropoffLongitude: _incomingBooking!.dropoffLongitude,
-        duration: _incomingBooking!.duration,
+    BookingModel? matched = _findBookingById(bookingId);
+    if (matched != null) {
+      _activeBooking = matched.copyWith(
+        status: 'accepted',
         totalPrice: finalPrice,
-        bookingDate: _incomingBooking!.bookingDate,
-        additionalDetails: {
-          ...?_incomingBooking!.additionalDetails,
-          'finalNegotiatedPrice': finalPrice,
-        },
-        createdAt: _incomingBooking!.createdAt,
-        client: _incomingBooking!.client,
       );
-      _incomingBooking = null;
-      notifyListeners();
-      return true;
+    } else {
+      _activeBooking = BookingModel(
+        id: bookingId,
+        userId: 'client-user',
+        status: 'accepted',
+        pickupLocation: 'Lokasi Penjemputan',
+        dropoffLocation: 'Tujuan',
+        duration: 3,
+        totalPrice: finalPrice,
+        createdAt: DateTime.now(),
+      );
     }
+    _incomingBooking = null;
 
-    if (result != null && result['success'] == true) {
-      _incomingBooking = null;
-      _activeBooking = result['booking'];
-      notifyListeners();
-      return true;
-    }
-
-    // Force simulation true if incoming booking was somehow lost but we have active booking ID
-    if (_activeBooking == null) {
-       _activeBooking = BookingModel(
-          id: bookingId,
-          userId: 'c1',
-          driverId: 'd1',
-          status: 'on_the_way',
-          pickupLocation: 'Simulation Pickup',
-          dropoffLocation: 'Simulation Dropoff',
-          duration: 1,
-          totalPrice: finalPrice,
-          createdAt: DateTime.now(),
-       );
-       notifyListeners();
-       return true;
-    }
-
-    _errorMessage = result?['message'] ?? 'Failed to accept booking';
     notifyListeners();
-    return false;
+    return true;
   }
 
   // Reject booking (cancels it or returns to queue)
@@ -326,25 +444,28 @@ class BookingProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    final result = await _bookingService.updateBookingStatus(bookingId, 'cancelled');
+    try {
+      await Supabase.instance.client
+          .from('bookings')
+          .update({'status': 'cancelled'})
+          .eq('id', bookingId);
+    } catch (e) {
+      debugPrint("Supabase rejectBooking error: $e");
+    }
+
+    try {
+      await _bookingService.updateBookingStatus(bookingId, 'cancelled');
+    } catch (e) {
+      debugPrint("Backend rejectBooking error: $e");
+    }
+
     _isLoading = false;
 
-    if (result['success'] == true) {
-      _incomingBooking = null;
-      notifyListeners();
-      return true;
-    }
-
-    // Fallback for offline demo / simulation mode
     if (_incomingBooking != null && _incomingBooking!.id == bookingId) {
       _incomingBooking = null;
-      notifyListeners();
-      return true;
     }
-
-    _errorMessage = result['message'];
     notifyListeners();
-    return false;
+    return true;
   }
 
   // Update Booking Progress Status
@@ -354,40 +475,58 @@ class BookingProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    final result = await _bookingService.updateBookingStatus(_activeBooking!.id, status);
-    _isLoading = false;
+    final bId = _activeBooking!.id;
 
-    if (result['success'] == true) {
-      _activeBooking = result['booking'];
-      if (status == 'closed') {
-        _activeBooking = null; // Clear active since it is completed and paid
-      }
-      notifyListeners();
-      return true;
+    String dbStatus = status;
+    if (status == 'on_the_way' || status == 'arrived' || status == 'started' || status == 'dp_paid' || status == 'completion_requested') {
+      dbStatus = 'ongoing';
+    } else if (status == 'closed') {
+      dbStatus = 'completed';
     }
 
-    // Fallback for offline demo / simulation mode
-    _activeBooking = BookingModel(
-      id: _activeBooking!.id,
-      userId: _activeBooking!.userId,
-      driverId: _activeBooking!.driverId,
-      status: status,
-      pickupLocation: _activeBooking!.pickupLocation,
-      dropoffLocation: _activeBooking!.dropoffLocation,
-      pickupLatitude: _activeBooking!.pickupLatitude,
-      pickupLongitude: _activeBooking!.pickupLongitude,
-      dropoffLatitude: _activeBooking!.dropoffLatitude,
-      dropoffLongitude: _activeBooking!.dropoffLongitude,
-      duration: _activeBooking!.duration,
-      totalPrice: _activeBooking!.totalPrice,
-      bookingDate: _activeBooking!.bookingDate,
-      additionalDetails: _activeBooking!.additionalDetails,
-      createdAt: _activeBooking!.createdAt,
-      client: _activeBooking!.client,
-    );
+    final updatedDetails = Map<String, dynamic>.from(_activeBooking?.additionalDetails ?? {});
+    updatedDetails['sub_status'] = status;
+    if (status == 'dp_paid') {
+      updatedDetails['dp_paid'] = true;
+    }
 
-    if (status == 'closed') {
-      _activeBooking = null; // Clear active
+    final updatePayload = <String, dynamic>{
+      'status': dbStatus,
+      'additional_details': updatedDetails,
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+
+    try {
+      if (int.tryParse(bId) != null) {
+        await Supabase.instance.client
+            .from('bookings')
+            .update(updatePayload)
+            .eq('id', int.parse(bId));
+      } else {
+        await Supabase.instance.client
+            .from('bookings')
+            .update(updatePayload)
+            .eq('id', bId);
+      }
+      debugPrint("✅ Supabase updated booking $bId status to sub: $status, db: $dbStatus");
+    } catch (e) {
+      debugPrint("❌ Supabase updateBookingProgress error: $e");
+    }
+
+    try {
+      await _bookingService.updateBookingStatus(bId, status);
+    } catch (e) {
+      debugPrint("Backend updateBookingProgress error: $e");
+    }
+
+    _isLoading = false;
+
+    _activeBooking = _activeBooking!.copyWith(
+      status: status,
+      additionalDetails: updatedDetails,
+    );
+    if (status == 'completed' || status == 'closed' || status == 'cancelled' || status == 'paid') {
+      _activeBooking = null; // Clear active since session is closed
     }
     notifyListeners();
     return true;

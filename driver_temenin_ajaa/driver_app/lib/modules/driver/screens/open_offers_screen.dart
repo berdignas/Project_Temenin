@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../data/models/booking_model.dart';
+import '../../../providers/booking_provider.dart';
 import 'driver_negotiation_screen.dart';
 
 class OpenOffersScreen extends StatefulWidget {
@@ -12,14 +14,14 @@ class OpenOffersScreen extends StatefulWidget {
 }
 
 class _OpenOffersScreenState extends State<OpenOffersScreen> {
-  final List<BookingModel> _openOffers = [];
-
   String _formatPrice(double amount) {
     return amount.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.');
   }
 
   @override
   Widget build(BuildContext context) {
+    final bookingProvider = context.watch<BookingProvider>();
+    final openOffers = bookingProvider.pendingOffers;
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
@@ -43,7 +45,7 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> {
         decoration: const BoxDecoration(
           gradient: AppTheme.darkBgGradient,
         ),
-        child: _openOffers.isEmpty
+        child: openOffers.isEmpty
             ? Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -71,9 +73,9 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> {
               )
             : ListView.builder(
                 padding: const EdgeInsets.all(20),
-                itemCount: _openOffers.length,
+                itemCount: openOffers.length,
                 itemBuilder: (context, index) {
-                  final offer = _openOffers[index];
+                  final offer = openOffers[index];
                   return _buildOfferCard(offer);
                 },
               ),

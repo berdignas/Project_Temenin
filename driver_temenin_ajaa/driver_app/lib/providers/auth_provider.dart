@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/services/auth_service.dart';
@@ -151,9 +152,21 @@ class AuthProvider extends ChangeNotifier {
             'vehicle_stnk': '',
           };
         }
+      } else {
+        final errorMsg = result['message']?.toString().toLowerCase() ?? '';
+        if (errorMsg.contains('not found') || errorMsg.contains('tidak ditemukan') || errorMsg.contains('unauthorized')) {
+           debugPrint('[AuthProvider] User not found or invalid token, logging out...');
+           await logout();
+           return;
+        }
       }
     } catch (e) {
       debugPrint('[AuthProvider] Error refreshing profile: $e');
+      final errorMsg = e.toString().toLowerCase();
+      if (errorMsg.contains('not found') || errorMsg.contains('tidak ditemukan') || errorMsg.contains('unauthorized')) {
+         await logout();
+         return;
+      }
     }
     notifyListeners();
   }
@@ -221,6 +234,26 @@ class AuthProvider extends ChangeNotifier {
     final double simLat = -6.2278; 
     final double simLng = 106.7972;
 
+    try {
+      final currentAuthUser = Supabase.instance.client.auth.currentUser;
+      final driverId = _driverProfileData?['id'] as String? ?? _user?.id ?? currentAuthUser?.id;
+      
+      if (driverId != null) {
+        await Supabase.instance.client
+            .from('drivers')
+            .update({
+              'is_available': target,
+              'status': 'approved',
+              'latitude': simLat,
+              'longitude': simLng,
+            })
+            .or('id.eq.$driverId,user_id.eq.$driverId');
+        debugPrint("✅ Updated driver availability in Supabase: is_available = $target ($driverId)");
+      }
+    } catch (e) {
+      debugPrint("⚠️ Error updating driver availability in Supabase: $e");
+    }
+
     final result = await _authService.updateStatus(target, lat: simLat, lng: simLng);
     if (result['success'] == true) {
       _isAvailable = target;
@@ -233,42 +266,45 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
+  // Helper to upload any image file to Supabase Storage
+  Future<String> uploadImageFile(File file, {String folder = 'uploads'}) async {
+    try {
+      final bytes = await file.readAsBytes();
+      final fileName = '$folder/${folder}_${_user?.id ?? 'guest'}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+
+      try {
+        await Supabase.instance.client.storage
+            .from('community-media')
+            .uploadBinary(fileName, bytes, fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
+        return Supabase.instance.client.storage.from('community-media').getPublicUrl(fileName);
+      } catch (_) {
+        try {
+          await Supabase.instance.client.storage
+              .from('public')
+              .uploadBinary(fileName, bytes, fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
+          return Supabase.instance.client.storage.from('public').getPublicUrl(fileName);
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('ℹ️ Image upload fallback error: $e');
+    }
+    return file.path;
+  }
+
   // Update Avatar Profile Photo
   Future<void> updateAvatar(String newAvatarUrl) async {
     if (_user != null) {
       String finalAvatarUrl = newAvatarUrl;
 
       // If local file, upload binary to Supabase Storage bucket 'community-media'
-      if (File(newAvatarUrl).existsSync()) {
-        try {
-          final file = File(newAvatarUrl);
-          final bytes = await file.readAsBytes();
-          final fileName = 'avatars/avatar_${_user!.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
-
-          try {
-            await Supabase.instance.client.storage
-                .from('community-media')
-                .uploadBinary(fileName, bytes, fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
-
-            final cloudUrl = Supabase.instance.client.storage.from('community-media').getPublicUrl(fileName);
-            finalAvatarUrl = cloudUrl;
-            debugPrint('✅ Uploaded avatar to Supabase Storage: $cloudUrl');
-          } catch (storageErr) {
-            try {
-              await Supabase.instance.client.storage
-                  .from('public')
-                  .uploadBinary(fileName, bytes, fileOptions: const FileOptions(cacheControl: '3600', upsert: true));
-
-              final cloudUrl = Supabase.instance.client.storage.from('public').getPublicUrl(fileName);
-              finalAvatarUrl = cloudUrl;
-            } catch (_) {}
-          }
-        } catch (e) {
-          debugPrint('ℹ️ Local avatar upload fallback: $e');
-        }
+      if (!kIsWeb && File(newAvatarUrl).existsSync()) {
+        finalAvatarUrl = await uploadImageFile(File(newAvatarUrl), folder: 'avatars');
       }
 
       _user = _user!.copyWith(avatarUrl: finalAvatarUrl);
+      if (_driverProfileData != null) {
+        _driverProfileData!['image'] = finalAvatarUrl;
+      }
       notifyListeners();
 
       try {
@@ -280,11 +316,20 @@ class AuthProvider extends ChangeNotifier {
 
       try {
         await Supabase.instance.client
-            .from('profiles')
+            .from('users')
             .update({'avatar_url': finalAvatarUrl})
             .eq('id', _user!.id);
       } catch (e) {
-        debugPrint('ℹ️ Supabase avatar update info: $e');
+        debugPrint('ℹ️ Supabase users avatar update info: $e');
+      }
+
+      try {
+        await Supabase.instance.client
+            .from('drivers')
+            .update({'image': finalAvatarUrl})
+            .eq('user_id', _user!.id);
+      } catch (e) {
+        debugPrint('ℹ️ Supabase drivers image update info: $e');
       }
     }
   }

@@ -1,5 +1,6 @@
 // lib/modules/home/widgets/profile_tab.dart
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -928,6 +929,14 @@ class _ProfileTabState extends State<ProfileTab> {
       );
       
       if (image != null) {
+        if (kIsWeb) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Upload foto via web belum mendukung file sistem lokal.')),
+            );
+          }
+          return;
+        }
         final File imageFile = File(image.path);
         await _uploadAvatar(imageFile, context);
       }

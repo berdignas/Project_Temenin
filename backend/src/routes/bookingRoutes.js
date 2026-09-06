@@ -29,5 +29,6 @@ router.route('/:bookingId/negotiations')
 // Negotiation Acceptance & Status Lifecycle
 router.post('/:bookingId/negotiations/:negotiationId/accept', acceptNegotiation); // Client accepts a driver's negotiation price
 router.put('/:bookingId/status', updateBookingStatus);                           // Client/Driver updates ongoing status
+router.patch('/:bookingId/status', updateBookingStatus);
 
 module.exports = router;

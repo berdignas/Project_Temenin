@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/modules/auth/onboarding/screens/onboarding_screen.dart';
 import 'package:temenin_ajaa/modules/auth/screens/login_screen.dart';
+import 'package:temenin_ajaa/modules/auth/screens/setup_account_screen.dart';
+import 'package:temenin_ajaa/modules/auth/screens/verify_email_waiting_screen.dart';
 import 'package:temenin_ajaa/modules/clients/screens/home_loggedin_screen.dart';
 import 'providers/auth_provider.dart';
 import 'providers/driver_provider.dart';
@@ -20,7 +22,7 @@ void main() async {
   try {
     await Supabase.initialize(
       url: 'https://wdjjaevfuxqrephhdacp.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkamphZXZmdXhxcmVwaGhkYWNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyOTI0NDEsImV4cCI6MjEwMzg2ODQ0MX0.BGAHOeNX6XHaBOT7N4-yfEy9G8sw04VpSH4gVyiEzDs',
+      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkamphZXZmdXhxcmVwaGhkYWNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODI5MjQ0MSwiZXhwIjoyMTAzODY4NDQxfQ.GCnanHjOJ095gHvQwHXHLy_zpgAg1c7VRc90ZpO4ROc',
     );
     print('✅ Supabase initialized successfully');
   } catch (e) {
@@ -199,6 +201,13 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     /// LOGIN SUCCESS - USER AUTHENTICATED
     if (authProvider.isAuthenticated && authProvider.user != null) {
+      final user = authProvider.user!;
+      if (user.email == null || user.email!.isEmpty || user.email!.endsWith('@temenin.aja')) {
+        return const SetupAccountScreen();
+      }
+      if (user.isVerified == false) {
+        return const VerifyEmailWaitingScreen();
+      }
       return const HomeLoggedInScreen();
     }
 

@@ -250,7 +250,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
             );
             final user = authProvider.user;
-            if (user != null && (user.email == null || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
+            if (user != null && (user.email == null || user.email!.trim().isEmpty || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
               Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (context) => const SetupAccountScreen()),
@@ -319,7 +319,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
           );
           final user = authProvider.user;
-          if (user != null && (user.email == null || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
+          if (user != null && (user.email == null || user.email!.trim().isEmpty || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
             Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (context) => const SetupAccountScreen()),

@@ -2,69 +2,69 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // TDS Colors - Signature Pink Fuchsia + Soft Pearl Off-White (Nyaman di mata, tidak silau)
-  static const Color background = Color(0xFFF4F5F8);     // Soft Pearl Off-White (Sangat adem di mata)
-  static const Color surface = Color(0xFFFAFAFC);        // Soft Velvet Off-White (Tidak silau)
-  static const Color card = Color(0xFFFAFAFC);           // Elevated Soft Card
-  static const Color cardDeep = Color(0xFFEDEDF2);       // Soft Tinted Grey Container
-  static const Color border = Color(0xFFE2E4EB);         // Subtle Soft Border
-  static const Color primaryPink = Color(0xFFE11D74);    // Signature Pink Fuchsia
-  static const Color fuchsiaLight = Color(0xFFFDF2F8);   // Soft Fuchsia Glow Tint
+  // TDS Colors - Signature Electric Pink + Cyberpunk Dark Obsidian Black (Hitam Fuchsia)
+  static const Color background = Color(0xFF0B0B0F);     // Deep Obsidian Black
+  static const Color surface = Color(0xFF16151A);        // Dark Surface Container
+  static const Color card = Color(0xFF1C1B21);           // Elevated Dark Card
+  static const Color cardDeep = Color(0xFF24222A);       // Sub-surface Dark Container
+  static const Color border = Color(0xFF2A2832);         // Subtle Dark Border
+  static const Color primaryPink = Color(0xFFFF4DA6);    // Signature Electric Pink Fuchsia
+  static const Color fuchsiaLight = Color(0x33FF4DA6);   // Subtle Fuchsia Glow Tint
   static const Color roseGold = Color(0xFFDB2777);       // Deep Fuchsia Rose Accent
   static const Color fuchsiaDark = Color(0xFF9D174D);    // Deep Fuchsia Burgundy
 
   // Status Colors
-  static const Color success = Color(0xFF16A34A); // Emerald Green (Online / Selesai)
-  static const Color warning = Color(0xFFD97706); // Amber (Pending / Menunggu)
-  static const Color danger = Color(0xFFDC2626);  // Crimson Red (Tolak / Darurat)
-  static const Color info = Color(0xFF2563EB);    // Royal Blue
+  static const Color success = Color(0xFF10B981); // Emerald Green (Online / Selesai)
+  static const Color warning = Color(0xFFF59E0B); // Amber (Pending / Menunggu)
+  static const Color danger = Color(0xFFEF4444);  // Crimson Red (Tolak / Darurat)
+  static const Color info = Color(0xFF3B82F6);    // Royal Blue
 
-  // Text Colors (Eye-friendly Slate hierarchy)
-  static const Color textHighContrast = Color(0xFF1E293B); // Charcoal Slate 800 (Mudah dibaca)
-  static const Color textMediumContrast = Color(0xFF475569); // Slate 600 (Body Text)
-  static const Color textMuted = Color(0xFF64748B); // Slate 500 (Muted Text)
+  // Text Colors (Dark Mode Hierarchy)
+  static const Color textHighContrast = Color(0xFFFFFFFF);   // Pure White
+  static const Color textMediumContrast = Color(0xFFE2E8F0); // Light Slate
+  static const Color textMuted = Color(0xFF94A3B8);          // Muted Slate 400
 
-  // Gradients (Vibrant Fuchsia with smooth, premium transitions)
+  // Gradients (Hitam Fuchsia)
   static const LinearGradient heroGradient = LinearGradient(
     colors: [
-      Color(0xFFE11D74), // Signature Pink Fuchsia
-      Color(0xFFF43F5E), // Coral Rose
-      Color(0xFFFB7185), // Soft Fuchsia Blossom
+      Color(0xFFFF4DA6), // Signature Electric Pink Fuchsia
+      Color(0xFFFF1493), // Deep Neon Pink
+      Color(0xFFBE185D), // Deep Fuchsia Rose
     ],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient primaryGradient = LinearGradient(
-    colors: [primaryPink, Color(0xFFBE185D)],
+    colors: [primaryPink, Color(0xFFDB2777)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient darkBgGradient = LinearGradient(
     colors: [
-      Color(0xFFFAFAFC),
-      Color(0xFFFDF2F8), // Soft subtle fuchsia glow
-      Color(0xFFF4F5F8),
+      Color(0xFF0B0B0F),
+      Color(0xFF16151A),
+      Color(0xFF0B0B0F),
     ],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
   );
 
   static const LinearGradient cardGradient = LinearGradient(
-    colors: [Color(0xFFFAFAFC), Color(0xFFF4F5F8)],
+    colors: [Color(0xFF1C1B21), Color(0xFF16151A)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient heroCardGradient = LinearGradient(
-    colors: [Color(0xFFFAFAFC), Color(0xFFF4F5F8)],
+    colors: [Color(0xFF1C1B21), Color(0xFF16151A)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient glassBorderGradient = LinearGradient(
-    colors: [Color(0x33E11D74), Color(0x1AE2E4EB)],
+    colors: [Color(0x66FF4DA6), Color(0x1AFFFFFF)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -72,15 +72,16 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.light,
+      brightness: Brightness.dark,
       scaffoldBackgroundColor: background,
       primaryColor: primaryPink,
       cardColor: surface,
       dividerColor: border,
-      colorScheme: const ColorScheme.light(
+      colorScheme: const ColorScheme.dark(
         primary: primaryPink,
         secondary: roseGold,
         surface: surface,
+        background: background,
         error: danger,
       ),
       inputDecorationTheme: InputDecorationTheme(

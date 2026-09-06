@@ -22,13 +22,13 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final partnerName = widget.partnerData?['name'] ?? "Sarah Jessica";
-    final partnerRating = widget.partnerData?['rating'] ?? "4.9";
-    final partnerVehicle = widget.partnerData?['vehicle'] ?? "Toyota Corolla Sedan";
-    final partnerType = widget.partnerData?['type'] ?? "★ PLATINUM TIER";
-    final partnerImage = widget.partnerData?['image'] ?? "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=600&auto=format&fit=crop";
+    final partnerName = widget.partnerData?['name'] ?? "Driver Partner";
+    final partnerRating = widget.partnerData?['rating']?.toString() ?? "5.0";
+    final partnerVehicle = widget.partnerData?['vehicle'] ?? "Kendaraan Driver";
+    final partnerType = widget.partnerData?['type'] ?? "★ GOLD TIER";
+    final partnerImage = widget.partnerData?['image'] ?? "https://ui-avatars.com/api/?name=Driver";
     final partnerStatus = widget.partnerData?['status'] ?? "Available";
-    final partnerPriceVal = widget.partnerData?['price'] ?? 150000;
+    final partnerPriceVal = widget.partnerData?['price'] ?? 50000;
     
     final formattedPrice = 'Rp ${partnerPriceVal.toString().replaceAllMapped(
       RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.'

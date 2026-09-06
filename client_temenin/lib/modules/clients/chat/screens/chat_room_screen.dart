@@ -37,59 +37,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
-    final isMock = widget.bookingId == null || 
-        widget.bookingId!.isEmpty || 
-        widget.bookingId!.contains('mock') || 
-        widget.bookingId!.contains('support');
-
-    if (!isMock) {
-      _isConnecting = true;
-      _subscribeToChat();
-    } else {
-      // Default initial mock messages based on ID
-      if (widget.bookingId == 'mock-booking-id-1') {
-        _messages.addAll([
-          {'sender': 'driver', 'text': 'Halo Kak, saya sudah bersiap untuk booking kita nanti malam.', 'time': '10:30'},
-          {'sender': 'user', 'text': 'Halo! Oke siap, tolong kabari ya kalau sudah jalan.', 'time': '10:35'},
-          {'sender': 'driver', 'text': 'Saya sudah sampai di lokasi penjemputan. Sampai jumpa!', 'time': '10:42'},
-        ]);
-      } else if (widget.bookingId == 'mock-booking-id-2') {
-        _messages.addAll([
-          {'sender': 'user', 'text': 'Halo Adrian, nanti kita kumpul di depan lobi ya.', 'time': 'Kemarin 14:15'},
-          {'sender': 'driver', 'text': 'Siap Kak, saya sudah stand by di depan lobi.', 'time': 'Kemarin 14:18'},
-          {'sender': 'driver', 'text': 'Terima kasih atas perjalanan yang menyenangkan. Semoga harimu menyenangkan!', 'time': 'Kemarin 18:30'},
-        ]);
-      } else if (widget.bookingId == 'mock-booking-id-3') {
-        _messages.addAll([
-          {'sender': 'driver', 'text': 'Bisa tolong konfirmasi jam bookingnya?', 'time': 'Minggu 09:12'},
-        ]);
-      } else if (widget.bookingId == 'support-chat-id') {
-        _messages.addAll([
-          {'sender': 'driver', 'text': 'Ada yang bisa kami bantu terkait kendala transaksi Anda?', 'time': '25 Okt 08:00'},
-          {'sender': 'user', 'text': 'Saya mengajukan refund untuk booking B-12948.', 'time': '25 Okt 08:15'},
-          {'sender': 'driver', 'text': 'Baik, mohon tunggu sebentar ya Kak.', 'time': '25 Okt 08:20'},
-          {'sender': 'driver', 'text': 'Permintaan pengembalian dana Anda telah berhasil diproses.', 'time': '25 Okt 10:00'},
-        ]);
-      } else {
-        _messages.addAll([
-          {
-            'sender': 'driver',
-            'text': "Halo! Saya sudah di lokasi titik jemput sesuai kesepakatan ya kak.",
-            'time': "14:22",
-          },
-          {
-            'sender': 'user',
-            'text': "Siap kak! Saya baru saja keluar lift lobi utama. Menuju ke depan sekarang.",
-            'time': "14:23",
-          },
-        ]);
-      }
-    }
+    _isConnecting = true;
+    _subscribeToChat();
   }
 
   @override
   void dispose() {
     _streamSubscription?.cancel();
+    _pollingTimer?.cancel();
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -144,60 +99,45 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       'timestamp': now.toIso8601String(),
     };
 
-    final isMock = widget.bookingId == null || 
-        widget.bookingId!.isEmpty || 
-        widget.bookingId!.contains('mock') || 
-        widget.bookingId!.contains('support');
+    if (widget.bookingId == null || widget.bookingId!.isEmpty) return;
 
-    if (!isMock) {
-      final updatedMessages = List<Map<String, dynamic>>.from(_messages)..add(newMsg);
-      final currentDetails = Map<String, dynamic>.from(_bookingData?['additional_details'] ?? {});
-      currentDetails['chat_messages'] = updatedMessages;
+    final updatedMessages = List<Map<String, dynamic>>.from(_messages)..add(newMsg);
 
-      setState(() {
-        _messages = updatedMessages;
-        _msgController.clear();
-      });
-      _scrollToBottom();
+    setState(() {
+      _messages = updatedMessages;
+      _msgController.clear();
+    });
+    _scrollToBottom();
 
-      try {
-        await Supabase.instance.client
-            .from('bookings')
-            .update({
-              'additional_details': currentDetails,
-            })
-            .eq('id', widget.bookingId!);
-      } catch (e) {
-        debugPrint('❌ Error sending message: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Gagal mengirim pesan: $e"), backgroundColor: Colors.red),
-          );
-        }
+    try {
+      // Fetch freshest row to avoid overwriting recent messages
+      final freshRow = await Supabase.instance.client
+          .from('bookings')
+          .select('additional_details')
+          .eq('id', widget.bookingId!)
+          .maybeSingle();
+
+      final currentDetails = Map<String, dynamic>.from(freshRow?['additional_details'] ?? _bookingData?['additional_details'] ?? {});
+      final serverMsgs = (currentDetails['chat_messages'] as List<dynamic>?)
+          ?.map((m) => Map<String, dynamic>.from(m as Map))
+          .toList() ?? [];
+      
+      serverMsgs.add(newMsg);
+      currentDetails['chat_messages'] = serverMsgs;
+
+      await Supabase.instance.client
+          .from('bookings')
+          .update({
+            'additional_details': currentDetails,
+          })
+          .eq('id', widget.bookingId!);
+    } catch (e) {
+      debugPrint('❌ Error sending message: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Gagal mengirim pesan: $e"), backgroundColor: Colors.red),
+        );
       }
-    } else {
-      // Mock simulation mode
-      setState(() {
-        _messages.add(newMsg);
-        _msgController.clear();
-      });
-      _scrollToBottom();
-
-      // Mock automated reply
-      Future.delayed(const Duration(milliseconds: 1200), () {
-        if (mounted) {
-          final replyTime = DateTime.now();
-          final replyTimeStr = "${replyTime.hour.toString().padLeft(2, '0')}:${replyTime.minute.toString().padLeft(2, '0')}";
-          setState(() {
-            _messages.add({
-              'sender': 'driver',
-              'text': _getMockDriverReply(text),
-              'time': replyTimeStr,
-            });
-          });
-          _scrollToBottom();
-        }
-      });
     }
   }
 
@@ -208,19 +148,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return "$hour:$minute";
   }
 
-  String _getMockDriverReply(String userMessage) {
-    final lower = userMessage.toLowerCase();
-    if (lower.contains('halo') || lower.contains('hi') || lower.contains('hello')) {
-      return "Halo! Ada yang bisa saya bantu untuk perjalanan Anda?";
-    } else if (lower.contains('dimana') || lower.contains('posisi') || lower.contains('lokasi')) {
-      return "Saya di dekat pintu lobi utama, berjaket hitam dan menggunakan kendaraan yang tertera ya.";
-    } else if (lower.contains('tolong') || lower.contains('bantu')) {
-      return "Siap Kak, saya bantu laksanakan sekarang. Ada instruksi tambahan?";
-    } else if (lower.contains('makasih') || lower.contains('terima kasih') || lower.contains('thank')) {
-      return "Sama-sama Kak! Senang bisa mendampingi perjalanannya. 🙏";
-    }
-    return "Baik Kak, dimengerti. Saya stand by sesuai instruksi.";
-  }
+
 
   void _scrollToBottom() {
     Future.delayed(const Duration(milliseconds: 100), () {

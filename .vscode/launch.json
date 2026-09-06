@@ -2,18 +2,32 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Temenin Ajaa (Client) - Chrome Web",
+      "name": "📱 Run Client App (Ditanya Device)",
       "request": "launch",
       "type": "dart",
       "cwd": "temenin_ajaa",
-      "deviceId": "chrome"
+      "args": [
+        "-d",
+        "${input:pilihDevice}"
+      ]
     },
     {
-      "name": "Temenin Ajaa Driver - Chrome Web",
+      "name": "🚗 Run Driver App (Ditanya Device)",
       "request": "launch",
       "type": "dart",
       "cwd": "driver_temenin_ajaa/driver_app",
-      "deviceId": "chrome"
+      "args": [
+        "-d",
+        "${input:pilihDevice}"
+      ]
+    }
+  ],
+  "inputs": [
+    {
+      "id": "pilihDevice",
+      "type": "promptString",
+      "description": "Ketik nama/ID device (contoh: chrome, edge, windows, emulator-5554)",
+      "default": "chrome"
     }
   ]
 }

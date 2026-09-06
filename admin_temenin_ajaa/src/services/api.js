@@ -129,6 +129,37 @@ export const adminApi = {
     }
   },
 
+  createBooking: async (data) => {
+    try {
+      const res = await client.post('/admin/bookings', data);
+      return res.data;
+    } catch {
+      const newB = { id: 'bk-' + Date.now(), ...data, created_at: new Date() };
+      mockBookings.unshift(newB);
+      return { success: true, message: 'Pesanan berhasil dibuat' };
+    }
+  },
+
+  updateBooking: async (id, data) => {
+    try {
+      const res = await client.put(`/admin/bookings/${id}`, data);
+      return res.data;
+    } catch {
+      mockBookings = mockBookings.map(b => b.id === id ? { ...b, ...data } : b);
+      return { success: true, message: 'Pesanan berhasil diperbarui' };
+    }
+  },
+
+  deleteBooking: async (id) => {
+    try {
+      const res = await client.delete(`/admin/bookings/${id}`);
+      return res.data;
+    } catch {
+      mockBookings = mockBookings.filter(b => b.id !== id);
+      return { success: true, message: 'Pesanan berhasil dihapus' };
+    }
+  },
+
   updateBookingStatus: async (id, status) => {
     try {
       const res = await client.put(`/admin/bookings/${id}/status`, { status });

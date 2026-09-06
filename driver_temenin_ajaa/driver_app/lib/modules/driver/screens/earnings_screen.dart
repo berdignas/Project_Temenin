@@ -327,36 +327,38 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
   }
 
   // ============================================================
-  // EMPTY STATE WITH REALISTIC MOCK ITEMS (Reference Style)
-  // ============================================================
   Widget _buildEmptyStateWithMockHistory() {
-    return Column(
-      children: [
-        _buildTripHistoryCard(
-          icon: Icons.directions_car_rounded,
-          title: "Zaporiz'ke Hwy, 40",
-          subtitle: "Ags 23, 19:03 WIB • Comfort Companion",
-          price: "Rp 120.000",
-        ),
-        _buildTripHistoryCard(
-          icon: Icons.two_wheeler_rounded,
-          title: "Zaporiz'ke Hwy, 40",
-          subtitle: "Ags 20, 18:02 WIB • Antar Jemput",
-          price: "Rp 85.000",
-        ),
-        _buildTripHistoryCard(
-          icon: Icons.directions_car_rounded,
-          title: "Mechnykova St, 19",
-          subtitle: "Ags 20, 15:48 WIB • Hangout Guide",
-          price: "Rp 160.000",
-        ),
-        _buildTripHistoryCard(
-          icon: Icons.directions_car_rounded,
-          title: "Zaporiz'ke Hwy, 40",
-          subtitle: "Ags 17, 10:15 WIB • Temenin Ride",
-          price: "Rp 115.000",
-        ),
-      ],
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: const BoxDecoration(
+              color: AppTheme.cardDeep,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.account_balance_wallet_outlined, color: AppTheme.textMuted, size: 36),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "Belum Ada Riwayat Perjalanan Selesai",
+            style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Setiap pesanan yang diselesaikan akan tercatat di sini secara otomatis.",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
 

@@ -27,6 +27,7 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
   List<Map<String, dynamic>> _messages = [];
   Map<String, dynamic>? _bookingData;
   StreamSubscription<List<Map<String, dynamic>>>? _streamSubscription;
+  Timer? _pollingTimer;
   bool _isConnecting = true;
 
   @override
@@ -38,6 +39,7 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
   @override
   void dispose() {
     _streamSubscription?.cancel();
+    _pollingTimer?.cancel();
     _msgController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -59,6 +61,14 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
 
   void _subscribeToChat() {
     debugPrint('📡 Subscribing to chat updates for Booking: ${widget.bookingId}');
+    if (widget.bookingId.isEmpty) {
+      setState(() => _isConnecting = false);
+      return;
+    }
+
+    _streamSubscription?.cancel();
+    _pollingTimer?.cancel();
+
     try {
       _streamSubscription = Supabase.instance.client
           .from('bookings')
@@ -86,10 +96,39 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
           });
     } catch (e) {
       debugPrint('❌ Supabase stream error: $e');
-      setState(() {
-        _isConnecting = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isConnecting = false;
+        });
+      }
     }
+
+    // Polling fallback every 2 seconds for instant sync
+    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!mounted || widget.bookingId.contains('mock')) return;
+      try {
+        final data = await Supabase.instance.client
+            .from('bookings')
+            .select()
+            .eq('id', widget.bookingId)
+            .maybeSingle();
+        if (data != null && mounted) {
+          _bookingData = data;
+          final details = data['additional_details'] as Map<String, dynamic>?;
+          final msgs = details?['chat_messages'] as List<dynamic>?;
+          final newMessages = msgs?.map((m) => Map<String, dynamic>.from(m as Map)).toList() ?? [];
+          if (newMessages.length != _messages.length) {
+            setState(() {
+              _messages = newMessages;
+              _isConnecting = false;
+            });
+            _scrollToBottom();
+          }
+        }
+      } catch (e) {
+        debugPrint("Driver chat polling error: $e");
+      }
+    });
   }
 
   void _sendMessage() async {
@@ -106,38 +145,74 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
       'timestamp': now.toIso8601String(),
     };
 
-    final updatedMessages = List<Map<String, dynamic>>.from(_messages)..add(newMsg);
-    
-    // Create copy of current additional details
-    final currentDetails = Map<String, dynamic>.from(_bookingData?['additional_details'] ?? {});
-    currentDetails['chat_messages'] = updatedMessages;
+    final isMock = widget.bookingId.isEmpty || widget.bookingId.contains('mock');
 
-    // Optimistic UI update
-    setState(() {
-      _messages = updatedMessages;
-      _msgController.clear();
-    });
-    _scrollToBottom();
+    if (!isMock) {
+      final updatedMessages = List<Map<String, dynamic>>.from(_messages)..add(newMsg);
 
-    // Write to database
-    try {
-      await Supabase.instance.client
-          .from('bookings')
-          .update({
-            'additional_details': currentDetails,
-          })
-          .eq('id', widget.bookingId);
-      debugPrint('✅ Message sent successfully to Supabase');
-    } catch (e) {
-      debugPrint('❌ Failed to update messages in Supabase: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Gagal mengirim pesan: $e"),
-            backgroundColor: Colors.red,
-          ),
-        );
+      // Optimistic UI update
+      setState(() {
+        _messages = updatedMessages;
+        _msgController.clear();
+      });
+      _scrollToBottom();
+
+      // Write to database
+      try {
+        final freshRow = await Supabase.instance.client
+            .from('bookings')
+            .select('additional_details')
+            .eq('id', widget.bookingId)
+            .maybeSingle();
+
+        final currentDetails = Map<String, dynamic>.from(freshRow?['additional_details'] ?? _bookingData?['additional_details'] ?? {});
+        final serverMsgs = (currentDetails['chat_messages'] as List<dynamic>?)
+            ?.map((m) => Map<String, dynamic>.from(m as Map))
+            .toList() ?? [];
+        
+        serverMsgs.add(newMsg);
+        currentDetails['chat_messages'] = serverMsgs;
+
+        await Supabase.instance.client
+            .from('bookings')
+            .update({
+              'additional_details': currentDetails,
+            })
+            .eq('id', widget.bookingId);
+        debugPrint('✅ Message sent successfully to Supabase');
+      } catch (e) {
+        debugPrint('❌ Failed to update messages in Supabase: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Gagal mengirim pesan: $e"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
+    } else {
+      // Mock simulation mode
+      setState(() {
+        _messages.add(newMsg);
+        _msgController.clear();
+      });
+      _scrollToBottom();
+
+      Future.delayed(const Duration(milliseconds: 1200), () {
+        if (mounted) {
+          final replyTime = DateTime.now();
+          final replyTimeStr = "${replyTime.hour.toString().padLeft(2, '0')}:${replyTime.minute.toString().padLeft(2, '0')}";
+          setState(() {
+            _messages.add({
+              'sender': 'user',
+              'text': _getMockClientReply(text),
+              'time': replyTimeStr,
+            });
+          });
+          _scrollToBottom();
+        }
+      });
     }
   }
 

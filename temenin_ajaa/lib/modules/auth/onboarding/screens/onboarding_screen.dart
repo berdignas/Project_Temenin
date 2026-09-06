@@ -77,8 +77,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             right: 0,
             child: Column(
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 0, // margin is handled in _buildDot
+                  runSpacing: 8,
                   children: List.generate(
                     _pages.length,
                     (index) => _buildDot(index),

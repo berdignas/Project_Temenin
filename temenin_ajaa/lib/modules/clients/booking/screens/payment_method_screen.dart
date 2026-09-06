@@ -10,8 +10,9 @@ import 'tracking_driver_screen.dart';
 
 class PaymentMethodScreen extends StatefulWidget {
   final Map<String, dynamic>? bookingData;
+  final String? bookingId;
   
-  const PaymentMethodScreen({super.key, this.bookingData});
+  const PaymentMethodScreen({super.key, this.bookingData, this.bookingId});
 
   @override
   State<PaymentMethodScreen> createState() => _PaymentMethodScreenState();
@@ -384,27 +385,106 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                 final authProvider = Provider.of<AuthProvider>(context, listen: false);
                 final userId = authProvider.user?.id;
                 
-                final random = Random();
-                final otpPin = (random.nextInt(9000) + 1000).toString();
                 final bookingDetails = Map<String, dynamic>.from(widget.bookingData ?? {});
-                bookingDetails['otp'] = otpPin;
+                final existingOtp = bookingDetails['otp'] ?? 
+                                   (bookingDetails['additional_details'] is Map ? bookingDetails['additional_details']['otp'] : null);
+                if (existingOtp != null && existingOtp.toString().isNotEmpty) {
+                  bookingDetails['otp'] = existingOtp.toString();
+                } else {
+                  final random = Random();
+                  bookingDetails['otp'] = (random.nextInt(9000) + 1000).toString();
+                }
 
-                String? bookingId;
+                String? bookingId = widget.bookingId;
                 try {
                   if (userId != null) {
-                    final response = await Supabase.instance.client
-                        .from('bookings')
-                        .insert({
-                          'user_id': userId,
-                          'status': 'pending',
-                          'pickup_location': bookingDetails['pickup'] ?? bookingDetails['location'] ?? 'Lokasi Penjemputan',
-                          'dropoff_location': bookingDetails['destination'] ?? bookingDetails['location'] ?? 'Tujuan',
-                          'total_price': bookingDetails['totalPrice'] ?? bookingDetails['price'] ?? 0,
-                          'additional_details': bookingDetails,
-                        })
-                        .select('id')
-                        .single();
-                    bookingId = response['id'];
+                    if (bookingId != null && !bookingId.startsWith('mock')) {
+                      bookingDetails['sub_status'] = 'dp_paid';
+                      bookingDetails['dp_paid'] = true;
+                      String? updateDriverId = bookingDetails['driverId'] ?? bookingDetails['partnerId'] ?? bookingDetails['driver_id'];
+                      final updateData = <String, dynamic>{
+                        'status': 'ongoing',
+                        'additional_details': bookingDetails,
+                      };
+                      if (updateDriverId != null && !updateDriverId.startsWith('mock') && !updateDriverId.startsWith('drv-') && !updateDriverId.startsWith('d1')) {
+                        updateData['driver_id'] = updateDriverId;
+                      }
+                      await Supabase.instance.client
+                          .from('bookings')
+                          .update(updateData)
+                          .eq('id', bookingId);
+                    } else {
+                      // Resolve target driver ID
+                      String? driverId = bookingDetails['driverId'] ?? 
+                                         bookingDetails['partnerId'] ?? 
+                                         bookingDetails['selectedPartner']?['id'] ??
+                                         bookingDetails['partner']?['id'];
+                      
+                      if (driverId == null || driverId.isEmpty || driverId.startsWith('mock') || driverId.startsWith('drv-') || driverId.startsWith('d1')) {
+                        try {
+                          final onlineDriver = await Supabase.instance.client
+                              .from('drivers')
+                              .select('id')
+                              .eq('is_available', true)
+                              .limit(1)
+                              .maybeSingle();
+                          if (onlineDriver != null && onlineDriver['id'] != null) {
+                            driverId = onlineDriver['id'].toString();
+                          } else {
+                            final approvedDriver = await Supabase.instance.client
+                                .from('drivers')
+                                .select('id')
+                                .limit(1)
+                                .maybeSingle();
+                            if (approvedDriver != null && approvedDriver['id'] != null) {
+                              driverId = approvedDriver['id'].toString();
+                            }
+                          }
+                        } catch (e) {
+                          debugPrint("Error fetching default driver: $e");
+                        }
+                      }
+
+                      String? validDriverId;
+                      if (driverId != null && !driverId.startsWith('mock') && !driverId.startsWith('drv-') && !driverId.startsWith('d1')) {
+                        validDriverId = driverId;
+                      }
+
+                      final totalPriceVal = bookingDetails['totalPrice'] ?? bookingDetails['price'] ?? bookingDetails['totalPayment'] ?? 50000;
+                      final numPrice = totalPriceVal is num ? totalPriceVal.toDouble() : (double.tryParse(totalPriceVal.toString()) ?? 50000.0);
+
+                      bookingDetails['sub_status'] = 'dp_paid';
+                      bookingDetails['dp_paid'] = true;
+                      final insertPayload = <String, dynamic>{
+                        'user_id': userId,
+                        'status': 'ongoing',
+                        'pickup_location': bookingDetails['pickup'] ?? bookingDetails['location'] ?? 'Lokasi Penjemputan',
+                        'dropoff_location': bookingDetails['destination'] ?? bookingDetails['location'] ?? 'Tujuan',
+                        'total_price': numPrice,
+                        'additional_details': bookingDetails,
+                      };
+                      if (validDriverId != null && validDriverId.isNotEmpty) {
+                        insertPayload['driver_id'] = validDriverId;
+                      }
+
+                      try {
+                        final response = await Supabase.instance.client
+                            .from('bookings')
+                            .insert(insertPayload)
+                            .select('id')
+                            .single();
+                        bookingId = response['id']?.toString();
+                      } catch (err) {
+                        debugPrint("First insert attempt failed in payment: $err. Retrying without driver_id...");
+                        insertPayload.remove('driver_id');
+                        final response = await Supabase.instance.client
+                            .from('bookings')
+                            .insert(insertPayload)
+                            .select('id')
+                            .single();
+                        bookingId = response['id']?.toString();
+                      }
+                    }
                   }
                 } catch (e) {
                   debugPrint("Failed saving booking to Supabase: $e");
@@ -412,6 +492,11 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
 
                 if (mounted) {
                   Navigator.pop(context); // Close loading dialog
+                  
+                  // Update local state so TrackingDriverScreen knows DP is paid
+                  bookingDetails['status'] = 'dp_paid';
+                  bookingDetails['sub_status'] = 'dp_paid';
+                  bookingDetails['dp_paid'] = true;
 
                   Navigator.pushAndRemoveUntil(
                     context,
@@ -421,7 +506,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                         bookingId: bookingId,
                       ),
                     ),
-                    (route) => route.isFirst,
+                    (route) => false,
                   );
                 }
               },

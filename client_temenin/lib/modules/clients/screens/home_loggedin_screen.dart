@@ -5,6 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import 'package:temenin_ajaa/providers/auth_provider.dart';
+import 'package:temenin_ajaa/providers/driver_provider.dart';
+import 'package:temenin_ajaa/providers/client_booking_provider.dart';
 import 'package:temenin_ajaa/data/models/user_model.dart';
 import 'package:temenin_ajaa/modules/clients/screens/profile_completion_screen.dart';
 import 'package:temenin_ajaa/modules/clients/widgets/profile_tab.dart';
@@ -485,6 +487,17 @@ class _HomeContentState extends State<HomeContent> {
     _loadUserPoints();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndShowVerificationPopup();
+      try {
+        context.read<DriverProvider>().fetchDrivers();
+        context.read<DriverProvider>().subscribeToDriversRealtime();
+      } catch (_) {}
+
+      final authProvider = context.read<AuthProvider>();
+      if (authProvider.user != null) {
+        try {
+          context.read<ClientBookingProvider>().subscribeToClientBookings(authProvider.user!.id);
+        } catch (_) {}
+      }
     });
   }
 
@@ -779,6 +792,8 @@ class _HomeContentState extends State<HomeContent> {
                   delegate: SliverChildListDelegate([
                     const SizedBox(height: 20),
                     _buildWalletCard(context, user),
+                    const SizedBox(height: 16),
+                    _buildActiveBookingCardForClient(context),
                     const SizedBox(height: 20),
                     _buildPromoBanner(),
                     const SizedBox(height: 20),
@@ -803,6 +818,164 @@ class _HomeContentState extends State<HomeContent> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActiveBookingCardForClient(BuildContext context) {
+    final clientBooking = context.watch<ClientBookingProvider>().currentBooking;
+    if (clientBooking == null) return const SizedBox.shrink();
+
+    final status = clientBooking['status']?.toString() ?? 'pending';
+    final activeStatuses = ['pending', 'accepted', 'confirmed', 'on_the_way', 'arrived', 'started', 'ongoing', 'in_progress'];
+    if (!activeStatuses.contains(status)) return const SizedBox.shrink();
+
+    final bookingId = clientBooking['id']?.toString() ?? '';
+    final pickup = clientBooking['pickup_location'] ?? clientBooking['pickup'] ?? 'Lokasi Penjemputan';
+    final destination = clientBooking['dropoff_location'] ?? clientBooking['destination'] ?? 'Lokasi Tujuan';
+
+    String statusText = 'Pesanan Sedang Diproses';
+    Color statusColor = AppColors.electricPink;
+
+    switch (status) {
+      case 'pending':
+        statusText = 'Mencari Partner Terdekat... 📡';
+        break;
+      case 'accepted':
+      case 'confirmed':
+        statusText = 'Partner Mengonfirmasi Pesanan ✔';
+        statusColor = const Color(0xFF00FF7F);
+        break;
+      case 'on_the_way':
+        statusText = 'Driver Sedang Menuju Ke Lokasi Anda 🛵';
+        statusColor = const Color(0xFF00E5FF);
+        break;
+      case 'arrived':
+        statusText = 'Driver Sudah Sampai Di Lokasi Penjemputan 📍';
+        statusColor = const Color(0xFF00FF7F);
+        break;
+      case 'started':
+      case 'ongoing':
+      case 'in_progress':
+        statusText = 'Perjalanan / Layanan Sedang Berlangsung ✨';
+        statusColor = const Color(0xFF9D6BFF);
+        break;
+    }
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TrackingDriverScreen(
+              bookingId: bookingId,
+              bookingData: clientBooking,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppColors.obsidian,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: statusColor, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: statusColor.withOpacity(0.2),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.directions_car_rounded, color: statusColor, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "PESANAN BERLANGSUNG",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: statusColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      Text(
+                        statusText,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: AppColors.textMain,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        "Lacak",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 10),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.elevatedDark,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_pin_circle_rounded, color: AppColors.electricPink, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "$pickup ➔ $destination",
+                      style: GoogleFonts.inter(color: AppColors.textMuted, fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

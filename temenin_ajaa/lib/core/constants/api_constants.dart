@@ -1,6 +1,7 @@
-// Path: constants\api_constants.dart
+import 'package:flutter/foundation.dart';
+
 class ApiConstants {
-  static const String baseUrl = 'http://192.168.1.4:3002'; // Updated to physical PC IP for physical device testing
+  static const String baseUrl = kIsWeb ? 'http://127.0.0.1:3002' : 'http://192.168.1.3:3002';
 
   
   // Auth Endpoints

@@ -200,7 +200,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     await prefs.setString('userRole', 'user');
                     
                     final user = authProvider.user;
-                    if (user != null && (user.email == null || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
+                    if (user != null && (user.email == null || user.email!.trim().isEmpty || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(builder: (context) => const SetupAccountScreen()),

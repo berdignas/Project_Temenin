@@ -2,8 +2,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import '../../../../providers/auth_provider.dart';
+import '../../../../providers/driver_provider.dart';
 import 'chat_room_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
@@ -17,57 +19,75 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
 
-  final List<Map<String, dynamic>> _mockChats = [
-    {
-      'id': '1',
-      'name': 'Sarah Jenkins (Diamond Partner)',
-      'image': 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80',
-      'lastMessage': 'Halo kak! Saya sudah standby di lobi Senopati ya ✨',
-      'time': '12:45',
-      'unread': 2,
-      'isOnline': true,
-      'tag': 'Companion',
-      'category': 'companion',
-    },
-    {
-      'id': '2',
-      'name': 'Budi Santoso (Driver VIP)',
-      'image': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
-      'lastMessage': 'Siap meluncur jemput di titik penjemputan bandara.',
-      'time': 'Kemarin',
-      'unread': 0,
-      'isOnline': false,
-      'tag': 'Driver',
-      'category': 'driver',
-    },
-    {
-      'id': '3',
-      'name': 'Jessica Mila (VVIP Escort)',
-      'image': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
-      'lastMessage': 'Terima kasih untuk hangout dinner kemarin kak! Senang bertemu.',
-      'time': '20 Okt',
-      'unread': 0,
-      'isOnline': true,
-      'tag': 'Companion',
-      'category': 'companion',
-    },
-    {
-      'id': '4',
-      'name': 'Ahmad Fauzi (Freedom Runner)',
-      'image': 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80',
-      'lastMessage': 'Tiket konser sudah berhasil saya belikan kak. Struknya terlampir.',
-      'time': '18 Okt',
-      'unread': 0,
-      'isOnline': false,
-      'tag': 'Runner',
-      'category': 'driver',
-    },
-  ];
+  List<Map<String, dynamic>> _liveChats = [];
+  bool _isLoadingLive = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _loadLiveChats();
+  }
+
+  Future<void> _loadLiveChats() async {
+    setState(() => _isLoadingLive = true);
+    try {
+      final auth = Provider.of<AuthProvider>(context, listen: false);
+      final userId = auth.user?.id ?? Supabase.instance.client.auth.currentUser?.id;
+      
+      var query = Supabase.instance.client.from('bookings').select();
+      if (userId != null && userId.contains('-')) {
+        query = query.eq('user_id', userId);
+      }
+      
+      final data = await query.order('created_at', ascending: false).limit(10);
+      if (data is List && data.isNotEmpty) {
+        final List<Map<String, dynamic>> loaded = [];
+        for (final b in data) {
+          final details = b['additional_details'] as Map<String, dynamic>?;
+          final msgs = (details?['chat_messages'] as List<dynamic>?)
+              ?.map((m) => Map<String, dynamic>.from(m as Map))
+              .toList() ?? [];
+          
+          final driverProv = Provider.of<DriverProvider>(context, listen: false);
+          final dId = b['driver_id']?.toString() ?? details?['driver_id']?.toString();
+          Map<String, dynamic>? currentDriver;
+          if (dId != null) {
+            try {
+              currentDriver = driverProv.drivers.firstWhere((d) => d['id'] == dId || d['driverId'] == dId);
+            } catch (_) {}
+          }
+          final driverName = currentDriver?['name'] ?? details?['driverName'] ?? details?['driver_name'] ?? 'Driver Partner';
+          final driverImage = currentDriver?['image'] ?? details?['driverImage'] ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80';
+          final lastMsg = msgs.isNotEmpty ? msgs.last['text']?.toString() ?? 'Mulai percakapan...' : 'Pesanan baru aktif';
+          final lastTime = msgs.isNotEmpty ? msgs.last['time']?.toString() ?? 'Baru saja' : 'Baru saja';
+          
+          loaded.add({
+            'id': b['id'].toString(),
+            'bookingId': b['id'].toString(),
+            'name': driverName,
+            'image': driverImage,
+            'lastMessage': lastMsg,
+            'time': lastTime,
+            'unread': 0,
+            'isOnline': true,
+            'tag': 'Driver',
+            'category': 'driver',
+          });
+        }
+        if (mounted) {
+          setState(() {
+            _liveChats = loaded;
+            _isLoadingLive = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => _isLoadingLive = false);
+      }
+    } catch (e) {
+      debugPrint("Error loading live chats: $e");
+      if (mounted) setState(() => _isLoadingLive = false);
+    }
   }
 
   @override
@@ -193,10 +213,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
   Widget _buildOnlineStories() {
     final users = [
       {'name': 'Saya', 'img': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80', 'isMe': true},
-      {'name': 'Raditya', 'img': 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=150&q=80', 'isMe': false},
-      {'name': 'Siska', 'img': 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80', 'isMe': false},
-      {'name': 'Adrian', 'img': 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=150&q=80', 'isMe': false},
-      {'name': 'Citra', 'img': 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=150&q=80', 'isMe': false},
     ];
 
     return SizedBox(
@@ -287,7 +303,8 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
   }
 
   Widget _buildChatList(String category) {
-    final filteredChats = _mockChats.where((chat) {
+    final allList = [..._liveChats];
+    final filteredChats = allList.where((chat) {
       if (category == 'all') return true;
       return chat['category'] == category;
     }).toList();
@@ -308,14 +325,18 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
       );
     }
 
-    return ListView.builder(
-      physics: const BouncingScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      itemCount: filteredChats.length,
-      itemBuilder: (context, index) {
-        final chat = filteredChats[index];
-        return _buildChatTile(chat);
-      },
+    return RefreshIndicator(
+      onRefresh: _loadLiveChats,
+      color: AppTheme.primaryPink,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        itemCount: filteredChats.length,
+        itemBuilder: (context, index) {
+          final chat = filteredChats[index];
+          return _buildChatTile(chat);
+        },
+      ),
     );
   }
 
@@ -335,13 +356,14 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
             context,
             MaterialPageRoute(
               builder: (context) => ChatRoomScreen(
+                bookingId: chat['bookingId'] ?? chat['id'],
                 recipientName: chat['name'],
                 recipientImage: chat['image'],
                 status: chat['isOnline'] ? "Online" : "Offline",
                 tag: chat['tag'],
               ),
             ),
-          );
+          ).then((_) => _loadLiveChats());
         },
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: Stack(

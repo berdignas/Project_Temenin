@@ -4,8 +4,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/providers/driver_provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:temenin_ajaa/providers/auth_provider.dart';
 import 'booking_confirmation_screen.dart';
 import 'tracking_driver_screen.dart';
+import 'freedom_request_negotiation_screen.dart' as temenin_ajaa_negotiation;
 
 class HangoutBookingScreen extends StatefulWidget {
   final Map<String, dynamic>? selectedPartner;
@@ -1156,30 +1159,70 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
                 'driverName': widget.selectedPartner!['name'],
                 'driverImage': widget.selectedPartner!['image'] ?? widget.selectedPartner!['avatar'] ?? '',
                 'driverRating': widget.selectedPartner!['rating'].toString(),
-                'driverTrips': widget.selectedPartner!['trips'].toString(),
-                'driverClass': widget.selectedPartner!['tier'] ?? 'Gold',
+                'driverTrips': widget.selectedPartner!['trips']?.toString() ?? "120",
+                'driverClass': widget.selectedPartner!['type'] ?? 'Gold',
                 'vehicle': widget.selectedPartner!['vehicle'] ?? 'Kendaraan Pribadi',
                 'plateNumber': widget.selectedPartner!['plateNumber'] ?? 'B 1234 XYZ',
+                'serviceFee': prices['hangoutBaseCost'],
+                'userInitialPrice': prices['hangoutBaseCost'],
               });
 
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => BookingConfirmationScreen(
+                  builder: (context) => temenin_ajaa_negotiation.FreedomRequestNegotiationScreen(
                     bookingData: bookingData,
                   ),
                 ),
               );
             } else {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => TrackingDriverScreen(
-                    bookingData: bookingData,
-                    bookingId: 'mock-bkg-${DateTime.now().millisecondsSinceEpoch}',
-                  ),
-                ),
-              );
+              () async {
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primaryPink)),
+                );
+
+                String? bookingId;
+                try {
+                  final auth = Provider.of<AuthProvider>(context, listen: false);
+                  final userId = auth.user?.id ?? Supabase.instance.client.auth.currentUser?.id;
+                  if (userId != null) {
+                    final totalPriceVal = bookingData['totalPayment'] ?? 130000;
+                    final numPrice = totalPriceVal is num ? totalPriceVal.toDouble() : (double.tryParse(totalPriceVal.toString()) ?? 130000.0);
+                    final insertPayload = <String, dynamic>{
+                      'user_id': userId,
+                      'status': 'pending',
+                      'pickup_location': bookingData['pickup'] ?? 'Lokasi Penjemputan',
+                      'dropoff_location': bookingData['destination'] ?? 'Tujuan',
+                      'total_price': numPrice,
+                      'additional_details': bookingData,
+                    };
+                    final response = await Supabase.instance.client
+                        .from('bookings')
+                        .insert(insertPayload)
+                        .select('id')
+                        .single();
+                    bookingId = response['id']?.toString();
+                    debugPrint("✅ Radar booking created in Supabase: $bookingId");
+                  }
+                } catch (e) {
+                  debugPrint("Error inserting radar booking: $e");
+                }
+
+                if (mounted) {
+                  Navigator.pop(context); // close loader
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => TrackingDriverScreen(
+                        bookingData: bookingData,
+                        bookingId: bookingId ?? 'mock-bkg-${DateTime.now().millisecondsSinceEpoch}',
+                      ),
+                    ),
+                  );
+                }
+              }();
             }
           }
         },

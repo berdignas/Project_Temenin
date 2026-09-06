@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -296,7 +297,7 @@ class _DriverCommunityScreenState extends State<DriverCommunityScreen> {
                                 padding: const EdgeInsets.all(2),
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(30),
-                                  child: (localPath != null && localPath.isNotEmpty && File(localPath).existsSync())
+                                  child: (!kIsWeb && localPath != null && localPath.isNotEmpty && File(localPath).existsSync())
                                       ? Image.file(File(localPath), fit: BoxFit.cover)
                                       : Image.network(imgUrl, fit: BoxFit.cover),
                                 ),
@@ -488,14 +489,14 @@ class _DriverCommunityScreenState extends State<DriverCommunityScreen> {
                               borderRadius: BorderRadius.circular(16),
                               child: AspectRatio(
                                 aspectRatio: 4 / 3,
-                                child: (post['localFilePaths'] != null && (post['localFilePaths'] as List).length > 1)
+                                child: (post['localFilePaths'] != null && (post['localFilePaths'] as List).isNotEmpty)
                                     ? Stack(
                                         children: [
                                           PageView.builder(
                                             itemCount: (post['localFilePaths'] as List).length,
                                             itemBuilder: (context, photoIndex) {
                                               final path = (post['localFilePaths'] as List)[photoIndex].toString();
-                                              return File(path).existsSync()
+                                              return (!kIsWeb && File(path).existsSync())
                                                   ? Image.file(File(path), fit: BoxFit.cover)
                                                   : Image.network(imgUrl, fit: BoxFit.cover);
                                             },
@@ -506,7 +507,7 @@ class _DriverCommunityScreenState extends State<DriverCommunityScreen> {
                                             child: Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                               decoration: BoxDecoration(
-                                                color: Colors.black.withOpacity(0.7),
+                                                color: Colors.black.withOpacity(0.6),
                                                 borderRadius: BorderRadius.circular(12),
                                               ),
                                               child: Text(
@@ -520,7 +521,7 @@ class _DriverCommunityScreenState extends State<DriverCommunityScreen> {
                                     : Stack(
                                         alignment: Alignment.center,
                                         children: [
-                                          (localPath != null && localPath.isNotEmpty && File(localPath).existsSync())
+                                          (!kIsWeb && localPath != null && localPath.isNotEmpty && File(localPath).existsSync())
                                               ? Image.file(File(localPath), fit: BoxFit.cover, width: double.infinity, height: double.infinity)
                                               : (imgUrl.isNotEmpty
                                                   ? Image.network(imgUrl, fit: BoxFit.cover, width: double.infinity, height: double.infinity)

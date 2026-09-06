@@ -5,7 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import 'package:temenin_ajaa/providers/auth_provider.dart';
+import 'package:temenin_ajaa/providers/driver_provider.dart';
+import 'package:temenin_ajaa/providers/client_booking_provider.dart';
 import 'package:temenin_ajaa/data/models/user_model.dart';
+import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/modules/clients/screens/profile_completion_screen.dart';
 import 'package:temenin_ajaa/modules/clients/widgets/profile_tab.dart';
 import 'package:temenin_ajaa/modules/clients/driver/screens/partner_list_screen.dart';
@@ -141,79 +144,6 @@ class Review {
     required this.rating,
     required this.date,
   });
-}
-
-// ============================================================
-// MOCK DATA
-// ============================================================
-
-class MockData {
-  static List<Driver> get featuredDrivers => [
-    Driver(
-      id: '1',
-      name: 'Ariel Noah',
-      imageUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200&h=200&fit=crop',
-      rating: 4.9,
-      driverClass: 'Diamond',
-      isAvailable: true,
-      vehicleType: 'Kawasaki Ninja ZX-25R',
-      plateNumber: 'B 1982 NOAH',
-      reviewCount: 340,
-    ),
-    Driver(
-      id: '2',
-      name: 'User Andriana',
-      imageUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&h=200&fit=crop',
-      rating: 4.9,
-      driverClass: 'Platinum',
-      isAvailable: true,
-      vehicleType: 'Yamaha Aerox Connected',
-      plateNumber: 'B 6666 RAISA',
-      reviewCount: 280,
-    ),
-    Driver(
-      id: '3',
-      name: 'Nicholas Saputra',
-      imageUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=200&h=200&fit=crop',
-      rating: 5.0,
-      driverClass: 'VVIP',
-      isAvailable: false,
-      vehicleType: 'Honda CBR250RR',
-      plateNumber: 'B 777 NIS',
-      reviewCount: 450,
-    ),
-  ];
-
-  static ActiveBooking get activeBooking => ActiveBooking(
-    id: 'B001',
-    driverName: 'Ariel Noah',
-    driverImage: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=200&h=200&fit=crop',
-    driverRating: 4.9,
-    driverClass: 'Diamond',
-    serviceType: 'Ride Service',
-    status: 'On The Way',
-    estimatedArrival: '5 mins',
-    pickup: 'Senayan City',
-    destination: 'Kemang Pratama',
-    totalPayment: 150000,
-    dp: 75000,
-    remainingPayment: 75000,
-  );
-
-  static List<Review> get reviews => [
-    Review(
-      name: 'Anya Geraldine',
-      comment: 'Ariel asik banget pas bawa motor. Suaranya merdu pas nyanyi di jalan! 🎤🛵',
-      rating: 4.9,
-      date: '2 hari lalu',
-    ),
-    Review(
-      name: 'Al Ghazali',
-      comment: 'Nicholas teman ngobrol film yang keren abis. Sangat berwawasan luas.',
-      rating: 5.0,
-      date: '3 hari lalu',
-    ),
-  ];
 }
 
 // ============================================================
@@ -485,6 +415,13 @@ class _HomeContentState extends State<HomeContent> {
     _loadUserPoints();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndShowVerificationPopup();
+      context.read<DriverProvider>().fetchDrivers();
+      context.read<DriverProvider>().subscribeToDriversRealtime();
+
+      final authProvider = context.read<AuthProvider>();
+      if (authProvider.user != null) {
+        context.read<ClientBookingProvider>().subscribeToClientBookings(authProvider.user!.id);
+      }
     });
   }
 
@@ -779,6 +716,8 @@ class _HomeContentState extends State<HomeContent> {
                   delegate: SliverChildListDelegate([
                     const SizedBox(height: 20),
                     _buildWalletCard(context, user),
+                    const SizedBox(height: 16),
+                    _buildActiveBookingCardForClient(context),
                     const SizedBox(height: 20),
                     _buildPromoBanner(),
                     const SizedBox(height: 20),
@@ -803,6 +742,165 @@ class _HomeContentState extends State<HomeContent> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActiveBookingCardForClient(BuildContext context) {
+    final clientBooking = context.watch<ClientBookingProvider>().currentBooking;
+    if (clientBooking == null) return const SizedBox.shrink();
+
+    final status = clientBooking['status']?.toString() ?? 'pending';
+    final activeStatuses = ['pending', 'accepted', 'confirmed', 'on_the_way', 'arrived', 'started', 'ongoing', 'in_progress'];
+    if (!activeStatuses.contains(status)) return const SizedBox.shrink();
+
+    final bookingId = clientBooking['id']?.toString() ?? '';
+    final driver = clientBooking['driver'] as Map<String, dynamic>?;
+    final pickup = clientBooking['pickup_location'] ?? clientBooking['pickup'] ?? 'Lokasi Penjemputan';
+    final destination = clientBooking['dropoff_location'] ?? clientBooking['destination'] ?? 'Lokasi Tujuan';
+
+    String statusText = 'Pesanan Sedang Diproses';
+    Color statusColor = AppTheme.primaryPink;
+
+    switch (status) {
+      case 'pending':
+        statusText = 'Mencari Partner Terdekat... 📡';
+        break;
+      case 'accepted':
+      case 'confirmed':
+        statusText = 'Partner Mengonfirmasi Pesanan ✔';
+        statusColor = const Color(0xFF00FF7F);
+        break;
+      case 'on_the_way':
+        statusText = 'Driver Sedang Menuju Ke Lokasi Anda 🛵';
+        statusColor = const Color(0xFF00E5FF);
+        break;
+      case 'arrived':
+        statusText = 'Driver Sudah Sampai Di Lokasi Penjemputan 📍';
+        statusColor = const Color(0xFF00FF7F);
+        break;
+      case 'started':
+      case 'ongoing':
+      case 'in_progress':
+        statusText = 'Perjalanan / Layanan Sedang Berlangsung ✨';
+        statusColor = const Color(0xFF9D6BFF);
+        break;
+    }
+
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TrackingDriverScreen(
+              bookingId: bookingId,
+              bookingData: clientBooking,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 4),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: statusColor, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: statusColor.withOpacity(0.2),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.directions_car_rounded, color: statusColor, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "PESANAN BERLANGSUNG",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: statusColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      Text(
+                        statusText,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: AppTheme.textHighContrast,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Text(
+                        "Lacak",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 10),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppTheme.cardDeep,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.person_pin_circle_rounded, color: AppTheme.primaryPink, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "$pickup ➔ $destination",
+                      style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 11),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -2050,125 +2148,36 @@ class _HomeContentState extends State<HomeContent> {
   }
 
   Widget _buildPartnerList() {
-    final allPartners = [
-      _PartnerData(
-        id: 'drv-1',
-        name: 'Sarah Jessica',
-        imageUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
-        rating: 4.9,
-        tags: ['Hangout', 'Ride', 'Verified KYC', 'Counseling', 'Curhat'],
-        distance: '1.2 KM',
-        price: 'Rp 150.000',
-        vehicle: 'Toyota Corolla Sedan',
-        vehicleStnk: 'B 1982 NOAH',
-        tier: '★ PLATINUM TIER',
-        priceVal: 150000,
-      ),
-      _PartnerData(
-        id: 'drv-2',
-        name: 'Rayhan Putra',
-        imageUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=400&auto=format&fit=crop',
-        rating: 4.8,
-        tags: ['Ride', 'Event Companion', 'Sporty', 'Hiking'],
-        distance: '2.5 KM',
-        price: 'Rp 175.000',
-        vehicle: 'Kawasaki Ninja ZX-25R',
-        vehicleStnk: 'B 1234 XY',
-        tier: '★ GOLD TIER',
-        priceVal: 175000,
-      ),
-      _PartnerData(
-        id: 'drv-3',
-        name: 'Amanda Wijaya',
-        imageUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=400&auto=format&fit=crop',
-        rating: 4.7,
-        tags: ['Curhat', 'Counseling', 'Verified KYC'],
-        distance: '1.8 KM',
-        price: 'Rp 120.000',
-        vehicle: 'Honda Vario 160',
-        vehicleStnk: 'B 4321 AC',
-        tier: '★ GOLD TIER',
-        priceVal: 120000,
-      ),
-      _PartnerData(
-        id: 'drv-4',
-        name: 'Dimas Setiawan',
-        imageUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?q=80&w=400&auto=format&fit=crop',
-        rating: 4.9,
-        tags: ['Sporty', 'Hiking', 'Assistant'],
-        distance: '3.1 KM',
-        price: 'Rp 200.000',
-        vehicle: 'Vespa Sprint Sport',
-        vehicleStnk: 'B 8888 DM',
-        tier: '★ PLATINUM TIER',
-        priceVal: 200000,
-      ),
-      _PartnerData(
-        id: 'drv-5',
-        name: 'Citra Kirana',
-        imageUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=400&auto=format&fit=crop',
-        rating: 5.0,
-        tags: ['Counseling', 'Curhat', 'Hangout', 'Verified KYC'],
-        distance: '0.9 KM',
-        price: 'Rp 250.000',
-        vehicle: 'Mini Cooper Clubman',
-        vehicleStnk: 'B 777 CK',
-        tier: '★ DIAMOND TIER',
-        priceVal: 250000,
-      ),
-      _PartnerData(
-        id: 'drv-6',
-        name: 'Bagas Pradana',
-        imageUrl: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?q=80&w=400&auto=format&fit=crop',
-        rating: 4.9,
-        tags: ['Sporty', 'Assistant', 'Bodyguard'],
-        distance: '4.2 KM',
-        price: 'Rp 350.000',
-        vehicle: 'Kawasaki Ninja ZX-6R',
-        vehicleStnk: 'B 666 VVIP',
-        tier: '★ VVIP TIER',
-        priceVal: 350000,
-      ),
-      _PartnerData(
-        id: 'drv-7',
-        name: 'Chelsea Islan',
-        imageUrl: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?q=80&w=400&auto=format&fit=crop',
-        rating: 5.0,
-        tags: ['Hangout', 'Counseling', 'Verified KYC'],
-        distance: '1.5 KM',
-        price: 'Rp 400.000',
-        vehicle: 'BMW 320i',
-        vehicleStnk: 'B 1 CHI',
-        tier: '★ DIAMOND TIER',
-        priceVal: 400000,
-      ),
-      _PartnerData(
-        id: 'drv-8',
-        name: 'Nicholas Saputra',
-        imageUrl: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?q=80&w=400&auto=format&fit=crop',
-        rating: 5.0,
-        tags: ['Hiking', 'Ride', 'Detective'],
-        distance: '2.0 KM',
-        price: 'Rp 500.000',
-        vehicle: 'Toyota Land Cruiser',
-        vehicleStnk: 'B 23 NICS',
-        tier: '★ VVIP TIER',
-        priceVal: 500000,
-      ),
-      _PartnerData(
-        id: 'drv-9',
-        name: 'Ariel Tatum',
-        imageUrl: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?q=80&w=400&auto=format&fit=crop',
-        rating: 4.9,
-        tags: ['Curhat', 'Hangout', 'Counseling', 'Verified KYC'],
+    final driverProvider = context.watch<DriverProvider>();
+    final List<Map<String, dynamic>> realDrivers = driverProvider.drivers;
+
+    if (driverProvider.isLoading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(20.0),
+          child: CircularProgressIndicator(color: AppColors.electricPink),
+        ),
+      );
+    }
+
+    final allPartners = realDrivers.map((d) {
+      final priceVal = d['price'] is int ? d['price'] as int : (int.tryParse(d['price'].toString()) ?? 50000);
+      final priceFormatted = 'Rp ${priceVal.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}';
+      
+      return _PartnerData(
+        id: d['id'].toString(),
+        name: d['name'] ?? 'Driver Partner',
+        imageUrl: d['image'] ?? 'https://ui-avatars.com/api/?name=Driver',
+        rating: double.tryParse(d['rating'].toString()) ?? 5.0,
+        tags: ['Ride', 'Hangout', 'Verified KYC', 'Counseling', 'Curhat', 'Sporty', 'Hiking', 'Assistant', 'Event Companion'],
         distance: '1.0 KM',
-        price: 'Rp 450.000',
-        vehicle: 'Mercedes-Benz C-Class',
-        vehicleStnk: 'B 99 ATL',
-        tier: '★ DIAMOND TIER',
-        priceVal: 450000,
-      ),
-    ];
+        price: priceFormatted,
+        vehicle: d['vehicle'] ?? 'Kendaraan Driver',
+        vehicleStnk: 'B ${d['id']} DRV',
+        tier: '★ ${(d['type'] ?? 'GOLD').toString().toUpperCase()} TIER',
+        priceVal: priceVal,
+      );
+    }).toList();
 
     // Filter by selected category pill
     final filteredPartners = allPartners.where((partner) {

@@ -242,35 +242,31 @@ bool get isRegularUser => _userRole == 'user';
 
   // Refresh user data from server
   Future<bool> refreshUser() async {
-    _errorMessage = null;
-    notifyListeners();
-
     try {
       final result = await _authService.getUserProfile();
       
       print('🔄 Refresh user result: ${result['success']}');
       
-      if (result['success'] == true) {
+      if (result['success'] == true && result['user'] != null) {
         _user = result['user'];
         _isAuthenticated = true;
         
-        // PANGGIL method updateLocalUser yang sudah dibuat
         await _authService.updateLocalUser(_user!);
         
         print('✅ User refreshed: ${_user?.fullName}');
-        print('✅ Avatar URL: ${_user?.avatarUrl}');
-        
         notifyListeners();
         return true;
+      } else if (result['statusCode'] == 401) {
+        print('❌ Token expired or unauthorized (401), logging out...');
+        await logout();
+        return false;
       } else {
-        _errorMessage = result['message'] ?? 'Failed to refresh user data';
-        notifyListeners();
+        // Non-401 error or offline mode: preserve logged-in state from local cache
+        print('⚠️ Could not refresh user profile online: ${result['message']}. Using local cached profile.');
         return false;
       }
     } catch (e) {
-      print('❌ Refresh error: $e');
-      _errorMessage = e.toString();
-      notifyListeners();
+      print('❌ Refresh error: $e. Using local cached profile.');
       return false;
     }
   }

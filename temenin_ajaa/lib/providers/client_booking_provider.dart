@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/constants/api_constants.dart';
 import 'package:temenin_ajaa/core/services/auth_service.dart';
 
@@ -11,11 +13,96 @@ class ClientBookingProvider extends ChangeNotifier {
   String? _errorMessage;
   Map<String, dynamic>? _currentBooking;
   List<dynamic> _negotiations = [];
+  StreamSubscription<List<Map<String, dynamic>>>? _realtimeSubscription;
 
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   Map<String, dynamic>? get currentBooking => _currentBooking;
   List<dynamic> get negotiations => _negotiations;
+
+  /// Subscribe to real-time updates for any booking belonging to the logged-in client
+  void subscribeToClientBookings(String userId) {
+    debugPrint('📡 Client Subscribing to Realtime Bookings for User ID: $userId');
+    _realtimeSubscription?.cancel();
+
+    try {
+      _realtimeSubscription = Supabase.instance.client
+          .from('bookings')
+          .stream(primaryKey: ['id'])
+          .eq('user_id', userId)
+          .listen((List<Map<String, dynamic>> data) async {
+            debugPrint('⚡ Client Realtime: Received ${data.length} bookings for user $userId');
+            if (data.isNotEmpty) {
+              final activeBookings = data.where((b) {
+                final s = b['status']?.toString();
+                final addDetails = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+                final sub = addDetails?['sub_status']?.toString();
+
+                if (s == 'completed' || s == 'closed' || s == 'cancelled' || s == 'paid' ||
+                    sub == 'completed' || sub == 'closed' || sub == 'cancelled' || sub == 'paid') {
+                  return false;
+                }
+
+                return s == 'pending' ||
+                       s == 'accepted' ||
+                       s == 'confirmed' ||
+                       s == 'ongoing' ||
+                       s == 'in_progress' ||
+                       sub == 'dp_paid' ||
+                       sub == 'on_the_way' ||
+                       sub == 'arrived' ||
+                       sub == 'started' ||
+                       sub == 'ongoing';
+              }).toList();
+
+              if (activeBookings.isNotEmpty) {
+                final latestRaw = activeBookings.last;
+                final driverId = latestRaw['driver_id'];
+
+                Map<String, dynamic>? driverData;
+                if (driverId != null && driverId.toString().isNotEmpty) {
+                  try {
+                    final dbDriver = await Supabase.instance.client
+                        .from('drivers')
+                        .select('*, users(*)')
+                        .eq('id', driverId)
+                        .maybeSingle();
+                    driverData = dbDriver;
+                  } catch (e) {
+                    debugPrint('Error fetching driver details for client booking: $e');
+                  }
+                }
+
+                _currentBooking = {
+                  ...latestRaw,
+                  if (driverData != null) 'driver': driverData,
+                };
+              } else {
+                _currentBooking = null;
+              }
+              notifyListeners();
+            } else {
+              _currentBooking = null;
+              notifyListeners();
+            }
+          }, onError: (err) {
+            debugPrint('❌ Client Realtime Error: $err');
+          });
+    } catch (e) {
+      debugPrint('❌ Client Realtime Exception: $e');
+    }
+  }
+
+  void unsubscribeFromBookings() {
+    _realtimeSubscription?.cancel();
+    _realtimeSubscription = null;
+  }
+
+  @override
+  void dispose() {
+    unsubscribeFromBookings();
+    super.dispose();
+  }
 
   // 1. Create a Booking Request
   Future<Map<String, dynamic>> createBookingRequest(Map<String, dynamic> bookingData) async {
