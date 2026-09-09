@@ -231,39 +231,47 @@ class AuthProvider extends ChangeNotifier {
     final target = !_isAvailable;
     
     // Simulate updating coordinate tracking (Senayan City Mall GPS coordinates)
-    final double simLat = -6.2278; 
-    final double simLng = 106.7972;
+    const double simLat = -6.2278; 
+    const double simLng = 106.7972;
 
     try {
       final currentAuthUser = Supabase.instance.client.auth.currentUser;
       final driverId = _driverProfileData?['id'] as String? ?? _user?.id ?? currentAuthUser?.id;
+      final userId = _user?.id ?? currentAuthUser?.id;
       
+      final Map<String, dynamic> updateData = {
+        'is_available': target,
+        'status': target ? 'available' : 'offline',
+        'latitude': simLat,
+        'longitude': simLng,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
       if (driverId != null) {
         await Supabase.instance.client
             .from('drivers')
-            .update({
-              'is_available': target,
-              'status': 'approved',
-              'latitude': simLat,
-              'longitude': simLng,
-            })
+            .update(updateData)
             .or('id.eq.$driverId,user_id.eq.$driverId');
-        debugPrint("✅ Updated driver availability in Supabase: is_available = $target ($driverId)");
       }
+      if (userId != null && userId != driverId) {
+        await Supabase.instance.client
+            .from('drivers')
+            .update(updateData)
+            .eq('user_id', userId);
+      }
+      debugPrint("✅ Updated driver availability in Supabase: is_available = $target ($driverId)");
     } catch (e) {
       debugPrint("⚠️ Error updating driver availability in Supabase: $e");
     }
 
-    final result = await _authService.updateStatus(target, lat: simLat, lng: simLng);
-    if (result['success'] == true) {
-      _isAvailable = target;
-      notifyListeners();
-      return true;
-    } else {
-      _errorMessage = result['message'];
-      notifyListeners();
-      return false;
+    await _authService.updateStatus(target, lat: simLat, lng: simLng);
+    _isAvailable = target;
+    if (_driverProfileData != null) {
+      _driverProfileData!['is_available'] = target;
+      _driverProfileData!['status'] = target ? 'available' : 'offline';
     }
+    notifyListeners();
+    return true;
   }
 
   // Helper to upload any image file to Supabase Storage

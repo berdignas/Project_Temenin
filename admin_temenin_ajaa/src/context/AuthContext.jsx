@@ -1,27 +1,37 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { adminApi } from '../services/api';
 
 const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
   const [admin, setAdmin] = useState(() => {
     const saved = localStorage.getItem('admin_user');
-    return saved ? JSON.parse(saved) : { name: 'Super Admin', email: 'admin@temenin.aja', role: 'Super Admin' };
+    return saved ? JSON.parse(saved) : null;
   });
 
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     return !!localStorage.getItem('admin_token');
   });
 
-  const login = (email, password) => {
-    if (email === 'admin@temenin.aja' && password === 'admin123') {
-      const user = { name: 'Super Admin', email, role: 'Super Admin' };
-      localStorage.setItem('admin_token', 'token_admin_temenin_ajaa_secret');
-      localStorage.setItem('admin_user', JSON.stringify(user));
-      setAdmin(user);
-      setIsAuthenticated(true);
-      return true;
+  const login = async (email, password) => {
+    try {
+      const response = await adminApi.login(email, password);
+      if (response && response.success && response.data) {
+        const { user, token } = response.data;
+        if (user.role !== 'admin') {
+          throw new Error('Akun tidak memiliki hak akses administrator');
+        }
+        localStorage.setItem('admin_token', token);
+        localStorage.setItem('admin_user', JSON.stringify(user));
+        setAdmin(user);
+        setIsAuthenticated(true);
+        return { success: true };
+      }
+      return { success: false, message: response?.message || 'Login gagal' };
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || err.message || 'Login gagal';
+      return { success: false, message: errorMsg };
     }
-    return false;
   };
 
   const logout = () => {

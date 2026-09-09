@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/services/booking_service.dart';
 import '../data/models/booking_model.dart';
+import '../core/services/notification_sound_service.dart';
+import '../data/models/driver_notification_model.dart';
 import 'auth_provider.dart';
 
 class BookingProvider extends ChangeNotifier {
@@ -12,6 +14,11 @@ class BookingProvider extends ChangeNotifier {
   BookingModel? _activeBooking;
   BookingModel? _incomingBooking;
   
+  // In-app Notifications state
+  final List<DriverNotificationModel> _notifications = [];
+  DriverNotificationModel? _activeBannerNotification;
+  final Set<String> _seenBookingIds = {};
+  
   bool _isLoading = false;
   String? _errorMessage;
   
@@ -20,8 +27,6 @@ class BookingProvider extends ChangeNotifier {
   int _totalRides = 0;
   List<dynamic> _earningsBookings = [];
   
-
-  
   // Realtime subscription & Polling
   StreamSubscription<List<Map<String, dynamic>>>? _realtimeSubscription;
   Timer? _pollingTimer;
@@ -29,6 +34,10 @@ class BookingProvider extends ChangeNotifier {
   List<BookingModel> get bookings => _bookings;
   BookingModel? get activeBooking => _activeBooking;
   BookingModel? get incomingBooking => _incomingBooking;
+  List<DriverNotificationModel> get notifications => List.unmodifiable(_notifications);
+  DriverNotificationModel? get activeBannerNotification => _activeBannerNotification;
+  int get unreadNotificationsCount => _notifications.where((n) => !n.isRead).length;
+
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   
@@ -36,9 +45,35 @@ class BookingProvider extends ChangeNotifier {
   int get totalRides => _totalRides;
   List<dynamic> get earningsBookings => _earningsBookings;
 
+  // Dismiss top floating banner
+  void dismissBannerNotification() {
+    _activeBannerNotification = null;
+    NotificationSoundService().stopSound();
+    notifyListeners();
+  }
+
+  // Mark notification as read
+  void markNotificationAsRead(String id) {
+    final idx = _notifications.indexWhere((n) => n.id == id);
+    if (idx != -1) {
+      _notifications[idx].isRead = true;
+      notifyListeners();
+    }
+  }
+
+  // Mark all notifications as read
+  void markAllNotificationsAsRead() {
+    for (var n in _notifications) {
+      n.isRead = true;
+    }
+    notifyListeners();
+  }
+
   // Clear current incoming request
   void clearIncomingRequest() {
     _incomingBooking = null;
+    _activeBannerNotification = null;
+    NotificationSoundService().stopSound();
     notifyListeners();
   }
 
@@ -157,6 +192,31 @@ class BookingProvider extends ChangeNotifier {
         }));
       }
       _pendingOffers = offers;
+      
+      // Check for brand new incoming offers to ring notification sound and show banner
+      for (final offer in offers) {
+        final bId = offer.id.toString();
+        if (!_seenBookingIds.contains(bId)) {
+          _seenBookingIds.add(bId);
+          
+          final clientName = offer.client?.fullName ?? 'Pelanggan';
+          final notif = DriverNotificationModel(
+            id: 'notif-$bId-${DateTime.now().millisecondsSinceEpoch}',
+            title: '🔔 Pesanan Baru Masuk!',
+            message: '$clientName memesan pendampingan (${offer.duration} Jam) • Rp ${offer.totalPrice.toStringAsFixed(0)}',
+            timestamp: DateTime.now(),
+            type: NotificationType.newOrder,
+            booking: offer,
+            isRead: false,
+          );
+          _notifications.insert(0, notif);
+          _activeBannerNotification = notif;
+          
+          // Play loud ringtone / notification sound
+          NotificationSoundService().playOrderAlert();
+        }
+      }
+
       final directTargetOffer = offers.where((offer) {
         final dId = offer.driverId?.toString();
         return dId != null && _associatedDriverIds.contains(dId);

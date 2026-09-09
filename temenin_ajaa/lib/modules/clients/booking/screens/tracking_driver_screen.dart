@@ -2037,14 +2037,51 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                 width: double.infinity,
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Terima kasih atas ulasan Anda! Poin loyalitas Anda bertambah.")),
-                    );
-                    try {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    } catch (_) {
-                      Navigator.pop(context);
+                  onPressed: () async {
+                    final bookingId = widget.bookingId ?? widget.bookingData?['id']?.toString() ?? '';
+                    if (bookingId.isNotEmpty) {
+                      try {
+                        final user = Supabase.instance.client.auth.currentUser;
+                        final driverId = widget.bookingData?['driver_id']?.toString();
+                        if (user != null && driverId != null) {
+                          await Supabase.instance.client.from('reviews').insert({
+                            'booking_id': bookingId,
+                            'user_id': user.id,
+                            'driver_id': driverId,
+                            'rating': _userRating,
+                            'comment': _reviewController.text.trim(),
+                          });
+
+                          // Recalculate average rating for the driver
+                          final allReviews = await Supabase.instance.client
+                              .from('reviews')
+                              .select('rating')
+                              .eq('driver_id', driverId);
+
+                          if (allReviews is List && allReviews.isNotEmpty) {
+                            final sum = allReviews.fold<double>(
+                                0.0, (acc, r) => acc + (double.tryParse(r['rating']?.toString() ?? '5') ?? 5.0));
+                            final avg = (sum / allReviews.length).clamp(1.0, 5.0);
+                            await Supabase.instance.client
+                                .from('drivers')
+                                .update({'rating': double.parse(avg.toStringAsFixed(1))})
+                                .eq('id', driverId);
+                          }
+                        }
+                      } catch (e) {
+                        debugPrint('Notice on review submission: $e');
+                      }
+                    }
+
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Terima kasih atas ulasan Anda! Poin loyalitas Anda bertambah.")),
+                      );
+                      try {
+                        Navigator.of(context).popUntil((route) => route.isFirst);
+                      } catch (_) {
+                        Navigator.pop(context);
+                      }
                     }
                   },
                   style: ElevatedButton.styleFrom(

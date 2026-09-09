@@ -7,7 +7,10 @@ const {
   placeNegotiation,
   getBookingNegotiations,
   acceptNegotiation,
-  updateBookingStatus
+  updateBookingStatus,
+  createBookingReview,
+  getBookingReviews,
+  sendChatMessage
 } = require('../controllers/bookingController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -30,5 +33,13 @@ router.route('/:bookingId/negotiations')
 router.post('/:bookingId/negotiations/:negotiationId/accept', acceptNegotiation); // Client accepts a driver's negotiation price
 router.put('/:bookingId/status', updateBookingStatus);                           // Client/Driver updates ongoing status
 router.patch('/:bookingId/status', updateBookingStatus);
+
+// Reviews & Ratings
+router.route('/:bookingId/reviews')
+  .post(createBookingReview)
+  .get(getBookingReviews);
+
+// Chat messages
+router.post('/:bookingId/messages', sendChatMessage);
 
 module.exports = router;

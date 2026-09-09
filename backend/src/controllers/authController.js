@@ -2,6 +2,7 @@
 const { supabase, supabaseAdmin } = require('../config/supabase');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 
 const register = async (req, res) => {
   try {
@@ -333,17 +334,6 @@ const login = async (req, res) => {
       try {
         isPasswordValid = await bcrypt.compare(password, user.password_hash);
       } catch (_) {}
-
-      if (!isPasswordValid && password === user.password_hash) {
-        isPasswordValid = true;
-        try {
-          const salt = await bcrypt.genSalt(10);
-          const hashed = await bcrypt.hash(password, salt);
-          await supabaseAdmin.from('users').update({ password_hash: hashed }).eq('id', user.id);
-        } catch (hErr) {
-          console.error('Failed re-hashing password:', hErr);
-        }
-      }
     }
     console.log('🔑 Password valid:', isPasswordValid);
 
@@ -478,9 +468,8 @@ const sendOtp = async (req, res) => {
 
     const cleanPhone = phone.trim();
     
-    // Generate 6 digit OTP acak secara dinamis (Mocking tanpa Twilio)
-    // Akan menghasilkan angka acak antara 100000 hingga 999999
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate 6 digit OTP acak yang aman secara kriptografi
+    const otpCode = crypto.randomInt(100000, 1000000).toString();
     
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 5); // 5 menit kedaluwarsa

@@ -304,13 +304,25 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
                     itemBuilder: (context, index) {
                       final booking = bookingProvider.earningsBookings[index];
                       final price = (booking['total_price'] ?? 0.0).toDouble();
-                      final dateStr = booking['created_at'] != null
-                          ? DateTime.parse(booking['created_at']).toLocal().toString().substring(0, 10)
-                          : 'Baru saja';
+                      String dateStr = 'Baru saja';
+                      if (booking['created_at'] != null) {
+                        try {
+                          final dt = DateTime.parse(booking['created_at']).toLocal();
+                          const dayNames = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+                          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+                          final dayName = dayNames[(dt.weekday - 1) % 7];
+                          final monthName = monthNames[(dt.month - 1) % 12];
+                          final hour = dt.hour.toString().padLeft(2, '0');
+                          final minute = dt.minute.toString().padLeft(2, '0');
+                          dateStr = '$dayName, ${dt.day} $monthName • $hour:$minute WIB';
+                        } catch (_) {
+                          dateStr = booking['created_at'].toString().split('T')[0];
+                        }
+                      }
 
                       return _buildTripHistoryCard(
                         icon: Icons.directions_car_rounded,
-                        title: booking['pickup_location'] ?? "Layanan Antar Jemput",
+                        title: booking['pickup_location'] ?? "Layanan Temenin",
                         subtitle: "Selesai • $dateStr",
                         price: formatCurrency(price),
                       );
@@ -330,32 +342,47 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
   Widget _buildEmptyStateWithMockHistory() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 24),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(color: AppTheme.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          )
+        ],
       ),
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: AppTheme.cardDeep,
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primaryPink.withOpacity(0.18),
+                  const Color(0xFF8B5CF6).withOpacity(0.12),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
               shape: BoxShape.circle,
+              border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
             ),
-            child: const Icon(Icons.account_balance_wallet_outlined, color: AppTheme.textMuted, size: 36),
+            child: const Icon(Icons.account_balance_wallet_outlined, color: AppTheme.primaryPink, size: 40),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Text(
-            "Belum Ada Riwayat Perjalanan Selesai",
-            style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
+            "Belum Ada Riwayat Pendapatan",
+            style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 16, fontWeight: FontWeight.w800),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            "Setiap pesanan yang diselesaikan akan tercatat di sini secara otomatis.",
+            "Setiap pesanan yang diselesaikan akan otomatis tercatat bersama detail komisi dan tanggal transaksi.",
             textAlign: TextAlign.center,
-            style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+            style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12, height: 1.4),
           ),
         ],
       ),

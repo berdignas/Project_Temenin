@@ -1,4 +1,4 @@
-// lib/modules/chat/screens/chat_list_screen.dart
+// lib/modules/clients/chat/screens/chat_list_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -21,11 +21,17 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
 
   List<Map<String, dynamic>> _liveChats = [];
   bool _isLoadingLive = false;
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.trim().toLowerCase();
+      });
+    });
     _loadLiveChats();
   }
 
@@ -40,8 +46,8 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
         query = query.eq('user_id', userId);
       }
       
-      final data = await query.order('created_at', ascending: false).limit(10);
-      if (data is List && data.isNotEmpty) {
+      final data = await query.order('created_at', ascending: false).limit(15);
+      if (data.isNotEmpty) {
         final List<Map<String, dynamic>> loaded = [];
         for (final b in data) {
           final details = b['additional_details'] as Map<String, dynamic>?;
@@ -49,6 +55,7 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
               ?.map((m) => Map<String, dynamic>.from(m as Map))
               .toList() ?? [];
           
+          if (!mounted) return;
           final driverProv = Provider.of<DriverProvider>(context, listen: false);
           final dId = b['driver_id']?.toString() ?? details?['driver_id']?.toString();
           Map<String, dynamic>? currentDriver;
@@ -61,6 +68,9 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
           final driverImage = currentDriver?['image'] ?? details?['driverImage'] ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80';
           final lastMsg = msgs.isNotEmpty ? msgs.last['text']?.toString() ?? 'Mulai percakapan...' : 'Pesanan baru aktif';
           final lastTime = msgs.isNotEmpty ? msgs.last['time']?.toString() ?? 'Baru saja' : 'Baru saja';
+          final bookingStatus = b['status']?.toString() ?? 'ongoing';
+          final serviceType = b['service_type']?.toString().toLowerCase() ?? 'driver';
+          final isCompanion = serviceType.contains('companion') || serviceType.contains('teman');
           
           loaded.add({
             'id': b['id'].toString(),
@@ -69,10 +79,11 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
             'image': driverImage,
             'lastMessage': lastMsg,
             'time': lastTime,
-            'unread': 0,
+            'unread': msgs.isEmpty ? 1 : 0,
             'isOnline': true,
-            'tag': 'Driver',
-            'category': 'driver',
+            'tag': isCompanion ? 'Companion' : 'Driver',
+            'category': isCompanion ? 'companion' : 'driver',
+            'status': bookingStatus,
           });
         }
         if (mounted) {
@@ -109,9 +120,9 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: _buildSearchBar(),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             _buildOnlineStories(),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             _buildTabBar(),
             Expanded(
               child: TabBarView(
@@ -126,17 +137,30 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
+      floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Mulai pesan baru dari daftar kontak / partner."),
-              backgroundColor: AppTheme.primaryPink,
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.support_agent_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Text("Bantuan CS 24/7 Temenin Aja siap membantu.", style: GoogleFonts.inter(fontSize: 12.5)),
+                ],
+              ),
+              backgroundColor: AppTheme.surface,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: AppTheme.primaryPink)),
             ),
           );
         },
         backgroundColor: AppTheme.primaryPink,
-        child: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white),
+        elevation: 4,
+        icon: const Icon(Icons.headset_mic_rounded, color: Colors.white, size: 20),
+        label: Text(
+          "Bantuan",
+          style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+        ),
       ),
     );
   }
@@ -146,30 +170,60 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
     final avatar = auth.user?.avatarUrl ?? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 15, 20, 10),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            "Pesan",
-            style: GoogleFonts.inter(
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              color: AppTheme.textHighContrast,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Pesan & Aktivitas",
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textHighContrast,
+                  letterSpacing: -0.5,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                "Hubungi mitra & teman perjalanan Anda",
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: AppTheme.textMuted,
+                ),
+              ),
+            ],
           ),
-          Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              color: AppTheme.fuchsiaLight,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3), width: 1.5),
-            ),
-            child: CircleAvatar(
-              radius: 18,
-              backgroundColor: AppTheme.surface,
-              backgroundImage: NetworkImage(avatar),
-            ),
+          Stack(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  shape: BoxShape.circle,
+                ),
+                child: CircleAvatar(
+                  radius: 19,
+                  backgroundColor: AppTheme.surface,
+                  backgroundImage: NetworkImage(avatar),
+                ),
+              ),
+              Positioned(
+                right: 0,
+                top: 0,
+                child: Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryPink,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppTheme.background, width: 2),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -183,18 +237,25 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
+        border: Border.all(color: _searchQuery.isNotEmpty ? AppTheme.primaryPink : AppTheme.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          const Icon(Icons.search_rounded, color: AppTheme.textMuted, size: 22),
+          const Icon(Icons.search_rounded, color: AppTheme.primaryPink, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: TextField(
               controller: _searchController,
               style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13),
               decoration: InputDecoration(
-                hintText: "Cari percakapan...",
+                hintText: "Cari nama driver, teman, atau pesan...",
                 hintStyle: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13),
                 border: InputBorder.none,
                 enabledBorder: InputBorder.none,
@@ -205,26 +266,51 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
               ),
             ),
           ),
+          if (_searchQuery.isNotEmpty)
+            GestureDetector(
+              onTap: () {
+                _searchController.clear();
+              },
+              child: const Icon(Icons.cancel_rounded, color: AppTheme.textMuted, size: 18),
+            ),
         ],
       ),
     );
   }
 
   Widget _buildOnlineStories() {
-    final users = [
-      {'name': 'Saya', 'img': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80', 'isMe': true},
+    final driverProv = Provider.of<DriverProvider>(context, listen: false);
+    final drivers = driverProv.drivers;
+
+    // List of active companions / drivers
+    final List<Map<String, dynamic>> stories = [
+      {'name': 'Saya', 'img': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80', 'isMe': true, 'role': 'Akun'},
+      if (drivers.isNotEmpty)
+        ...drivers.take(6).map((d) => {
+          'name': (d['name']?.toString() ?? 'Partner').split(' ').first,
+          'img': d['image']?.toString() ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
+          'isMe': false,
+          'role': d['role'] ?? 'Driver',
+        })
+      else ...[
+        {'name': 'Budi', 'img': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80', 'isMe': false, 'role': 'Driver'},
+        {'name': 'Sarah', 'img': 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80', 'isMe': false, 'role': 'Teman'},
+        {'name': 'Dimas', 'img': 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80', 'isMe': false, 'role': 'Driver'},
+      ]
     ];
 
     return SizedBox(
-      height: 90,
+      height: 94,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: users.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 14),
+        itemCount: stories.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
         itemBuilder: (context, index) {
-          final user = users[index];
+          final user = stories[index];
+          final isMe = user['isMe'] == true;
+
           return Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -234,32 +320,40 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
                     padding: const EdgeInsets.all(2.5),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: user['isMe'] == false 
-                          ? Border.all(color: AppTheme.primaryPink, width: 2)
-                          : Border.all(color: AppTheme.border, width: 2),
+                      gradient: !isMe ? AppTheme.primaryGradient : null,
+                      border: isMe ? Border.all(color: AppTheme.border, width: 2) : null,
                     ),
                     child: CircleAvatar(
-                      radius: 26,
-                      backgroundColor: AppTheme.surface,
+                      radius: 25,
+                      backgroundColor: AppTheme.cardDeep,
                       backgroundImage: NetworkImage(user['img'] as String),
                     ),
                   ),
-                  if (user['isMe'] == true)
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(
+                        color: AppTheme.background,
+                        shape: BoxShape.circle,
+                      ),
                       child: Container(
-                        padding: const EdgeInsets.all(3),
-                        decoration: const BoxDecoration(
-                          color: AppTheme.primaryPink,
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: isMe ? AppTheme.primaryPink : AppTheme.success,
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.add_rounded, color: Colors.white, size: 12),
+                        child: isMe 
+                            ? const Icon(Icons.add_rounded, color: Colors.white, size: 8)
+                            : null,
                       ),
                     ),
+                  ),
                 ],
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 5),
               Text(
                 user['name'] as String,
                 style: GoogleFonts.inter(
@@ -267,6 +361,8 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
                 ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ],
           );
@@ -278,21 +374,30 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
   Widget _buildTabBar() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-      height: 38,
+      height: 40,
       decoration: BoxDecoration(
         color: AppTheme.cardDeep,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
       ),
       child: TabBar(
         controller: _tabController,
         indicator: BoxDecoration(
           color: AppTheme.primaryPink,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: AppTheme.primaryPink.withOpacity(0.3),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
+        indicatorSize: TabBarIndicatorSize.tab,
+        dividerColor: Colors.transparent,
         labelColor: Colors.white,
         unselectedLabelColor: AppTheme.textMuted,
-        labelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12),
-        unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.normal, fontSize: 12),
+        labelStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 12),
+        unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 12),
         tabs: const [
           Tab(text: "Semua"),
           Tab(text: "Companion"),
@@ -303,24 +408,61 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
   }
 
   Widget _buildChatList(String category) {
-    final allList = [..._liveChats];
-    final filteredChats = allList.where((chat) {
-      if (category == 'all') return true;
-      return chat['category'] == category;
+    if (_isLoadingLive) {
+      return const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryPink),
+        ),
+      );
+    }
+
+    final filteredChats = _liveChats.where((chat) {
+      final matchesCategory = category == 'all' || chat['category'] == category;
+      if (!matchesCategory) return false;
+
+      if (_searchQuery.isEmpty) return true;
+      final name = chat['name']?.toString().toLowerCase() ?? '';
+      final lastMsg = chat['lastMessage']?.toString().toLowerCase() ?? '';
+      return name.contains(_searchQuery) || lastMsg.contains(_searchQuery);
     }).toList();
 
     if (filteredChats.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.chat_bubble_outline_rounded, size: 48, color: AppTheme.textMuted),
-            const SizedBox(height: 12),
-            Text(
-              "Belum ada pesan pada kategori ini",
-              style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(32.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppTheme.surface,
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: const Icon(Icons.chat_bubble_outline_rounded, size: 28, color: AppTheme.textMuted),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                _searchQuery.isNotEmpty 
+                    ? "Tidak ditemukan percakapan '$_searchQuery'"
+                    : "Belum ada riwayat percakapan",
+                style: GoogleFonts.plusJakartaSans(
+                  color: AppTheme.textHighContrast,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                "Saat Anda memesan driver atau teman jalan, ruang obrolan akan muncul otomatis di sini.",
+                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12, height: 1.4),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -342,107 +484,170 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
 
   Widget _buildChatTile(Map<String, dynamic> chat) {
     final hasUnread = (chat['unread'] as int) > 0;
+    final tag = chat['tag']?.toString() ?? 'Partner';
+    final isCompanion = tag == 'Companion';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.border),
+        color: hasUnread ? AppTheme.cardDeep.withOpacity(0.9) : AppTheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: hasUnread ? AppTheme.primaryPink.withOpacity(0.4) : AppTheme.border,
+          width: hasUnread ? 1.2 : 1.0,
+        ),
+        boxShadow: [
+          if (hasUnread)
+            BoxShadow(
+              color: AppTheme.primaryPink.withOpacity(0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+        ],
       ),
-      child: ListTile(
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ChatRoomScreen(
-                bookingId: chat['bookingId'] ?? chat['id'],
-                recipientName: chat['name'],
-                recipientImage: chat['image'],
-                status: chat['isOnline'] ? "Online" : "Offline",
-                tag: chat['tag'],
-              ),
-            ),
-          ).then((_) => _loadLiveChats());
-        },
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: Stack(
-          children: [
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: AppTheme.cardDeep,
-              backgroundImage: NetworkImage(chat['image']),
-            ),
-            if (chat['isOnline'] == true)
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: AppTheme.success,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppTheme.surface, width: 2),
-                  ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatRoomScreen(
+                  bookingId: chat['bookingId'] ?? chat['id'],
+                  recipientName: chat['name'],
+                  recipientImage: chat['image'],
+                  status: chat['isOnline'] ? "Online" : "Offline",
+                  tag: tag,
                 ),
               ),
-          ],
-        ),
-        title: Row(
-          children: [
-            Expanded(
-              child: Text(
-                chat['name'],
-                style: GoogleFonts.inter(
-                  color: AppTheme.textHighContrast,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
+            ).then((_) => _loadLiveChats());
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(14.0),
+            child: Row(
+              children: [
+                // Avatar with Live Status
+                Stack(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(1.5),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: hasUnread ? AppTheme.primaryPink : AppTheme.border,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: CircleAvatar(
+                        radius: 24,
+                        backgroundColor: AppTheme.cardDeep,
+                        backgroundImage: NetworkImage(chat['image']),
+                      ),
+                    ),
+                    if (chat['isOnline'] == true)
+                      Positioned(
+                        right: 2,
+                        bottom: 2,
+                        child: Container(
+                          width: 11,
+                          height: 11,
+                          decoration: BoxDecoration(
+                            color: AppTheme.success,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppTheme.surface, width: 2),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+                const SizedBox(width: 14),
+
+                // Name & Message Content
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                chat['name'],
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: AppTheme.textHighContrast,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14.5,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isCompanion 
+                                      ? const Color(0xFF6366F1).withOpacity(0.15) 
+                                      : AppTheme.primaryPink.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  tag,
+                                  style: TextStyle(
+                                    color: isCompanion ? const Color(0xFF818CF8) : AppTheme.primaryPink,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            chat['time'],
+                            style: GoogleFonts.inter(
+                              color: hasUnread ? AppTheme.primaryPink : AppTheme.textMuted,
+                              fontSize: 11,
+                              fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              chat['lastMessage'],
+                              style: GoogleFonts.inter(
+                                color: hasUnread ? AppTheme.textHighContrast : AppTheme.textMuted,
+                                fontSize: 12.5,
+                                fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w400,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (hasUnread)
+                            Container(
+                              margin: const EdgeInsets.only(left: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: const BoxDecoration(
+                                color: AppTheme.primaryPink,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Text(
+                                chat['unread'].toString(),
+                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-            Text(
-              chat['time'],
-              style: GoogleFonts.inter(
-                color: hasUnread ? AppTheme.primaryPink : AppTheme.textMuted,
-                fontSize: 11,
-                fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4.0),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  chat['lastMessage'],
-                  style: GoogleFonts.inter(
-                    color: hasUnread ? AppTheme.textHighContrast : AppTheme.textMuted,
-                    fontSize: 12,
-                    fontWeight: hasUnread ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (hasUnread)
-                Container(
-                  margin: const EdgeInsets.only(left: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: const BoxDecoration(
-                    color: AppTheme.primaryPink,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Text(
-                    chat['unread'].toString(),
-                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                  ),
-                ),
-            ],
           ),
         ),
       ),

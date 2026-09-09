@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:temenin_ajaa/core/constants/api_constants.dart';
 import 'package:temenin_ajaa/modules/clients/pages/rewards_page.dart';
 
-const String BASE_URL = ApiConstants.baseUrl;
+String get BASE_URL => ApiConstants.baseUrl;
 
 class RewardService {
   Future<Map<String, dynamic>> getRewards(String userId) async {

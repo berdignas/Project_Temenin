@@ -1,8 +1,13 @@
 // lib/modules/booking/screens/booking_confirmation_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
+import 'package:temenin_ajaa/providers/auth_provider.dart';
+import 'dart:math';
 import 'payment_method_screen.dart';
+import 'tracking_driver_screen.dart';
 
 class BookingConfirmationScreen extends StatelessWidget {
   final Map<String, dynamic>? bookingData;
@@ -547,13 +552,112 @@ class BookingConfirmationScreen extends StatelessWidget {
             ],
           ),
           child: ElevatedButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => PaymentMethodScreen(bookingData: bookingData),
-                ),
+            onPressed: () async {
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primaryPink)),
               );
+
+              final authProvider = Provider.of<AuthProvider>(context, listen: false);
+              final userId = authProvider.user?.id;
+              final bookingDetails = Map<String, dynamic>.from(bookingData ?? {});
+              if (bookingDetails['otp'] == null) {
+                final random = Random();
+                bookingDetails['otp'] = (random.nextInt(9000) + 1000).toString();
+              }
+
+              String? bookingId;
+              try {
+                if (userId != null) {
+                  String? driverId = bookingDetails['driverId'] ?? 
+                                     bookingDetails['partnerId'] ?? 
+                                     bookingDetails['selectedPartner']?['id'] ??
+                                     bookingDetails['partner']?['id'];
+
+                  if (driverId == null || driverId.isEmpty || driverId.startsWith('mock') || driverId.startsWith('drv-') || driverId.startsWith('d1')) {
+                    try {
+                      final onlineDriver = await Supabase.instance.client
+                          .from('drivers')
+                          .select('id')
+                          .eq('is_available', true)
+                          .limit(1)
+                          .maybeSingle();
+                      if (onlineDriver != null && onlineDriver['id'] != null) {
+                        driverId = onlineDriver['id'].toString();
+                      } else {
+                        final approvedDriver = await Supabase.instance.client
+                            .from('drivers')
+                            .select('id')
+                            .limit(1)
+                            .maybeSingle();
+                        if (approvedDriver != null && approvedDriver['id'] != null) {
+                          driverId = approvedDriver['id'].toString();
+                        }
+                      }
+                    } catch (e) {
+                      debugPrint("Error fetching approved driver: $e");
+                    }
+                  }
+
+                  String? validDriverId;
+                  if (driverId != null && !driverId.startsWith('mock') && !driverId.startsWith('drv-') && !driverId.startsWith('d1')) {
+                    validDriverId = driverId;
+                  }
+
+                  bookingDetails['driverId'] = driverId;
+                  final totalPriceVal = bookingDetails['totalPrice'] ?? bookingDetails['price'] ?? bookingDetails['totalPayment'] ?? 130000;
+                  final numPrice = totalPriceVal is num ? totalPriceVal.toDouble() : (double.tryParse(totalPriceVal.toString()) ?? 130000.0);
+
+                  final insertPayload = <String, dynamic>{
+                    'user_id': userId,
+                    'status': 'pending',
+                    'pickup_location': bookingDetails['pickup'] ?? bookingDetails['location'] ?? 'Lokasi Penjemputan',
+                    'dropoff_location': bookingDetails['destination'] ?? bookingDetails['location'] ?? 'Tujuan',
+                    'total_price': numPrice,
+                    'additional_details': bookingDetails,
+                  };
+                  if (validDriverId != null && validDriverId.isNotEmpty) {
+                    insertPayload['driver_id'] = validDriverId;
+                  }
+
+                  try {
+                    final response = await Supabase.instance.client
+                        .from('bookings')
+                        .insert(insertPayload)
+                        .select('id')
+                        .single();
+                    bookingId = response['id']?.toString();
+                    debugPrint("✅ Booking created successfully in Supabase ID: $bookingId");
+                  } catch (err) {
+                    debugPrint("⚠️ First insert attempt failed: $err. Retrying without driver_id...");
+                    insertPayload.remove('driver_id');
+                    final response = await Supabase.instance.client
+                        .from('bookings')
+                        .insert(insertPayload)
+                        .select('id')
+                        .single();
+                    bookingId = response['id']?.toString();
+                    debugPrint("✅ Booking fallback created successfully in Supabase ID: $bookingId");
+                  }
+                }
+              } catch (e) {
+                debugPrint("❌ Failed saving pending booking to Supabase: $e");
+              }
+
+              if (context.mounted) {
+                Navigator.pop(context); // close loading
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => TrackingDriverScreen(
+                      bookingData: bookingDetails,
+                      bookingId: bookingId,
+                    ),
+                  ),
+                  (route) => false,
+                );
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.transparent,
@@ -561,7 +665,7 @@ class BookingConfirmationScreen extends StatelessWidget {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))
             ),
             child: const Text(
-              "Konfirmasi & Bayar DP",
+              "Kirim Request ke Driver",
               style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)
             ),
           ),

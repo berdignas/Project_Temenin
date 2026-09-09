@@ -200,7 +200,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     await prefs.setString('userRole', 'user');
                     
                     final user = authProvider.user;
-                    if (user != null && (user.email == null || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
+                    if (user != null && (user.email == null || user.email!.trim().isEmpty || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
                       Navigator.pushReplacement(
                         context,
                         MaterialPageRoute(builder: (context) => const SetupAccountScreen()),
@@ -262,9 +262,20 @@ class _LoginScreenState extends State<LoginScreen> {
             );
           }
         } else {
-          setState(() {
-            _loginError = authProvider.errorMessage ?? 'Gagal masuk. Silakan periksa kembali email dan kata sandi Anda.';
-          });
+          if (mounted) {
+            final err = authProvider.errorMessage ?? 'Email atau kata sandi Anda salah.';
+            setState(() {
+              _loginError = err;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(err),
+                backgroundColor: Colors.redAccent,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
         }
       }
     } catch (e) {

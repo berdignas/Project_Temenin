@@ -1,9 +1,14 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class ApiConstants {
-  static const String baseUrl = kIsWeb ? 'http://127.0.0.1:3002' : 'http://192.168.1.3:3002';
-
-  
+  static String get baseUrl {
+    if (kIsWeb) {
+      final host = Uri.base.host.isEmpty ? '127.0.0.1' : Uri.base.host;
+      return 'http://$host:3002';
+    }
+    return dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:3002';
+  }
   // Auth Endpoints
   static const String login = '/api/auth/login';
   static const String register = '/api/auth/register';
@@ -75,11 +80,11 @@ class ApiConstants {
   static const String deleteNotification = '/api/notifications/delete';
   static const String notificationSettings = '/api/notifications/settings';
 
-  static const String driverRegister = '$baseUrl/api/drivers/register';
-  static const String driverProfile = '$baseUrl/api/drivers/profile';
-  static const String driverStatus = '$baseUrl/api/drivers/status';
-  static const String driverBookings = '$baseUrl/api/drivers/bookings';
-  static const String driverEarnings = '$baseUrl/api/drivers/earnings';
+  static String get driverRegister => '$baseUrl/api/drivers/register';
+  static String get driverProfile => '$baseUrl/api/drivers/profile';
+  static String get driverStatus => '$baseUrl/api/drivers/status';
+  static String get driverBookings => '$baseUrl/api/drivers/bookings';
+  static String get driverEarnings => '$baseUrl/api/drivers/earnings';
   
   // Headers
   static const String contentType = 'application/json';

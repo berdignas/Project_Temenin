@@ -74,79 +74,6 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
     }
   }
 
-  List<BookingModel> _getRichMockBookings() {
-    return [
-      BookingModel(
-        id: 'BKG-9842',
-        userId: 'usr-1',
-        driverId: 'drv-1',
-        status: 'Ongoing',
-        pickupLocation: 'Senayan City Mall (Lobby South)',
-        dropoffLocation: 'Cafe Batavia, Kota Tua',
-        totalPrice: 150000,
-        bookingDate: DateTime.now().subtract(const Duration(minutes: 30)),
-        driver: DriverModel(
-          vehicleName: 'Sarah Jessica',
-          vehicleType: 'Hangout & Sesi Curhat',
-          plateNumber: 'B 1982 NOAH',
-          pricePerHour: 150000,
-          rating: 4.9,
-        ),
-      ),
-      BookingModel(
-        id: 'BKG-8712',
-        userId: 'usr-1',
-        driverId: 'drv-2',
-        status: 'Completed',
-        pickupLocation: 'Pondok Indah Mall 2',
-        dropoffLocation: 'BSD Breeze Food Court',
-        totalPrice: 175000,
-        bookingDate: DateTime.now().subtract(const Duration(days: 1, hours: 2)),
-        driver: DriverModel(
-          vehicleName: 'Rayhan Putra',
-          vehicleType: 'Ride & City Tour Vespa',
-          plateNumber: 'B 1234 XY',
-          pricePerHour: 175000,
-          rating: 4.8,
-        ),
-      ),
-      BookingModel(
-        id: 'BKG-5431',
-        userId: 'usr-1',
-        driverId: 'drv-3',
-        status: 'Completed',
-        pickupLocation: 'Semanang Park',
-        dropoffLocation: 'Gunung Gede Nature Reserve',
-        totalPrice: 200000,
-        bookingDate: DateTime.now().subtract(const Duration(days: 3)),
-        driver: DriverModel(
-          vehicleName: 'Dimas Setiawan',
-          vehicleType: 'Hiking Companion',
-          plateNumber: 'B 8888 DM',
-          pricePerHour: 200000,
-          rating: 5.0,
-        ),
-      ),
-      BookingModel(
-        id: 'BKG-3129',
-        userId: 'usr-1',
-        driverId: 'drv-4',
-        status: 'Cancelled',
-        pickupLocation: 'Online Voice Call',
-        dropoffLocation: '-',
-        totalPrice: 120000,
-        bookingDate: DateTime.now().subtract(const Duration(days: 5)),
-        driver: DriverModel(
-          vehicleName: 'Amanda Wijaya',
-          vehicleType: 'Counseling & Discussion',
-          plateNumber: '-',
-          pricePerHour: 120000,
-          rating: 4.7,
-        ),
-      ),
-    ];
-  }
-
   List<BookingModel> get _filteredBookings {
     List<BookingModel> filtered = _bookings;
     if (_selectedFilter != 'All') {
@@ -307,22 +234,89 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                         )
                       : _filteredBookings.isEmpty
                           ? Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.history_rounded,
-                                    size: 80,
-                                    color: AppTheme.textMuted.withOpacity(0.4),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'Tidak ada riwayat booking',
-                                    style: GoogleFonts.inter(
-                                      color: AppTheme.textMuted,
+                              child: SingleChildScrollView(
+                                physics: const BouncingScrollPhysics(),
+                                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(24),
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            AppTheme.primaryPink.withOpacity(0.18),
+                                            AppTheme.fuchsiaLight.withOpacity(0.08),
+                                          ],
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                        ),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: AppTheme.primaryPink.withOpacity(0.3),
+                                          width: 1.5,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: AppTheme.primaryPink.withOpacity(0.15),
+                                            blurRadius: 20,
+                                            offset: const Offset(0, 8),
+                                          )
+                                        ],
+                                      ),
+                                      child: const Icon(
+                                        Icons.receipt_long_rounded,
+                                        size: 56,
+                                        color: AppTheme.primaryPink,
+                                      ),
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 20),
+                                    Text(
+                                      'Belum Ada Pesanan',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        color: AppTheme.textHighContrast,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 18,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Riwayat aktivitas, perjalanan, dan pendampingan Anda akan tersimpan rapi di sini.',
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.inter(
+                                        color: AppTheme.textMuted,
+                                        fontSize: 13,
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 24),
+                                    ElevatedButton.icon(
+                                      onPressed: () {
+                                        if (Navigator.canPop(context)) {
+                                          Navigator.pop(context);
+                                        }
+                                      },
+                                      icon: const Icon(Icons.explore_rounded, size: 18),
+                                      label: Text(
+                                        'Mulai Jelajah Temen',
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppTheme.primaryPink,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(16),
+                                        ),
+                                        elevation: 4,
+                                        shadowColor: AppTheme.primaryPink.withOpacity(0.4),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             )
                           : ListView.builder(
@@ -847,12 +841,22 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
 
   String _formatDate(DateTime? date) {
     if (date == null) return 'N/A';
-    return '${date.day}/${date.month}/${date.year} • ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    const dayNames = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    final dayName = dayNames[(date.weekday - 1) % 7];
+    final monthName = monthNames[(date.month - 1) % 12];
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$dayName, ${date.day} $monthName ${date.year} • $hour:$minute WIB';
   }
 
-  String _formatPrice(int? price) {
+  String _formatPrice(dynamic price) {
     if (price == null) return '0';
-    return price.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.');
+    final numVal = num.tryParse(price.toString()) ?? 0;
+    return numVal.toStringAsFixed(0).replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]}.',
+    );
   }
 
   void _showCancelDialog(BuildContext context, BookingModel booking) {

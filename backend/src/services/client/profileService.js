@@ -138,15 +138,17 @@ class ProfileService {
         .webp({ quality: 80 })
         .toFile(processedPath);
 
-      // Delete old avatar file
+      // Delete old avatar file safely
       const oldAvatarUrl = currentUser.avatar_url;
-      if (oldAvatarUrl) {
-        const oldFilename = oldAvatarUrl.split('/').pop();
-        const oldPath = path.join(uploadDir, oldFilename);
-        try {
-          await fs.unlink(oldPath);
-        } catch (err) {
-          console.log('Old avatar not found:', err.message);
+      if (oldAvatarUrl && typeof oldAvatarUrl === 'string' && oldAvatarUrl.startsWith('/uploads/avatars/')) {
+        const oldFilename = path.basename(oldAvatarUrl);
+        const oldPath = path.resolve(uploadDir, oldFilename);
+        if (oldPath.startsWith(path.resolve(uploadDir))) {
+          try {
+            await fs.unlink(oldPath);
+          } catch (err) {
+            console.log('Old avatar not found:', err.message);
+          }
         }
       }
 
@@ -198,14 +200,16 @@ class ProfileService {
       }
 
       const avatarUrl = currentUser.avatar_url;
-      if (avatarUrl) {
-        // Delete file from filesystem using absolute path
-        const filename = avatarUrl.split('/').pop();
-        const filePath = path.join(__dirname, '../../../uploads/avatars', filename);
-        try {
-          await fs.unlink(filePath);
-        } catch (err) {
-          console.log('Avatar file not found:', err.message);
+      if (avatarUrl && typeof avatarUrl === 'string' && avatarUrl.startsWith('/uploads/avatars/')) {
+        const uploadDir = path.resolve(__dirname, '../../../uploads/avatars');
+        const filename = path.basename(avatarUrl);
+        const filePath = path.resolve(uploadDir, filename);
+        if (filePath.startsWith(uploadDir)) {
+          try {
+            await fs.unlink(filePath);
+          } catch (err) {
+            console.log('Avatar file not found:', err.message);
+          }
         }
       }
 

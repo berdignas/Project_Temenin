@@ -7,6 +7,9 @@ import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/modules/auth/onboarding/screens/onboarding_screen.dart';
 import 'package:temenin_ajaa/modules/auth/screens/login_screen.dart';
 import 'package:temenin_ajaa/modules/clients/screens/home_loggedin_screen.dart';
+import 'package:temenin_ajaa/modules/auth/screens/setup_account_screen.dart';
+import 'package:temenin_ajaa/modules/auth/screens/verify_email_waiting_screen.dart';
+import 'package:temenin_ajaa/core/widgets/offline_banner_widget.dart';
 import 'providers/auth_provider.dart';
 import 'providers/driver_provider.dart';
 import 'providers/client_booking_provider.dart';
@@ -19,8 +22,8 @@ void main() async {
   // Initialize Supabase
   try {
     await Supabase.initialize(
-      url: 'https://wdjjaevfuxqrephhdacp.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkamphZXZmdXhxcmVwaGhkYWNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODI5MjQ0MSwiZXhwIjoyMTAzODY4NDQxfQ.GCnanHjOJ095gHvQwHXHLy_zpgAg1c7VRc90ZpO4ROc',
+      url: const String.fromEnvironment('SUPABASE_URL', defaultValue: ''),
+      anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: ''),
     );
     print('✅ Supabase initialized successfully');
   } catch (e) {
@@ -56,6 +59,9 @@ class MyApp extends StatelessWidget {
         theme: AppTheme.lightTheme,
         home: const AuthWrapper(),
         onGenerateRoute: AppRoutes.generateRoute,
+        builder: (context, child) => OfflineBannerWrapper(
+          child: child ?? const SizedBox(),
+        ),
       ),
     );
   }
@@ -108,8 +114,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Widget build(BuildContext context) {
     final authProvider = context.watch<AuthProvider>();
 
-    /// LOADING STATE
-    if (authProvider.isLoading) {
+    /// LOADING STATE (Only during boot check)
+    if (authProvider.isLoading && !_hasCheckedAuth) {
       return const Scaffold(
         body: Center(
           child: Column(
@@ -133,8 +139,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
-    /// CHECK IF ERROR OCCURRED
-    if (authProvider.errorMessage != null) {
+    /// CHECK IF INITIALIZATION ERROR OCCURRED
+    if (authProvider.errorMessage != null && !_hasCheckedAuth) {
       return Scaffold(
         body: Center(
           child: Padding(
@@ -199,6 +205,13 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     /// LOGIN SUCCESS - USER AUTHENTICATED
     if (authProvider.isAuthenticated && authProvider.user != null) {
+      final user = authProvider.user!;
+      if (user.email == null || user.email!.isEmpty || user.email!.endsWith('@temenin.aja')) {
+        return const SetupAccountScreen();
+      }
+      if (user.isVerified == false) {
+        return const VerifyEmailWaitingScreen();
+      }
       return const HomeLoggedInScreen();
     }
 

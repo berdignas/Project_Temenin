@@ -39,12 +39,27 @@ class DriverProvider extends ChangeNotifier {
     try {
       final List<dynamic> dbDrivers = await Supabase.instance.client
           .from('drivers')
-          .select('*, users(*)');
+          .select('*, users(*), reviews(rating)');
 
       if (dbDrivers.isNotEmpty) {
         _drivers = dbDrivers.map((d) {
           final user = d['users'] ?? {};
-          final ratingVal = double.tryParse(d['rating']?.toString() ?? '5.0') ?? 5.0;
+          final rawMeta = user['raw_user_meta_data'] ?? {};
+          
+          final activeServices = rawMeta['active_services'] != null
+              ? List<String>.from(rawMeta['active_services'])
+              : ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant'];
+
+          // Calculate average rating from real reviews
+          final reviewsList = d['reviews'] as List<dynamic>? ?? [];
+          double ratingVal = 5.0; // default
+          if (reviewsList.isNotEmpty) {
+            final sum = reviewsList.map((r) => (r['rating'] as num).toDouble()).reduce((a, b) => a + b);
+            ratingVal = (sum / reviewsList.length).clamp(1.0, 5.0);
+          } else {
+             ratingVal = double.tryParse(d['rating']?.toString() ?? '5.0') ?? 5.0;
+          }
+
           final ridesVal = d['total_rides'] is int ? d['total_rides'] as int : (int.tryParse(d['total_rides']?.toString() ?? '0') ?? 0);
           
           String tier = 'Gold';
@@ -60,6 +75,14 @@ class DriverProvider extends ChangeNotifier {
             tier = 'Bronze';
           }
 
+          final avatarUrl = (user['avatar_url'] != null && 
+                             user['avatar_url'].toString().isNotEmpty && 
+                             !user['avatar_url'].toString().contains('placeholder') &&
+                             !user['avatar_url'].toString().contains('dummy') &&
+                             !user['avatar_url'].toString().contains('unsplash'))
+              ? user['avatar_url']
+              : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user['full_name'] ?? 'Driver')}&background=D64573&color=fff&bold=true';
+
           return {
             'id': d['id'].toString(),
             'driverId': d['id'].toString(),
@@ -71,7 +94,7 @@ class DriverProvider extends ChangeNotifier {
             'status': d['is_available'] == true ? 'Available' : 'Busy',
             'type': tier,
             'tier': tier,
-            'image': user['avatar_url'] ?? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300',
+            'image': avatarUrl,
             'tag': d['vehicle_type'] ?? 'Motor',
             'isAvailable': d['is_available'] == true,
             'price': d['price_per_hour'] ?? 50000,
@@ -80,6 +103,7 @@ class DriverProvider extends ChangeNotifier {
             'trips': ridesVal,
             'plateNumber': d['plate_number'] ?? 'B 1234 ABC',
             'description': 'Driver profesional dan terverifikasi siap menemani perjalanan atau aktivitas Anda dengan aman dan nyaman.',
+            'activeServices': activeServices,
           };
         }).toList();
         _isLoading = false;
@@ -158,12 +182,27 @@ class DriverProvider extends ChangeNotifier {
       try {
         final List<dynamic> dbDrivers = await Supabase.instance.client
             .from('drivers')
-            .select('*, users(*)');
+            .select('*, users(*), reviews(rating)');
 
         if (dbDrivers.isNotEmpty) {
           _drivers = dbDrivers.map((d) {
             final user = d['users'] ?? {};
-            final ratingVal = double.tryParse(d['rating']?.toString() ?? '5.0') ?? 5.0;
+            final rawMeta = user['raw_user_meta_data'] ?? {};
+            
+            final activeServices = rawMeta['active_services'] != null
+                ? List<String>.from(rawMeta['active_services'])
+                : ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant'];
+
+            // Calculate average rating from real reviews
+            final reviewsList = d['reviews'] as List<dynamic>? ?? [];
+            double ratingVal = 5.0; // default
+            if (reviewsList.isNotEmpty) {
+              final sum = reviewsList.map((r) => (r['rating'] as num).toDouble()).reduce((a, b) => a + b);
+              ratingVal = (sum / reviewsList.length).clamp(1.0, 5.0);
+            } else {
+               ratingVal = double.tryParse(d['rating']?.toString() ?? '5.0') ?? 5.0;
+            }
+            
             final ridesVal = d['total_rides'] is int ? d['total_rides'] as int : (int.tryParse(d['total_rides']?.toString() ?? '0') ?? 0);
             
             String tier = 'Gold';
@@ -171,13 +210,21 @@ class DriverProvider extends ChangeNotifier {
               tier = 'Diamond';
             } else if (ridesVal > 20 && ratingVal >= 4.8) {
               tier = 'Platinum';
-            } else if (ridesVal > 4.5) {
+            } else if (ratingVal >= 4.5) {
               tier = 'Gold';
             } else if (ratingVal >= 4.0) {
               tier = 'Silver';
             } else {
               tier = 'Bronze';
             }
+
+            final avatarUrl = (user['avatar_url'] != null && 
+                               user['avatar_url'].toString().isNotEmpty && 
+                               !user['avatar_url'].toString().contains('placeholder') &&
+                               !user['avatar_url'].toString().contains('dummy') &&
+                               !user['avatar_url'].toString().contains('unsplash'))
+                ? user['avatar_url']
+                : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user['full_name'] ?? 'Driver')}&background=D64573&color=fff&bold=true';
 
             return {
               'id': d['id'].toString(),
@@ -190,7 +237,7 @@ class DriverProvider extends ChangeNotifier {
               'status': d['is_available'] == true ? 'Available' : 'Busy',
               'type': tier,
               'tier': tier,
-              'image': user['avatar_url'] ?? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300',
+              'image': avatarUrl,
               'tag': d['vehicle_type'] ?? 'Motor',
               'isAvailable': d['is_available'] == true,
               'price': d['price_per_hour'] ?? 50000,
@@ -199,6 +246,7 @@ class DriverProvider extends ChangeNotifier {
               'trips': ridesVal,
               'plateNumber': d['plate_number'] ?? 'B 1234 ABC',
               'description': 'Driver profesional dan terverifikasi siap menemani perjalanan atau aktivitas Anda dengan aman dan nyaman.',
+              'activeServices': activeServices,
             };
           }).toList();
         }

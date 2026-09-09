@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../providers/booking_provider.dart';
 import '../../../providers/auth_provider.dart';
+import '../../../data/models/booking_model.dart';
 import 'chat_room_screen.dart';
 
 class DriverActiveBookingScreen extends StatefulWidget {

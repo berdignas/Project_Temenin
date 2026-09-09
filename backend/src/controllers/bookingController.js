@@ -381,6 +381,24 @@ exports.updateBookingStatus = async (req, res, next) => {
       });
     }
 
+    // Check authorization: client, driver, or admin
+    const { data: driverData } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const isClient = booking.user_id === userId;
+    const isDriver = driverData && (booking.driver_id === driverData.id);
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isClient && !isDriver && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are not authorized to update this booking'
+      });
+    }
+
     // Update status
     const { data: updatedBooking, error } = await supabase
       .from('bookings')
@@ -414,6 +432,208 @@ exports.updateBookingStatus = async (req, res, next) => {
       success: true,
       message: `Booking status updated to ${status}`,
       data: updatedBooking
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 8. Client submits a review & rating for a completed booking
+exports.createBookingReview = async (req, res, next) => {
+  try {
+    const { bookingId } = req.params;
+    const { rating, comment } = req.body;
+    const userId = req.user.id;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({
+        success: false,
+        message: 'Rating must be a number between 1 and 5'
+      });
+    }
+
+    // 1. Get booking details to find the driver_id
+    const { data: booking, error: bookingError } = await supabase
+      .from('bookings')
+      .select('id, user_id, driver_id, status')
+      .eq('id', bookingId)
+      .single();
+
+    if (bookingError || !booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
+      });
+    }
+
+    if (booking.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the client who booked can submit a review'
+      });
+    }
+
+    if (!booking.driver_id) {
+      return res.status(400).json({
+        success: false,
+        message: 'No driver assigned to this booking'
+      });
+    }
+
+    // 2. Insert or update review in 'reviews' table
+    const { data: review, error: reviewError } = await supabase
+      .from('reviews')
+      .insert({
+        booking_id: bookingId,
+        user_id: userId,
+        driver_id: booking.driver_id,
+        rating: parseFloat(rating),
+        comment: comment || ''
+      })
+      .select()
+      .single();
+
+    if (reviewError) throw reviewError;
+
+    // 3. Recalculate driver's overall rating automatically
+    const { data: allReviews, error: reviewsError } = await supabase
+      .from('reviews')
+      .select('rating')
+      .eq('driver_id', booking.driver_id);
+
+    if (!reviewsError && allReviews && allReviews.length > 0) {
+      const sumRatings = allReviews.reduce((sum, r) => sum + parseFloat(r.rating || 5), 0);
+      const avgRating = (sumRatings / allReviews.length).toFixed(1);
+
+      await supabase
+        .from('drivers')
+        .update({ rating: parseFloat(avgRating), updated_at: new Date() })
+        .eq('id', booking.driver_id);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Ulasan berhasil disimpan dan rating driver telah diperbarui',
+      data: review
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 9. Get all reviews for a booking or driver
+exports.getBookingReviews = async (req, res, next) => {
+  try {
+    const { bookingId } = req.params;
+
+    const { data: reviews, error } = await supabase
+      .from('reviews')
+      .select(`
+        *,
+        user:users (
+          id,
+          full_name,
+          avatar_url
+        )
+      `)
+      .eq('booking_id', bookingId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    res.status(200).json({
+      success: true,
+      data: reviews
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 10. Send a chat message in a booking room
+exports.sendChatMessage = async (req, res, next) => {
+  try {
+    const { bookingId } = req.params;
+    const { message, attachment_url, sender_role } = req.body;
+    const userId = req.user.id;
+
+    if (!message || message.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Message content cannot be empty'
+      });
+    }
+
+    // Verify booking exists and user is participant
+    const { data: bookingCheck, error: bookingErr } = await supabase
+      .from('bookings')
+      .select('id, user_id, driver_id')
+      .eq('id', bookingId)
+      .single();
+
+    if (bookingErr || !bookingCheck) {
+      return res.status(404).json({ success: false, message: 'Booking not found' });
+    }
+
+    const { data: driverData } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const isClient = bookingCheck.user_id === userId;
+    const isDriver = driverData && (bookingCheck.driver_id === driverData.id);
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isClient && !isDriver && !isAdmin) {
+      return res.status(403).json({ success: false, message: 'You are not authorized to send messages in this booking' });
+    }
+
+    const { data: chatMessage, error } = await supabase
+      .from('booking_messages')
+      .insert({
+        booking_id: bookingId,
+        sender_id: userId,
+        sender_role: sender_role || 'client',
+        message: message.trim(),
+        attachment_url: attachment_url || null,
+        is_read: false
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // Optional: Also sync to booking's additional_details['chat_messages'] for backward compatibility
+    try {
+      const { data: currentBooking } = await supabase
+        .from('bookings')
+        .select('additional_details')
+        .eq('id', bookingId)
+        .single();
+      
+      const details = currentBooking?.additional_details || {};
+      const existingMsgs = details.chat_messages || [];
+      existingMsgs.push({
+        id: chatMessage.id,
+        sender_id: userId,
+        sender_role: sender_role || 'client',
+        message: message.trim(),
+        attachment_url: attachment_url || null,
+        created_at: chatMessage.created_at
+      });
+      details.chat_messages = existingMsgs;
+
+      await supabase
+        .from('bookings')
+        .update({ additional_details: details, updated_at: new Date() })
+        .eq('id', bookingId);
+    } catch (_) {}
+
+    res.status(201).json({
+      success: true,
+      message: 'Message sent successfully',
+      data: chatMessage
     });
   } catch (error) {
     next(error);

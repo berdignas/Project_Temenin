@@ -198,6 +198,22 @@ CREATE TABLE booking_messages (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+ALTER TABLE booking_messages REPLICA IDENTITY FULL;
+
+-- ============================================================================
+-- 7b. TABEL ULASAN & RATING (REVIEWS & RATINGS)
+-- ============================================================================
+DROP TABLE IF EXISTS reviews CASCADE;
+CREATE TABLE reviews (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id UUID REFERENCES bookings(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+    driver_id UUID REFERENCES drivers(id) ON DELETE CASCADE NOT NULL,
+    rating NUMERIC(2,1) NOT NULL CHECK (rating >= 1 AND rating <= 5),
+    comment TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- ============================================================================
 -- 8. TABEL OTP SMS / WHATSAPP AUTHENTICATION
 -- ============================================================================
@@ -228,6 +244,7 @@ ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
 ALTER TABLE bookings DISABLE ROW LEVEL SECURITY;
 ALTER TABLE booking_negotiations DISABLE ROW LEVEL SECURITY;
 ALTER TABLE driver_withdrawals DISABLE ROW LEVEL SECURITY;
+ALTER TABLE reviews DISABLE ROW LEVEL SECURITY;
 ALTER TABLE wallet_transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE community_posts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE community_comments DISABLE ROW LEVEL SECURITY;
@@ -258,5 +275,40 @@ SELECT
     (SELECT COUNT(*) FROM bookings WHERE status = 'ongoing') AS active_ongoing_bookings,
     (SELECT COALESCE(SUM(total_price), 0) FROM bookings WHERE status = 'completed') AS total_revenue,
     (SELECT COUNT(*) FROM driver_withdrawals WHERE status = 'pending') AS pending_withdrawals;
+
+-- ============================================================================
+-- 12. TABEL EVENT TERDEKAT & PROMO (MANAGEMENT ADMIN)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS app_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    date_string TEXT NOT NULL,
+    location TEXT NOT NULL,
+    image_url TEXT NOT NULL,
+    ticket_url TEXT,
+    category TEXT DEFAULT 'Konser & Festival',
+    description TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE app_events DISABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS app_promos (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    image_url TEXT,
+    code TEXT,
+    discount_percent INTEGER DEFAULT 0,
+    max_discount NUMERIC(10,2) DEFAULT 0,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE app_promos DISABLE ROW LEVEL SECURITY;
+
 
 -- SELESAI! Seluruh database Temenin Ajaa kini 100% Siap Digunakan.

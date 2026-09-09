@@ -108,17 +108,41 @@ class _EditProfilePageState extends State<EditProfilePage> {
         
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Profil berhasil diperbarui!'),
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Profil berhasil diperbarui!',
+                    style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
               backgroundColor: AppTheme.success,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           );
           Navigator.pop(context, true);
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(authProvider.errorMessage ?? 'Gagal memperbarui profil'),
+              content: Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      authProvider.errorMessage ?? 'Gagal memperbarui profil',
+                      style: GoogleFonts.inter(color: Colors.white),
+                    ),
+                  ),
+                ],
+              ),
               backgroundColor: AppTheme.danger,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           );
         }
@@ -127,7 +151,20 @@ class _EditProfilePageState extends State<EditProfilePage> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: AppTheme.danger),
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('Error: $e', style: GoogleFonts.inter(color: Colors.white)),
+                ),
+              ],
+            ),
+            backgroundColor: AppTheme.danger,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
         );
       }
     }
@@ -138,36 +175,54 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final authProvider = Provider.of<AuthProvider>(context);
     final user = authProvider.user;
     
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Text(
-          'Edit Profil',
-          style: GoogleFonts.inter(
-            color: AppTheme.textHighContrast,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.textHighContrast),
-          onPressed: () => Navigator.pop(context),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _isLoading ? null : _saveProfile,
-            child: Text(
-              'Simpan',
-              style: GoogleFonts.inter(
-                color: AppTheme.primaryPink,
-                fontWeight: FontWeight.bold,
-                fontSize: 15,
-              ),
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      behavior: HitTestBehavior.opaque,
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          title: Text(
+            'Edit Profil',
+            style: GoogleFonts.inter(
+              color: AppTheme.textHighContrast,
+              fontWeight: FontWeight.bold,
             ),
           ),
-        ],
-      ),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.textHighContrast),
+            onPressed: () => Navigator.pop(context),
+          ),
+          actions: [
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16.0),
+                child: Center(
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryPink),
+                    ),
+                  ),
+                ),
+              )
+            else
+              TextButton(
+                onPressed: _saveProfile,
+                child: Text(
+                  'Simpan',
+                  style: GoogleFonts.inter(
+                    color: AppTheme.primaryPink,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+          ],
+        ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Form(
@@ -269,8 +324,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   prefixIcon: const Icon(Icons.person_outline, color: AppTheme.primaryPink),
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Silakan masukkan nama lengkap Anda';
+                  }
+                  if (value.trim().length < 3) {
+                    return 'Nama minimal terdiri dari 3 karakter';
                   }
                   return null;
                 },
@@ -298,8 +356,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   prefixIcon: const Icon(Icons.phone_outlined, color: AppTheme.primaryPink),
                 ),
                 validator: (value) {
-                  if (value == null || value.isEmpty) {
+                  if (value == null || value.trim().isEmpty) {
                     return 'Silakan masukkan nomor telepon Anda';
+                  }
+                  if (!RegExp(r'^[0-9]+$').hasMatch(value.trim())) {
+                    return 'Nomor telepon hanya boleh berisi angka';
+                  }
+                  if (value.trim().length < 9 || value.trim().length > 15) {
+                    return 'Nomor telepon tidak valid (9-15 digit)';
                   }
                   return null;
                 },
@@ -354,12 +418,64 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ],
                 ),
               ),
+              const SizedBox(height: 32),
+
+              // Bottom Save Button
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _saveProfile,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPink,
+                    disabledBackgroundColor: AppTheme.primaryPink.withOpacity(0.6),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    elevation: 0,
+                  ),
+                  child: _isLoading
+                      ? Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Menyimpan...',
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                        )
+                      : Text(
+                          'SIMPAN PERUBAHAN',
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(height: 20),
             ],
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   @override
   void dispose() {

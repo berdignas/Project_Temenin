@@ -10,13 +10,66 @@ const client = axios.create({
   }
 });
 
+// Attach Authorization Bearer token from localStorage
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem('admin_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 // Fallback Empty Data
 let mockUsers = [];
 let mockDrivers = [];
 let mockBookings = [];
 let mockPosts = [];
+let mockEvents = [
+  {
+    id: 'ev-1',
+    title: 'We The Fest 2026',
+    date_string: '14-16 Ags 2026',
+    location: 'GBK Sports Complex, Jaksel',
+    image_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=600&auto=format&fit=crop',
+    ticket_url: 'https://wethefest.com',
+    category: 'Festival Musik',
+    description: 'Festival musik musim panas terbesar di Jakarta dengan deretan artis lokal dan internasional terbaik.',
+    is_active: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'ev-2',
+    title: 'Java Jazz Festival',
+    date_string: '28-30 Nov 2026',
+    location: 'JIExpo Kemayoran, Jakpus',
+    image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&auto=format&fit=crop',
+    ticket_url: 'https://javajazzfestival.com',
+    category: 'Konser Musik',
+    description: 'Rasakan alunan jazz spektakuler dari musisi legendaris dalam dan luar negeri.',
+    is_active: true,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'ev-3',
+    title: 'Indonesia Comic Con',
+    date_string: '23-25 Des 2026',
+    location: 'JCC Senayan, Jaksel',
+    image_url: 'https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=600&auto=format&fit=crop',
+    ticket_url: 'https://indonesiacomiccon.com',
+    category: 'Pameran & Pop Culture',
+    description: 'Ajang kumpul komunitas pecinta anime, cosplay, game, dan komik terbesar se-Indonesia.',
+    is_active: true,
+    created_at: new Date().toISOString()
+  }
+];
 
 export const adminApi = {
+  // Auth
+  login: async (email, password) => {
+    const res = await client.post('/auth/login', { email, password });
+    return res.data;
+  },
+
   // Stats
   getStats: async () => {
     try {
@@ -203,6 +256,52 @@ export const adminApi = {
     } catch {
       mockPosts = mockPosts.filter(p => p.id !== id);
       return { success: true, message: 'Postingan berhasil dihapus' };
+    }
+  },
+
+  // Events Terdekat & Promosi
+  getEvents: async () => {
+    try {
+      const res = await client.get('/admin/events');
+      return res.data.data;
+    } catch {
+      return mockEvents;
+    }
+  },
+
+  createEvent: async (data) => {
+    try {
+      const res = await client.post('/admin/events', data);
+      return res.data;
+    } catch {
+      const newEv = {
+        id: 'ev-' + Date.now(),
+        ...data,
+        is_active: data.is_active !== undefined ? data.is_active : true,
+        created_at: new Date().toISOString()
+      };
+      mockEvents.unshift(newEv);
+      return { success: true, message: 'Event berhasil ditambahkan', data: newEv };
+    }
+  },
+
+  updateEvent: async (id, data) => {
+    try {
+      const res = await client.put(`/admin/events/${id}`, data);
+      return res.data;
+    } catch {
+      mockEvents = mockEvents.map(ev => ev.id === id ? { ...ev, ...data } : ev);
+      return { success: true, message: 'Event berhasil diperbarui' };
+    }
+  },
+
+  deleteEvent: async (id) => {
+    try {
+      const res = await client.delete(`/admin/events/${id}`);
+      return res.data;
+    } catch {
+      mockEvents = mockEvents.filter(ev => ev.id !== id);
+      return { success: true, message: 'Event berhasil dihapus' };
     }
   }
 };

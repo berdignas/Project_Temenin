@@ -23,13 +23,10 @@ exports.getStories = async (req, res, next) => {
 exports.createStory = async (req, res, next) => {
   try {
     const { image_url, caption, title, author_name, author_avatar } = req.body;
-    let userId = req.user ? req.user.id : req.body.user_id;
-
-    if (!userId) {
-      // Find a default user id if not provided
-      const { data: firstUser } = await supabaseAdmin.from('users').select('id').limit(1).single();
-      userId = firstUser ? firstUser.id : null;
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Harap login terlebih dahulu' });
     }
+    const userId = req.user.id;
 
     if (!image_url) {
       return res.status(400).json({
@@ -130,12 +127,10 @@ exports.getPosts = async (req, res, next) => {
 exports.createPost = async (req, res, next) => {
   try {
     const { image_url, caption, location, media_type, video_url, author_name, author_avatar } = req.body;
-    let userId = req.user ? req.user.id : req.body.user_id;
-
-    if (!userId) {
-      const { data: firstUser } = await supabaseAdmin.from('users').select('id').limit(1).single();
-      userId = firstUser ? firstUser.id : null;
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Harap login terlebih dahulu' });
     }
+    const userId = req.user.id;
 
     if (!image_url && !caption) {
       return res.status(400).json({
@@ -176,12 +171,10 @@ exports.createPost = async (req, res, next) => {
 exports.toggleLikePost = async (req, res, next) => {
   try {
     const { postId } = req.params;
-    let userId = req.user ? req.user.id : req.body.user_id;
-
-    if (!userId) {
-      const { data: firstUser } = await supabaseAdmin.from('users').select('id').limit(1).single();
-      userId = firstUser ? firstUser.id : null;
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Harap login terlebih dahulu' });
     }
+    const userId = req.user.id;
 
     // Check if like exists
     const { data: existingLike } = await supabaseAdmin
@@ -257,12 +250,10 @@ exports.addComment = async (req, res, next) => {
   try {
     const { postId } = req.params;
     const { comment_text, author_name } = req.body;
-    let userId = req.user ? req.user.id : req.body.user_id;
-
-    if (!userId) {
-      const { data: firstUser } = await supabaseAdmin.from('users').select('id').limit(1).single();
-      userId = firstUser ? firstUser.id : null;
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Harap login terlebih dahulu' });
     }
+    const userId = req.user.id;
 
     if (!comment_text) {
       return res.status(400).json({ success: false, message: 'Comment text is required' });

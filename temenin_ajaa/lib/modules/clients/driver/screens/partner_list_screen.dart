@@ -16,14 +16,17 @@ class PartnerListScreen extends StatefulWidget {
 class _PartnerListScreenState extends State<PartnerListScreen> {
   String _activeFilter = 'All';
   String _activeGenderFilter = 'Semua';
+  String _activeServiceFilter = 'Semua Layanan';
 
   final List<String> _filters = ['All', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'VVIP'];
   final List<String> _genderFilters = ['Semua', 'Perempuan', 'Laki-laki'];
+  final List<String> _serviceFilters = ['Semua Layanan', 'Ride', 'Hangout', 'Counseling', 'Curhat', 'Detective', 'Hiking', 'Assistant'];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DriverProvider>().subscribeToDriversRealtime();
       context.read<DriverProvider>().fetchDrivers();
     });
   }
@@ -33,11 +36,19 @@ class _PartnerListScreenState extends State<PartnerListScreen> {
     final driverProvider = context.watch<DriverProvider>();
     final List<Map<String, dynamic>> drivers = driverProvider.drivers;
 
-    // Filter list by class AND gender
+    // Filter list by class, gender AND service
     final filteredList = drivers.where((partner) {
       final matchesFilter = _activeFilter == 'All' || partner['type'] == _activeFilter;
       final matchesGender = _activeGenderFilter == 'Semua' || partner['gender'] == _activeGenderFilter;
-      return matchesFilter && matchesGender;
+      
+      bool matchesService = true;
+      if (_activeServiceFilter != 'Semua Layanan') {
+        final activeServices = partner['activeServices'] as List<String>? ?? [];
+        final serviceKey = _activeServiceFilter.toLowerCase();
+        matchesService = activeServices.contains(serviceKey);
+      }
+      
+      return matchesFilter && matchesGender && matchesService;
     }).toList();
 
     return Scaffold(
@@ -98,6 +109,24 @@ class _PartnerListScreenState extends State<PartnerListScreen> {
                       final isActive = _activeFilter == filterName;
                       return GestureDetector(
                         onTap: () => setState(() => _activeFilter = filterName),
+                        child: _buildFilterChip(filterName, isActive: isActive),
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Filter Chips (Services)
+                SizedBox(
+                  height: 36,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _serviceFilters.length,
+                    itemBuilder: (context, index) {
+                      final filterName = _serviceFilters[index];
+                      final isActive = _activeServiceFilter == filterName;
+                      return GestureDetector(
+                        onTap: () => setState(() => _activeServiceFilter = filterName),
                         child: _buildFilterChip(filterName, isActive: isActive),
                       );
                     },
@@ -263,25 +292,22 @@ class _PartnerListScreenState extends State<PartnerListScreen> {
             children: [
               ClipRRect(
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                child: image.isNotEmpty
-                    ? Image.network(
-                        image, 
-                        height: 190, 
-                        width: double.infinity, 
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            height: 190,
-                            color: AppTheme.cardDeep,
-                            child: const Icon(Icons.person, color: AppTheme.textMuted, size: 50),
-                          );
-                        },
-                      )
-                    : Container(
-                        height: 190,
-                        color: AppTheme.fuchsiaLight,
-                        child: const Icon(Icons.person, color: AppTheme.primaryPink, size: 50),
-                      ),
+                child: Image.network(
+                  (image.isNotEmpty && !image.contains('placeholder') && !image.contains('dummy'))
+                      ? image
+                      : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name.isNotEmpty ? name : "Temen")}&background=D64573&color=fff&bold=true', 
+                  height: 190, 
+                  width: double.infinity, 
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Image.network(
+                      'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name.isNotEmpty ? name : "Temen")}&background=D64573&color=fff&bold=true',
+                      height: 190,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                    );
+                  },
+                ),
               ),
               Positioned(
                 top: 12,

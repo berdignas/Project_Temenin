@@ -9,8 +9,8 @@ import 'package:http/http.dart' as http;
 import '../core/constants/api_constants.dart';
 
 class CommunityProvider extends ChangeNotifier {
-  static const String _postsCacheKey = 'customer_community_posts_cache_v2';
-  static const String _storiesCacheKey = 'customer_community_stories_cache_v2';
+  static const String _postsCacheKey = 'customer_community_posts_cache_v3';
+  static const String _storiesCacheKey = 'customer_community_stories_cache_v3';
 
   final List<Map<String, dynamic>> _posts = [];
   final List<Map<String, dynamic>> _stories = [];
@@ -191,11 +191,9 @@ class CommunityProvider extends ChangeNotifier {
         } catch (_) {}
       }
 
-      if (remotePosts.isNotEmpty) {
-        _posts.clear();
-        _posts.addAll(remotePosts);
-        await _saveToLocalStorage();
-      }
+      _posts.clear();
+      _posts.addAll(remotePosts);
+      await _saveToLocalStorage();
 
       // 2. Fetch Stories from Backend / Supabase
       List<Map<String, dynamic>> remoteStories = [];
@@ -255,11 +253,9 @@ class CommunityProvider extends ChangeNotifier {
         } catch (_) {}
       }
 
-      if (remoteStories.isNotEmpty) {
-        _stories.clear();
-        _stories.addAll(remoteStories);
-        await _saveToLocalStorage();
-      }
+      _stories.clear();
+      _stories.addAll(remoteStories);
+      await _saveToLocalStorage();
     } catch (e) {
       debugPrint('Customer community fetch info: $e');
     } finally {

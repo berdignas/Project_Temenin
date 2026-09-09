@@ -22,8 +22,6 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
   List<Map<String, dynamic>> _liveChats = [];
   bool _isLoadingLive = false;
 
-  final List<Map<String, dynamic>> _mockChats = [];
-
   @override
   void initState() {
     super.initState();
@@ -358,13 +356,14 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
             context,
             MaterialPageRoute(
               builder: (context) => ChatRoomScreen(
+                bookingId: chat['bookingId'] ?? chat['id'],
                 recipientName: chat['name'],
                 recipientImage: chat['image'],
                 status: chat['isOnline'] ? "Online" : "Offline",
                 tag: chat['tag'],
               ),
             ),
-          );
+          ).then((_) => _loadLiveChats());
         },
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         leading: Stack(

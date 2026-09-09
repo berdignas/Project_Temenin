@@ -442,10 +442,20 @@ const getAllDrivers = async (req, res) => {
     const { data: drivers, error } = await supabase
       .from('drivers')
       .select(`
-        *,
+        id,
+        user_id,
+        vehicle_type,
+        vehicle_name,
+        plate_number,
+        price_per_hour,
+        rating,
+        total_rides,
+        is_available,
+        status,
+        latitude,
+        longitude,
         users:user_id (
           full_name,
-          email,
           phone,
           avatar_url,
           gender

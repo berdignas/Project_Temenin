@@ -51,19 +51,6 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     final auth = context.watch<AuthProvider>();
     final booking = context.watch<BookingProvider>();
 
-    // Listen for incoming booking requests and show alert card
-    if (booking.incomingBooking != null && !_isDialogOpen) {
-      _isDialogOpen = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showIncomingRequestDialog(booking.incomingBooking!).then((_) {
-          _isDialogOpen = false;
-          if (mounted) {
-            Provider.of<BookingProvider>(context, listen: false).clearIncomingRequest();
-          }
-        });
-      });
-    }
-
     // List of screens to display in bottom navigation
     final List<Widget> screens = [
       _buildDashboard(auth, booking),
@@ -75,9 +62,126 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: screens[_currentIndex],
+      body: Stack(
+        children: [
+          screens[_currentIndex],
+          if (booking.activeBannerNotification != null)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _buildTopNotificationBanner(booking),
+            ),
+        ],
+      ),
       bottomNavigationBar: _buildModernBottomNavBar(),
     );
+  }
+
+  Widget _buildTopNotificationBanner(BookingProvider booking) {
+    final notif = booking.activeBannerNotification;
+    if (notif == null) return const SizedBox.shrink();
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        child: Material(
+          elevation: 10,
+          borderRadius: BorderRadius.circular(20),
+          color: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF1F1D2B), Color(0xFF2C1625)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppTheme.primaryPink, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryPink.withOpacity(0.4),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                )
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryPink.withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.notifications_active_rounded, color: AppTheme.primaryPink, size: 22),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        notif.title,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        notif.message,
+                        style: GoogleFonts.inter(
+                          color: Colors.white.withOpacity(0.85),
+                          fontSize: 11,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton(
+                  onPressed: () {
+                    final targetBooking = notif.booking ?? booking.incomingBooking;
+                    booking.dismissBannerNotification();
+                    if (targetBooking != null) {
+                      _showIncomingRequestDialog(targetBooking);
+                    } else {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const OpenOffersScreen()),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPink,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                  child: Text(
+                    "Terima",
+                    style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, color: Colors.white60, size: 18),
+                  padding: const EdgeInsets.only(left: 4),
+                  constraints: const BoxConstraints(),
+                  onPressed: () => booking.dismissBannerNotification(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    ).animate().slideY(begin: -1.0, end: 0.0, duration: 300.ms, curve: Curves.easeOutBack);
   }
 
   // ============================================================
@@ -216,12 +320,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           child: CircleAvatar(
                             radius: 24,
                             backgroundColor: AppTheme.cardDeep,
-                            backgroundImage: (auth.user?.avatarUrl != null && auth.user!.avatarUrl!.isNotEmpty)
-                                ? NetworkImage(_resolveImageUrl(auth.user!.avatarUrl!))
-                                : null,
-                            child: (auth.user?.avatarUrl == null || auth.user!.avatarUrl!.isEmpty)
-                                ? const Icon(Icons.person, color: AppTheme.primaryPink, size: 24)
-                                : null,
+                            backgroundImage: NetworkImage(
+                              (auth.user?.avatarUrl != null &&
+                                      auth.user!.avatarUrl!.isNotEmpty &&
+                                      !auth.user!.avatarUrl!.contains('dummy'))
+                                  ? _resolveImageUrl(auth.user!.avatarUrl!)
+                                  : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(name)}&background=D64573&color=fff&bold=true',
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -311,24 +416,34 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             ),
                             child: Stack(
                               alignment: Alignment.center,
+                              clipBehavior: Clip.none,
                               children: [
                                 const Icon(
                                   Icons.notifications_none_rounded,
                                   color: AppTheme.textHighContrast,
-                                  size: 19,
+                                  size: 20,
                                 ),
-                                Positioned(
-                                  top: 9,
-                                  right: 9,
-                                  child: Container(
-                                    width: 7,
-                                    height: 7,
-                                    decoration: const BoxDecoration(
-                                      color: AppTheme.primaryPink,
-                                      shape: BoxShape.circle,
+                                if (booking.unreadNotificationsCount > 0)
+                                  Positioned(
+                                    top: -3,
+                                    right: -3,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.primaryPink,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: Colors.white, width: 1.5),
+                                      ),
+                                      child: Text(
+                                        "${booking.unreadNotificationsCount}",
+                                        style: GoogleFonts.inter(
+                                          color: Colors.white,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             ),
                           ),

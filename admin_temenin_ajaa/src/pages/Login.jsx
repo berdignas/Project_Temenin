@@ -6,16 +6,20 @@ import { useAuth } from '../context/AuthContext';
 export const Login = () => {
   const [email, setEmail] = useState('admin@temenin.aja');
   const [password, setPassword] = useState('admin123');
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (login(email, password)) {
+    setError('');
+    setLoading(true);
+    const result = await login(email, password);
+    setLoading(false);
+    if (result && result.success) {
       navigate('/');
     } else {
-      setError('Email atau password tidak valid');
+      setError(result?.message || 'Email atau password tidak valid');
     }
   };
 

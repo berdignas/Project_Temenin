@@ -6,7 +6,7 @@ import 'package:temenin_ajaa/core/constants/api_constants.dart';
 import 'package:temenin_ajaa/modules/clients/pages/notifications_page.dart';
 
 
-const String BASE_URL = ApiConstants.baseUrl;
+String get BASE_URL => ApiConstants.baseUrl;
 
 class NotificationService {
   Future<Map<String, dynamic>> getNotifications(String userId) async {

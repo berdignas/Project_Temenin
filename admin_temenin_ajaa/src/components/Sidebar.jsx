@@ -6,6 +6,7 @@ import {
   Car, 
   UserCheck, 
   CalendarCheck, 
+  Ticket,
   Wallet, 
   MessageSquare, 
   Settings, 
@@ -28,6 +29,7 @@ export const Sidebar = ({ pendingCount = 2 }) => {
       badge: pendingCount > 0 ? pendingCount : null 
     },
     { label: 'Pemesanan & Order', path: '/bookings', icon: CalendarCheck },
+    { label: 'Event Terdekat', path: '/events', icon: Ticket },
     { label: 'Keuangan & Saldo', path: '/finance', icon: Wallet },
     { label: 'Komunitas & Konten', path: '/community', icon: MessageSquare },
     { label: 'Pengaturan Sistem', path: '/settings', icon: Settings },

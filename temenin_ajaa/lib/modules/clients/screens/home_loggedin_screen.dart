@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/providers/auth_provider.dart';
 import 'package:temenin_ajaa/providers/driver_provider.dart';
 import 'package:temenin_ajaa/providers/client_booking_provider.dart';
@@ -409,20 +411,110 @@ class _HomeContentState extends State<HomeContent> {
 
   bool _hasCheckedVerification = false;
 
+  List<Map<String, dynamic>> _promos = [
+    {
+      'id': 'pr-1',
+      'title': 'WEEKEND PROMO',
+      'subtitle': 'Diskon 20% Freedom Request Malam Ini!',
+      'description': 'Gunakan promo ini untuk menikmati layanan Freedom Request dengan harga lebih hemat di akhir pekan! Cukup gunakan kode: WEEKEND20 saat pembayaran.',
+      'banner_url': 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=600&q=80',
+      'is_active': true,
+    }
+  ];
+
+  List<Map<String, dynamic>> _events = [
+    {
+      'id': 'ev-1',
+      'title': 'We The Fest 2026',
+      'date_string': '14-16 Ags 2026',
+      'location': 'GBK Sports Complex, Jaksel',
+      'image_url': 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=600&auto=format&fit=crop',
+      'ticket_url': 'https://wethefest.com',
+      'category': 'Festival Musik',
+      'description': 'Festival musik musim panas terbesar di Jakarta menghadirkan musisi internasional dan lokal terbaik.',
+      'is_active': true,
+    },
+    {
+      'id': 'ev-2',
+      'title': 'Java Jazz Festival',
+      'date_string': '28-30 Nov 2026',
+      'location': 'JIExpo Kemayoran, Jakpus',
+      'image_url': 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&auto=format&fit=crop',
+      'ticket_url': 'https://javajazzfestival.com',
+      'category': 'Konser Musik',
+      'description': 'Rasakan alunan jazz spektakuler dari musisi legendaris dalam dan luar negeri.',
+      'is_active': true,
+    },
+    {
+      'id': 'ev-3',
+      'title': 'Indonesia Comic Con',
+      'date_string': '23-25 Des 2026',
+      'location': 'JCC Senayan, Jaksel',
+      'image_url': 'https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=600&auto=format&fit=crop',
+      'ticket_url': 'https://indonesiacomiccon.com',
+      'category': 'Pameran & Pop Culture',
+      'description': 'Ajang kumpul komunitas pecinta anime, cosplay, game, dan komik terbesar di Indonesia.',
+      'is_active': true,
+    },
+  ];
+
+  bool _isLoadingPromosEvents = false;
+
   @override
   void initState() {
     super.initState();
     _loadUserPoints();
+    _fetchPromosAndEvents();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndShowVerificationPopup();
-      context.read<DriverProvider>().fetchDrivers();
-      context.read<DriverProvider>().subscribeToDriversRealtime();
+      try {
+        context.read<DriverProvider>().fetchDrivers();
+        context.read<DriverProvider>().subscribeToDriversRealtime();
+      } catch (_) {}
 
       final authProvider = context.read<AuthProvider>();
       if (authProvider.user != null) {
-        context.read<ClientBookingProvider>().subscribeToClientBookings(authProvider.user!.id);
+        try {
+          context.read<ClientBookingProvider>().subscribeToClientBookings(authProvider.user!.id);
+        } catch (_) {}
       }
     });
+  }
+
+  Future<void> _fetchPromosAndEvents() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final promosRes = await supabase
+          .from('app_promos')
+          .select()
+          .eq('is_active', true)
+          .order('created_at', ascending: false);
+
+      final eventsRes = await supabase
+          .from('app_events')
+          .select()
+          .eq('is_active', true)
+          .order('created_at', ascending: false);
+      
+      if (mounted) {
+        setState(() {
+          if (promosRes is List && promosRes.isNotEmpty) {
+            _promos = List<Map<String, dynamic>>.from(promosRes);
+          }
+          if (eventsRes is List && eventsRes.isNotEmpty) {
+            _events = List<Map<String, dynamic>>.from(eventsRes);
+          }
+          _isLoadingPromosEvents = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching promos/events from Supabase: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingPromosEvents = false;
+        });
+      }
+    }
   }
 
   @override
@@ -1464,29 +1556,7 @@ class _HomeContentState extends State<HomeContent> {
 
 
   Widget _buildPopularEventsSection() {
-    final events = [
-      {
-        'title': 'We The Fest 2026',
-        'date': '14-16 Ags 2026',
-        'location': 'GBK Sports Complex, Jaksel',
-        'image': 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=400&auto=format&fit=crop',
-        'gradient': [const Color(0xFFFF4FA3), const Color(0xFF8B5CF6)],
-      },
-      {
-        'title': 'Java Jazz Festival',
-        'date': '28-30 Nov 2026',
-        'location': 'JIExpo Kemayoran, Jakpus',
-        'image': 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=400&auto=format&fit=crop',
-        'gradient': [const Color(0xFFF59E0B), const Color(0xFFEF4444)],
-      },
-      {
-        'title': 'Indonesia Comic Con',
-        'date': '23-25 Des 2026',
-        'location': 'JCC Senayan, Jaksel',
-        'image': 'https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=400&auto=format&fit=crop',
-        'gradient': [const Color(0xFF06B6D4), const Color(0xFF3B82F6)],
-      },
-    ];
+    if (_events.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1501,96 +1571,91 @@ class _HomeContentState extends State<HomeContent> {
         ),
         const SizedBox(height: 12),
         SizedBox(
-          height: 145,
+          height: 155,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
-            itemCount: events.length,
+            itemCount: _events.length,
             itemBuilder: (context, index) {
-              final ev = events[index];
-              final gradient = ev['gradient'] as List<Color>;
-              return Container(
-                width: 250,
-                margin: const EdgeInsets.only(right: 14),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  image: DecorationImage(
-                    image: NetworkImage(ev['image'] as String),
-                    fit: BoxFit.cover,
-                    colorFilter: ColorFilter.mode(
-                      Colors.black.withOpacity(0.4),
-                      BlendMode.darken,
-                    ),
-                  ),
-                  border: Border.all(color: AppColors.elevatedDark),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [gradient[0].withOpacity(0.3), gradient[1].withOpacity(0.3)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+              final ev = _events[index];
+              return GestureDetector(
+                onTap: () => _showEventDetail(ev),
+                behavior: HitTestBehavior.opaque,
+                child: Container(
+                  width: 250,
+                  margin: const EdgeInsets.only(right: 14),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    image: DecorationImage(
+                      image: NetworkImage(ev['image_url'] ?? ev['image'] ?? ''),
+                      fit: BoxFit.cover,
+                      colorFilter: ColorFilter.mode(
+                        Colors.black.withOpacity(0.4),
+                        BlendMode.darken,
                       ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.4),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            ev['date'] as String,
-                            style: GoogleFonts.inter(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          ev['title'] as String,
-                          style: GoogleFonts.plusJakartaSans(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const Icon(Icons.location_on_rounded, color: Colors.white70, size: 10),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                ev['location'] as String,
-                                style: GoogleFonts.inter(color: Colors.white70, fontSize: 9),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
+                    border: Border.all(color: AppColors.elevatedDark),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            AppColors.electricPink.withOpacity(0.3),
+                            AppColors.roseGold.withOpacity(0.3)
                           ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.pushNamed(
-                                  context, 
-                                  '/booking', 
-                                  arguments: {
-                                    'serviceType': 'hangout',
-                                    'activity': 'Event',
-                                    'notes': 'Booked partner for event: ${ev['title']}',
-                                  }
-                                );
-                              },
-                              child: Container(
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.4),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              (ev['date_string'] ?? ev['date'] ?? '').toString(),
+                              style: GoogleFonts.inter(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            (ev['title'] ?? '').toString(),
+                            style: GoogleFonts.plusJakartaSans(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(Icons.location_on_rounded, color: Colors.white70, size: 10),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  (ev['location'] ?? '').toString(),
+                                  style: GoogleFonts.inter(color: Colors.white70, fontSize: 9),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
                                   gradient: AppColors.brandGradient,
@@ -1598,10 +1663,10 @@ class _HomeContentState extends State<HomeContent> {
                                 ),
                                 child: Row(
                                   children: [
-                                    const Icon(Icons.person_add_rounded, color: Colors.white, size: 10),
+                                    const Icon(Icons.touch_app_rounded, color: Colors.white, size: 10),
                                     const SizedBox(width: 4),
                                     Text(
-                                      'Cari Partner',
+                                      'Lihat Detail',
                                       style: GoogleFonts.plusJakartaSans(
                                         color: Colors.white,
                                         fontSize: 9,
@@ -1611,10 +1676,10 @@ class _HomeContentState extends State<HomeContent> {
                                   ],
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -1623,6 +1688,404 @@ class _HomeContentState extends State<HomeContent> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showEventDetail(Map<String, dynamic> ev) {
+    final title = (ev['title'] ?? 'Event').toString();
+    final location = (ev['location'] ?? 'Lokasi Acara').toString();
+    final dateString = (ev['date_string'] ?? ev['date'] ?? 'Segera Hadir').toString();
+    final imageUrl = (ev['image_url'] ?? ev['image'] ?? '').toString();
+    final description = (ev['description'] ?? 'Tidak ada deskripsi detail untuk event ini.').toString();
+    final ticketUrl = (ev['ticket_url'] ?? '').toString();
+    final category = (ev['category'] ?? 'Event Musik & Seni').toString();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.obsidian,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.obsidian,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.elevatedDark,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                  children: [
+                    if (imageUrl.isNotEmpty)
+                      Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: Image.network(
+                              imageUrl,
+                              height: 190,
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                height: 190,
+                                color: AppColors.elevatedDark,
+                                child: const Center(
+                                  child: Icon(Icons.broken_image_rounded, color: AppColors.textMuted, size: 40),
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 12,
+                            left: 12,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.65),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: AppColors.electricPink.withOpacity(0.5)),
+                              ),
+                              child: Text(
+                                category,
+                                style: GoogleFonts.inter(
+                                  color: AppColors.roseGold,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 16),
+                    Text(
+                      title,
+                      style: GoogleFonts.plusJakartaSans(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20,
+                        height: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.elevatedDark,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.elevatedDark),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.calendar_month_rounded, color: AppColors.electricPink, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  dateString,
+                                  style: GoogleFonts.inter(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(Icons.location_on_rounded, color: AppColors.roseGold, size: 16),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  location,
+                                  style: GoogleFonts.inter(
+                                    color: Colors.white70,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Tentang Event',
+                      style: GoogleFonts.plusJakartaSans(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      description,
+                      style: GoogleFonts.inter(
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1F1A24),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.warning.withOpacity(0.35)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.info_outline_rounded, color: AppColors.warning, size: 16),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Ketentuan Tiket & Layanan Partner',
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: AppColors.warning,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '• Tarif layanan Temenin Ajaa adalah biaya transportasi & pendampingan resmi partner. Jika acara berbayar, tiket masuk untuk partner sepenuhnya ditanggung oleh Client.',
+                            style: GoogleFonts.inter(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '• Tidak sempat antre tiket OTS? Pilih "Freedom Request" agar partner dapat membantu membelikan atau mengantrekan tiket untuk Anda!',
+                            style: GoogleFonts.inter(
+                              color: AppColors.roseGold,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    if (ticketUrl.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            try {
+                              final uri = Uri.parse(ticketUrl);
+                              if (await canLaunchUrl(uri)) {
+                                await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              } else {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Tidak dapat membuka link tiket.')),
+                                  );
+                                }
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error: $e')),
+                                );
+                              }
+                            }
+                          },
+                          icon: const Icon(Icons.confirmation_number_outlined, color: AppColors.electricPink, size: 18),
+                          label: Text(
+                            'Beli Tiket Resmi di Web Mitra',
+                            style: GoogleFonts.inter(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            side: const BorderSide(color: AppColors.electricPink, width: 1.2),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          ),
+                        ),
+                      ),
+                    Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        gradient: AppColors.brandGradient,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.electricPink.withOpacity(0.35),
+                            blurRadius: 14,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _showEventOrderSelectionSheet(context, title, location);
+                        },
+                        icon: const Icon(Icons.directions_car_filled_rounded, color: Colors.white, size: 18),
+                        label: Text(
+                          'Pesan Perjalanan / Teman ke Sini',
+                          style: GoogleFonts.plusJakartaSans(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          padding: const EdgeInsets.symmetric(vertical: 15),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showEventOrderSelectionSheet(BuildContext context, String eventTitle, String eventLocation) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.obsidian,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.elevatedDark,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Pilih Layanan Menuju Event',
+              style: GoogleFonts.plusJakartaSans(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Tujuan otomatis diatur ke: $eventLocation',
+              style: GoogleFonts.inter(
+                color: AppColors.roseGold,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 18),
+            _buildModalOption(
+              context,
+              icon: Icons.local_taxi_rounded,
+              title: '🚕 Antar Jemput (Ride Service)',
+              subtitle: 'Diantar langsung ke lokasi acara secara aman',
+              color: AppColors.electricPink,
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AntarJemputBookingScreen(
+                      initialDestination: eventLocation,
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildModalOption(
+              context,
+              icon: Icons.wine_bar_rounded,
+              title: '🍸 Hangout Service (Temani Nonton)',
+              subtitle: 'Ditemani partner seru selama acara berlangsung',
+              color: AppColors.roseGold,
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => HangoutBookingScreen(
+                      initialDestination: eventLocation,
+                      initialActivity: 'Event: $eventTitle',
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+            _buildModalOption(
+              context,
+              icon: Icons.explore_rounded,
+              title: '✨ Freedom Request (Jastip Tiket / Antri)',
+              subtitle: 'Minta bantuan partner antrekan tiket atau negosiasi bebas',
+              color: const Color(0xFFFF8552),
+              onTap: () {
+                Navigator.pop(ctx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => FreedomRequestBookingScreen(
+                      initialDestination: eventLocation,
+                      initialDescription: 'Bantu antri tiket dan temani nonton event $eventTitle',
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 14),
+          ],
+        ),
+      ),
     );
   }
 

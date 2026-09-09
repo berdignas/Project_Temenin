@@ -13,11 +13,15 @@ import 'freedom_request_negotiation_screen.dart' as temenin_ajaa_negotiation;
 class HangoutBookingScreen extends StatefulWidget {
   final Map<String, dynamic>? selectedPartner;
   final String serviceType;
+  final String? initialDestination;
+  final String? initialActivity;
   
   const HangoutBookingScreen({
     super.key, 
     this.selectedPartner,
     this.serviceType = 'hangout',
+    this.initialDestination,
+    this.initialActivity,
   });
 
   @override
@@ -27,7 +31,7 @@ class HangoutBookingScreen extends StatefulWidget {
 class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
   final _formKey = GlobalKey<FormState>();
   final _pickupController = TextEditingController(text: 'Apartemen Senopati Tower A, Jaksel');
-  final _destinationController = TextEditingController(text: 'Senayan City Lobby Main Mall, Jaksel');
+  late final TextEditingController _destinationController;
   final _dateController = TextEditingController();
   final _timeController = TextEditingController();
   final _notesController = TextEditingController();
@@ -71,6 +75,12 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
   @override
   void initState() {
     super.initState();
+    _destinationController = TextEditingController(
+      text: widget.initialDestination ?? 'Senayan City Lobby Main Mall, Jaksel',
+    );
+    if (widget.initialActivity != null && widget.initialActivity!.isNotEmpty) {
+      _selectedActivity = widget.initialActivity!;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<DriverProvider>(context, listen: false).fetchDrivers();
     });

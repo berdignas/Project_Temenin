@@ -41,6 +41,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _subscribeToChat();
   }
 
+  Timer? _pollingTimer;
+
   @override
   void dispose() {
     _streamSubscription?.cancel();
@@ -55,6 +57,42 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       setState(() => _isConnecting = false);
       return;
     }
+    
+    _streamSubscription?.cancel();
+    _pollingTimer?.cancel();
+
+    try {
+      // 1. Primary: Stream from dedicated 'booking_messages' table with Supabase Realtime
+      _streamSubscription = Supabase.instance.client
+          .from('booking_messages')
+          .stream(primaryKey: ['id'])
+          .eq('booking_id', widget.bookingId!)
+          .order('created_at', ascending: true)
+          .listen((List<Map<String, dynamic>> data) {
+            if (mounted) {
+              if (data.isNotEmpty) {
+                final formatted = data.map((m) => _formatMessage(m)).toList();
+                setState(() {
+                  _messages = formatted;
+                  _isConnecting = false;
+                });
+                _scrollToBottom();
+              } else {
+                // If table is empty, check fallback
+                _fetchFallbackMessages();
+              }
+            }
+          }, onError: (err) {
+            debugPrint('⚠️ booking_messages stream notice: $err - using fallback stream');
+            _subscribeFallbackStream();
+          });
+    } catch (e) {
+      debugPrint('⚠️ Supabase stream init error: $e');
+      _subscribeFallbackStream();
+    }
+  }
+
+  void _subscribeFallbackStream() {
     try {
       _streamSubscription = Supabase.instance.client
           .from('bookings')
@@ -66,23 +104,59 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 _bookingData = data.first;
                 final details = _bookingData?['additional_details'] as Map<String, dynamic>?;
                 final msgs = details?['chat_messages'] as List<dynamic>?;
-                _messages = msgs?.map((m) => Map<String, dynamic>.from(m as Map)).toList() ?? [];
+                _messages = msgs?.map((m) => _formatMessage(Map<String, dynamic>.from(m as Map))).toList() ?? [];
                 _isConnecting = false;
               });
               _scrollToBottom();
             }
-          }, onError: (err) {
-            debugPrint('❌ Stream subscription error: $err');
-            if (mounted) {
-              setState(() => _isConnecting = false);
-            }
+          }, onError: (_) {
+            if (mounted) setState(() => _isConnecting = false);
           });
-    } catch (e) {
-      debugPrint('❌ Supabase stream error: $e');
-      if (mounted) {
-        setState(() => _isConnecting = false);
-      }
+    } catch (_) {
+      if (mounted) setState(() => _isConnecting = false);
     }
+  }
+
+  Future<void> _fetchFallbackMessages() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('bookings')
+          .select('additional_details')
+          .eq('id', widget.bookingId!)
+          .maybeSingle();
+      if (data != null && mounted) {
+        final details = data['additional_details'] as Map<String, dynamic>?;
+        final msgs = details?['chat_messages'] as List<dynamic>?;
+        if (msgs != null && msgs.isNotEmpty && _messages.isEmpty) {
+          setState(() {
+            _messages = msgs.map((m) => _formatMessage(Map<String, dynamic>.from(m as Map))).toList();
+            _isConnecting = false;
+          });
+          _scrollToBottom();
+        } else {
+          setState(() => _isConnecting = false);
+        }
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isConnecting = false);
+    }
+  }
+
+  Map<String, dynamic> _formatMessage(Map<String, dynamic> raw) {
+    String text = raw['message'] ?? raw['text'] ?? '';
+    String sender = raw['sender_role'] ?? raw['sender'] ?? 'user';
+    String time = raw['time'] ?? '';
+    if (time.isEmpty && raw['created_at'] != null) {
+      final dt = DateTime.tryParse(raw['created_at'].toString())?.toLocal() ?? DateTime.now();
+      time = "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+    }
+    return {
+      'id': raw['id'],
+      'sender': (sender == 'client' || sender == 'user') ? 'user' : 'driver',
+      'text': text,
+      'time': time.isNotEmpty ? time : _getCurrentTime(),
+      'created_at': raw['created_at'],
+    };
   }
 
   void _sendMessage() async {
@@ -90,7 +164,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (text.isEmpty) return;
 
     final now = DateTime.now();
-    final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+    final timeStr = _getCurrentTime();
     
     final newMsg = {
       'sender': 'user',
@@ -109,8 +183,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     });
     _scrollToBottom();
 
+    // 1. Send via Supabase booking_messages table
     try {
-      // Fetch freshest row to avoid overwriting recent messages
+      final user = Supabase.instance.client.auth.currentUser;
+      await Supabase.instance.client.from('booking_messages').insert({
+        'booking_id': widget.bookingId!,
+        'sender_id': user?.id ?? '00000000-0000-0000-0000-000000000000',
+        'sender_role': 'client',
+        'message': text,
+      });
+    } catch (e) {
+      debugPrint('Notice on booking_messages insert: $e (syncing via booking details)');
+    }
+
+    // 2. Also sync to booking's additional_details for backward compatibility
+    try {
       final freshRow = await Supabase.instance.client
           .from('bookings')
           .select('additional_details')
@@ -132,12 +219,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           })
           .eq('id', widget.bookingId!);
     } catch (e) {
-      debugPrint('❌ Error sending message: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Gagal mengirim pesan: $e"), backgroundColor: Colors.red),
-        );
-      }
+      debugPrint('Error syncing message: $e');
     }
   }
 

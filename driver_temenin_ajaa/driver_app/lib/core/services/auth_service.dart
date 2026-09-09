@@ -301,10 +301,26 @@ class AuthService {
           'driverData': data['data'] ?? data['driverData'],
         };
       }
-
-      final user = await getUser();
-      return {'success': true, 'user': user, 'driverData': null};
     } catch (e) {
+      debugPrint('[DriverAuth] Backend getProfile error: $e');
+    }
+    
+    // Fallback to Supabase direct fetch
+    try {
+      final user = await getUser();
+      if (user != null) {
+        final res = await Supabase.instance.client
+            .from('drivers')
+            .select()
+            .or('user_id.eq.${user.id},id.eq.${user.id}')
+            .maybeSingle();
+        if (res != null) {
+          return {'success': true, 'user': user, 'driverData': res};
+        }
+      }
+      return {'success': true, 'user': user, 'driverData': null};
+    } catch (sErr) {
+      debugPrint('[DriverAuth] Supabase getProfile fallback error: $sErr');
       final user = await getUser();
       return {'success': true, 'user': user, 'driverData': null};
     }

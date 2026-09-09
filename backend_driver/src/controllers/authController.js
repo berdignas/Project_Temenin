@@ -168,24 +168,12 @@ const login = async (req, res) => {
       user.role = 'driver';
     }
 
-    // Verify password (bcrypt + plaintext fallback)
+    // Verify password strictly with bcrypt
     let isPasswordValid = false;
     if (user.password_hash) {
       try {
         isPasswordValid = await bcrypt.compare(password, user.password_hash);
       } catch (_) {}
-
-      if (!isPasswordValid && password === user.password_hash) {
-        isPasswordValid = true;
-        // Upgrade plaintext password hash to bcrypt hash in DB
-        try {
-          const salt = await bcrypt.genSalt(10);
-          const hashed = await bcrypt.hash(password, salt);
-          await supabase.from('users').update({ password_hash: hashed }).eq('id', user.id);
-        } catch (hErr) {
-          console.error('Failed re-hashing password:', hErr);
-        }
-      }
     }
 
     if (!isPasswordValid) {

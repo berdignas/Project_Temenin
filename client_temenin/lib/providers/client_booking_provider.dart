@@ -33,15 +33,27 @@ class ClientBookingProvider extends ChangeNotifier {
           .listen((List<Map<String, dynamic>> data) async {
             debugPrint('⚡ Client Realtime: Received ${data.length} bookings for user $userId');
             if (data.isNotEmpty) {
-              final activeBookings = data.where((b) =>
-                  b['status'] == 'pending' ||
-                  b['status'] == 'accepted' ||
-                  b['status'] == 'confirmed' ||
-                  b['status'] == 'on_the_way' ||
-                  b['status'] == 'arrived' ||
-                  b['status'] == 'started' ||
-                  b['status'] == 'ongoing' ||
-                  b['status'] == 'in_progress').toList();
+              final activeBookings = data.where((b) {
+                final s = b['status']?.toString();
+                final addDetails = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+                final sub = addDetails?['sub_status']?.toString();
+
+                if (s == 'completed' || s == 'closed' || s == 'cancelled' || s == 'paid' ||
+                    sub == 'completed' || sub == 'closed' || sub == 'cancelled' || sub == 'paid') {
+                  return false;
+                }
+
+                return s == 'pending' ||
+                       s == 'accepted' ||
+                       s == 'confirmed' ||
+                       s == 'ongoing' ||
+                       s == 'in_progress' ||
+                       sub == 'dp_paid' ||
+                       sub == 'on_the_way' ||
+                       sub == 'arrived' ||
+                       sub == 'started' ||
+                       sub == 'ongoing';
+              }).toList();
 
               if (activeBookings.isNotEmpty) {
                 final latestRaw = activeBookings.last;

@@ -27,6 +27,8 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
   bool _initialized = false;
 
   List<String> _selectedCities = [];
+  List<String> _selectedSkills = [];
+  List<String> _selectedLanguages = [];
   List<Map<String, dynamic>> _vehicles = [];
   int _activeVehicleIndex = 0;
 
@@ -38,7 +40,52 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
     'Makassar',
     'Yogyakarta',
     'Semarang',
-    'Bali'
+    'Bali',
+    'Tangerang',
+    'Bekasi',
+    'Bogor',
+    'Depok',
+  ];
+
+  final List<String> _allSkillsRecommendation = [
+    'Paham Rute & Jalan Pintas',
+    'Mengemudi Defensif & Aman',
+    'Navigasi GPS Cepat & Ahli',
+    'Ramah & Komunikatif',
+    'Teman Wisata Kuliner & Kafe',
+    'Paham Spot Wisata & Tempat Hits',
+    'Fotografi & Bantu Foto Aesthetic',
+    'Disiplin & Selalu Tepat Waktu',
+    'Menjaga Privasi & Rahasia Klien',
+    'Bantuan Angkat Barang Belanja',
+    'Tanggap Darurat Kendaraan',
+    'Rute Antar Kota & Tol Bebas Hambatan',
+    'Antar Jemput Bandara & Stasiun',
+    'Pendengar Cerita yang Baik & Berempati',
+    'Peka Terhadap Kebutuhan Klien',
+    'Berpakaian Rapi, Bersih & Wangi',
+    'Etika & Tata Krama Sopan',
+    'Teman Nonton / Konser / Event',
+    'Pendamping Acara Formal & Bisnis',
+    'Siap Menunggu dengan Sabar',
+    'Pet Friendly (Ramah Hewan)',
+    'Bebas Asap Rokok di Kendaraan',
+    'Kabin Bersih & AC Dingin',
+    'Paham Area Belanja & Mall',
+    'Asisten Pribadi On-The-Go',
+  ];
+
+  final List<String> _allLanguages = [
+    'Bahasa Indonesia',
+    'Bahasa Inggris',
+    'Bahasa Jawa',
+    'Bahasa Sunda',
+    'Bahasa Mandarin',
+    'Bahasa Jepang',
+    'Bahasa Korea',
+    'Bahasa Arab',
+    'Bahasa Minang',
+    'Bahasa Bali',
   ];
 
   @override
@@ -64,6 +111,12 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
           if (metadata['operational_cities'] != null) {
             _selectedCities = List<String>.from(metadata['operational_cities']);
           }
+          if (metadata['skills'] != null) {
+            _selectedSkills = List<String>.from(metadata['skills']);
+          }
+          if (metadata['languages'] != null) {
+            _selectedLanguages = List<String>.from(metadata['languages']);
+          }
           if (metadata['vehicles'] != null) {
             _vehicles = List<Map<String, dynamic>>.from(
               (metadata['vehicles'] as List).map((v) => Map<String, dynamic>.from(v))
@@ -78,16 +131,29 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
         bioText = vehicleStnk;
       }
 
-      if (_vehicles.isEmpty) {
-        _vehicles.add({
-          'type': driver?['vehicle_type'] ?? 'Motor',
-          'name': driver?['vehicle_name'] ?? 'Honda PCX',
-          'plate_number': driver?['plate_number'] ?? 'B 1234 XYZ',
-          'age': '< 5 Tahun',
-        });
+      if (_selectedLanguages.isEmpty) {
+        _selectedLanguages = ['Bahasa Indonesia'];
       }
 
-      final activeV = _activeVehicleIndex < _vehicles.length ? _vehicles[_activeVehicleIndex] : _vehicles[0];
+      if (_vehicles.isEmpty) {
+        final vName = driver?['vehicle_name']?.toString().trim();
+        final vPlate = driver?['plate_number']?.toString().trim();
+        final vType = driver?['vehicle_type']?.toString().trim();
+
+        if (vName != null && vName.isNotEmpty && vName != 'Belum diatur') {
+          _vehicles.add({
+            'type': (vType != null && vType.isNotEmpty) ? vType : 'Motor',
+            'name': vName,
+            'plate_number': (vPlate != null && vPlate.isNotEmpty) ? vPlate : '',
+            'age': '< 5 Tahun',
+          });
+        }
+      }
+
+      final activeV = (_vehicles.isNotEmpty && _activeVehicleIndex < _vehicles.length)
+          ? _vehicles[_activeVehicleIndex]
+          : {'name': driver?['vehicle_name'] ?? '', 'plate_number': driver?['plate_number'] ?? ''};
+
       _vehicleNameController = TextEditingController(text: activeV['name'] ?? '');
       _plateNumberController = TextEditingController(text: activeV['plate_number'] ?? '');
       _bioController = TextEditingController(text: bioText);
@@ -119,6 +185,8 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
     final metadata = {
       'bio': _bioController.text,
       'operational_cities': _selectedCities,
+      'skills': _selectedSkills,
+      'languages': _selectedLanguages,
       'vehicles': _vehicles,
       'active_vehicle_index': _activeVehicleIndex,
     };
@@ -139,17 +207,41 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
 
     if (success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profil berhasil diperbarui'),
-          backgroundColor: Colors.green,
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Text(
+                'Profil berhasil diperbarui!',
+                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.green.shade600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
       Navigator.pop(context);
     } else if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(auth.errorMessage ?? 'Gagal memperbarui profil'),
-          backgroundColor: Colors.red[800],
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  auth.errorMessage ?? 'Gagal memperbarui profil',
+                  style: GoogleFonts.poppins(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     }
@@ -159,32 +251,35 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: Text(
-          "Edit Profil",
-          style: GoogleFonts.poppins(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 18),
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      behavior: HitTestBehavior.opaque,
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: Text(
+            "Edit Profil",
+            style: GoogleFonts.poppins(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 18),
+          ),
+          backgroundColor: AppTheme.surface,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textHighContrast),
+            onPressed: () => Navigator.pop(context),
+          ),
         ),
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textHighContrast),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: AppTheme.darkBgGradient,
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.all(24.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: AppTheme.darkBgGradient,
+          ),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.all(24.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildSectionHeader("INFORMASI PRIBADI"),
                   
@@ -193,17 +288,26 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                     controller: _fullNameController,
                     hint: "Andi Wijaya",
                     icon: Icons.person_rounded,
-                    validator: (v) => v!.trim().isEmpty ? 'Nama harus diisi' : null,
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Nama harus diisi';
+                      if (v.trim().length < 3) return 'Nama minimal 3 karakter';
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 16),
 
                   _buildFieldLabel("NOMOR TELEPON"),
                   _buildTextField(
                     controller: _phoneController,
-                    hint: "+62 812-xxxx-xxxx",
+                    hint: "0812xxxxxxxx",
                     icon: Icons.phone_rounded,
                     keyboardType: TextInputType.phone,
-                    validator: (v) => v!.trim().isEmpty ? 'Nomor telepon harus diisi' : null,
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) return 'Nomor telepon harus diisi';
+                      if (!RegExp(r'^[0-9]+$').hasMatch(v.trim())) return 'Hanya boleh angka';
+                      if (v.trim().length < 9 || v.trim().length > 15) return 'Nomor tidak valid (9-15 digit)';
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 16),
 
@@ -396,6 +500,145 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                     icon: Icons.description_rounded,
                     maxLines: 4,
                   ),
+                  const SizedBox(height: 24),
+
+                  _buildSectionHeader("AREA OPERASIONAL & JANGKAUAN"),
+                  _buildFieldLabel("PILIH KOTA OPERASIONAL"),
+                  Text(
+                    "Pilih kota-kota tempat Anda siap melayani penjemputan & pendampingan klien.",
+                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _allCities.map((city) {
+                      final isSelected = _selectedCities.contains(city);
+                      return FilterChip(
+                        label: Text(city),
+                        selected: isSelected,
+                        selectedColor: AppTheme.primaryPink.withOpacity(0.2),
+                        checkmarkColor: AppTheme.primaryPink,
+                        labelStyle: GoogleFonts.plusJakartaSans(
+                          color: isSelected ? AppTheme.primaryPink : AppTheme.textHighContrast,
+                          fontSize: 12,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                        backgroundColor: AppTheme.surface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: BorderSide(color: isSelected ? AppTheme.primaryPink : AppTheme.border),
+                        ),
+                        onSelected: (selected) {
+                          setState(() {
+                            if (selected) {
+                              _selectedCities.add(city);
+                            } else {
+                              _selectedCities.remove(city);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 28),
+
+                  _buildSectionHeader("KEAHLIAN & SPESIALISASI DRIVER"),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildFieldLabel("PILIH DARI REKOMENDASI RESMI"),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryPink.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          "${_selectedSkills.length} Dipilih",
+                          style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    "Pilih keahlian & nilai tambah Anda (minimal 3 - 10+ keahlian) yang akan ditampilkan di profil Anda kepada klien.",
+                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _allSkillsRecommendation.map((skill) {
+                      final isSelected = _selectedSkills.contains(skill);
+                      return FilterChip(
+                        label: Text(skill),
+                        selected: isSelected,
+                        selectedColor: AppTheme.primaryPink.withOpacity(0.2),
+                        checkmarkColor: AppTheme.primaryPink,
+                        labelStyle: GoogleFonts.plusJakartaSans(
+                          color: isSelected ? AppTheme.primaryPink : AppTheme.textHighContrast,
+                          fontSize: 12,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                        backgroundColor: AppTheme.surface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: BorderSide(color: isSelected ? AppTheme.primaryPink : AppTheme.border),
+                        ),
+                        onSelected: (selected) {
+                          setState(() {
+                            if (selected) {
+                              _selectedSkills.add(skill);
+                            } else {
+                              _selectedSkills.remove(skill);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 28),
+
+                  _buildSectionHeader("KEMAMPUAN BAHASA PERCAKAPAN"),
+                  _buildFieldLabel("PILIH BAHASA YANG DIKUASAI"),
+                  Text(
+                    "Pilih bahasa yang Anda kuasai untuk memudahkan komunikasi saat mendampingi klien.",
+                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _allLanguages.map((lang) {
+                      final isSelected = _selectedLanguages.contains(lang);
+                      return FilterChip(
+                        label: Text(lang),
+                        selected: isSelected,
+                        selectedColor: AppTheme.primaryPink.withOpacity(0.2),
+                        checkmarkColor: AppTheme.primaryPink,
+                        labelStyle: GoogleFonts.plusJakartaSans(
+                          color: isSelected ? AppTheme.primaryPink : AppTheme.textHighContrast,
+                          fontSize: 12,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        ),
+                        backgroundColor: AppTheme.surface,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          side: BorderSide(color: isSelected ? AppTheme.primaryPink : AppTheme.border),
+                        ),
+                        onSelected: (selected) {
+                          setState(() {
+                            if (selected) {
+                              _selectedLanguages.add(lang);
+                            } else {
+                              _selectedLanguages.remove(lang);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
                   const SizedBox(height: 40),
 
                   SizedBox(
@@ -421,13 +664,27 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                           ),
                         ),
                         child: auth.isLoading
-                            ? const SizedBox(
-                                height: 24,
-                                width: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.5,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                ),
+                            ? Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    "Menyimpan Perubahan...",
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ],
                               )
                             : Text(
                                 "SIMPAN PERUBAHAN",
@@ -448,8 +705,9 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildSectionHeader(String title) {
     return Column(

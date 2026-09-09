@@ -8,8 +8,15 @@ import 'freedom_request_negotiation_screen.dart';
 
 class FreedomRequestBookingScreen extends StatefulWidget {
   final Map<String, dynamic>? selectedPartner;
+  final String? initialDescription;
+  final String? initialDestination;
   
-  const FreedomRequestBookingScreen({super.key, this.selectedPartner});
+  const FreedomRequestBookingScreen({
+    super.key, 
+    this.selectedPartner,
+    this.initialDescription,
+    this.initialDestination,
+  });
 
   @override
   State<FreedomRequestBookingScreen> createState() => _FreedomRequestBookingScreenState();
@@ -17,9 +24,9 @@ class FreedomRequestBookingScreen extends StatefulWidget {
 
 class _FreedomRequestBookingScreenState extends State<FreedomRequestBookingScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _descriptionController = TextEditingController();
+  late final TextEditingController _descriptionController;
   final _pickupController = TextEditingController();
-  final _destinationController = TextEditingController();
+  late final TextEditingController _destinationController;
   final _dateController = TextEditingController();
   final _timeController = TextEditingController();
   final _notesController = TextEditingController();
@@ -67,6 +74,8 @@ class _FreedomRequestBookingScreenState extends State<FreedomRequestBookingScree
   @override
   void initState() {
     super.initState();
+    _descriptionController = TextEditingController(text: widget.initialDescription ?? '');
+    _destinationController = TextEditingController(text: widget.initialDestination ?? '');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<DriverProvider>(context, listen: false).fetchDrivers();
     });

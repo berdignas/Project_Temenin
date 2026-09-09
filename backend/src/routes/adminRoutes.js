@@ -15,8 +15,17 @@ const {
   updateBookingStatus,
   topUpUserBalance,
   getCommunityPosts,
-  deleteCommunityPost
+  deleteCommunityPost,
+  getEvents,
+  createEvent,
+  updateEvent,
+  deleteEvent
 } = require('../controllers/adminController');
+const { protect, requireRole } = require('../middleware/authMiddleware');
+
+// Protect all admin routes
+router.use(protect);
+router.use(requireRole(['admin']));
 
 // Admin Dashboard & Stats
 router.get('/stats', getDashboardStats);
@@ -44,5 +53,11 @@ router.post('/topup', topUpUserBalance);
 // Community Content Moderation
 router.get('/community/posts', getCommunityPosts);
 router.delete('/community/posts/:id', deleteCommunityPost);
+
+// Event Terdekat Management
+router.get('/events', getEvents);
+router.post('/events', createEvent);
+router.put('/events/:id', updateEvent);
+router.delete('/events/:id', deleteEvent);
 
 module.exports = router;

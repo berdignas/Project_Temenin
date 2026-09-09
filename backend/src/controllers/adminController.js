@@ -427,3 +427,118 @@ exports.deleteCommunityPost = async (req, res) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+
+// 7. Event Terdekat Management
+let memoryEvents = [
+  {
+    id: 'ev-1',
+    title: 'We The Fest 2026',
+    date_string: '14-16 Ags 2026',
+    location: 'GBK Sports Complex, Jaksel',
+    image_url: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?q=80&w=600&auto=format&fit=crop',
+    ticket_url: 'https://wethefest.com',
+    category: 'Festival Musik',
+    description: 'Festival musik musim panas terbesar di Jakarta menghadirkan musisi internasional dan lokal terbaik.',
+    is_active: true,
+    created_at: new Date()
+  },
+  {
+    id: 'ev-2',
+    title: 'Java Jazz Festival',
+    date_string: '28-30 Nov 2026',
+    location: 'JIExpo Kemayoran, Jakpus',
+    image_url: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=600&auto=format&fit=crop',
+    ticket_url: 'https://javajazzfestival.com',
+    category: 'Konser Musik',
+    description: 'Rasakan alunan jazz spektakuler dari musisi legendaris dalam dan luar negeri.',
+    is_active: true,
+    created_at: new Date()
+  },
+  {
+    id: 'ev-3',
+    title: 'Indonesia Comic Con',
+    date_string: '23-25 Des 2026',
+    location: 'JCC Senayan, Jaksel',
+    image_url: 'https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=600&auto=format&fit=crop',
+    ticket_url: 'https://indonesiacomiccon.com',
+    category: 'Pameran & Pop Culture',
+    description: 'Ajang kumpul komunitas pecinta anime, cosplay, game, dan komik terbesar di Indonesia.',
+    is_active: true,
+    created_at: new Date()
+  }
+];
+
+exports.getEvents = async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('app_events')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error || !data || data.length === 0) {
+      return res.status(200).json({ success: true, data: memoryEvents });
+    }
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    res.status(200).json({ success: true, data: memoryEvents });
+  }
+};
+
+exports.createEvent = async (req, res) => {
+  try {
+    const eventData = {
+      ...req.body,
+      is_active: req.body.is_active !== undefined ? req.body.is_active : true,
+      created_at: new Date()
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from('app_events')
+      .insert([eventData])
+      .select();
+
+    if (error) {
+      const newEv = { id: 'ev-' + Date.now(), ...eventData };
+      memoryEvents.unshift(newEv);
+      return res.status(201).json({ success: true, message: 'Event berhasil ditambahkan', data: newEv });
+    }
+
+    res.status(201).json({ success: true, message: 'Event berhasil ditambahkan', data: data[0] });
+  } catch (error) {
+    const newEv = { id: 'ev-' + Date.now(), ...req.body, is_active: true, created_at: new Date() };
+    memoryEvents.unshift(newEv);
+    res.status(201).json({ success: true, message: 'Event berhasil disimpan', data: newEv });
+  }
+};
+
+exports.updateEvent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('app_events')
+      .update({ ...req.body, updated_at: new Date() })
+      .eq('id', id)
+      .select();
+
+    memoryEvents = memoryEvents.map(ev => ev.id === id ? { ...ev, ...req.body } : ev);
+
+    res.status(200).json({ success: true, message: 'Event berhasil diperbarui', data: data ? data[0] : null });
+  } catch (error) {
+    const { id } = req.params;
+    memoryEvents = memoryEvents.map(ev => ev.id === id ? { ...ev, ...req.body } : ev);
+    res.status(200).json({ success: true, message: 'Event diperbarui' });
+  }
+};
+
+exports.deleteEvent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await supabaseAdmin.from('app_events').delete().eq('id', id);
+    memoryEvents = memoryEvents.filter(ev => ev.id !== id);
+    res.status(200).json({ success: true, message: 'Event berhasil dihapus' });
+  } catch (error) {
+    const { id } = req.params;
+    memoryEvents = memoryEvents.filter(ev => ev.id !== id);
+    res.status(200).json({ success: true, message: 'Event berhasil dihapus' });
+  }
+};

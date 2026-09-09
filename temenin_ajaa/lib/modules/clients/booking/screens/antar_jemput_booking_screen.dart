@@ -9,11 +9,13 @@ import 'package:temenin_ajaa/core/theme/app_theme.dart';
 class AntarJemputBookingScreen extends StatefulWidget {
   final Map<String, dynamic>? selectedPartner;
   final String serviceType;
+  final String? initialDestination;
   
   const AntarJemputBookingScreen({
     super.key, 
     this.selectedPartner,
     this.serviceType = 'regular',
+    this.initialDestination,
   });
 
   @override
@@ -23,7 +25,7 @@ class AntarJemputBookingScreen extends StatefulWidget {
 class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
   final _formKey = GlobalKey<FormState>();
   final _pickupController = TextEditingController();
-  final _destinationController = TextEditingController();
+  late final TextEditingController _destinationController;
   final _dateController = TextEditingController();
   final _timeController = TextEditingController();
   final _notesController = TextEditingController();
@@ -55,6 +57,7 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
   @override
   void initState() {
     super.initState();
+    _destinationController = TextEditingController(text: widget.initialDestination ?? '');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<DriverProvider>(context, listen: false).fetchDrivers();
     });

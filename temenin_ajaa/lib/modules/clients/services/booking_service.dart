@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:temenin_ajaa/core/constants/api_constants.dart';
 import '../../../data/models/booking_model.dart';
 
-const String BASE_URL = ApiConstants.baseUrl;
+String get BASE_URL => ApiConstants.baseUrl;
 
 class BookingService {
   Future<Map<String, dynamic>> getBookingHistory(String userId) async {

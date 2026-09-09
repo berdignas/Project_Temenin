@@ -11,6 +11,7 @@ import { DriverApprovals } from './pages/DriverApprovals';
 import { Bookings } from './pages/Bookings';
 import { Finance } from './pages/Finance';
 import { Community } from './pages/Community';
+import { Events } from './pages/Events';
 import { Settings } from './pages/Settings';
 import { adminApi } from './services/api';
 
@@ -61,6 +62,7 @@ export default function App() {
             <Route path="/drivers" element={<Drivers />} />
             <Route path="/driver-approvals" element={<DriverApprovals />} />
             <Route path="/bookings" element={<Bookings />} />
+            <Route path="/events" element={<Events />} />
             <Route path="/finance" element={<Finance />} />
             <Route path="/community" element={<Community />} />
             <Route path="/settings" element={<Settings />} />

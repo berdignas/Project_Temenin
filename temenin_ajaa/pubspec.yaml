@@ -18,11 +18,13 @@ dependencies:
   url_launcher: ^6.2.5
   provider: ^6.0.5
   supabase_flutter: ^2.0.0
+  connectivity_plus: ^6.0.5
   
   # Cupertino Icons (optional)
   cupertino_icons: ^1.0.6
   image_picker: ^1.2.1
   video_player: ^2.8.6
+  flutter_dotenv: ^6.0.1
 
 dev_dependencies:
   flutter_test:
@@ -34,6 +36,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - .env
     - assets/images/
     - assets/images/partners/
     - assets/images/bike/

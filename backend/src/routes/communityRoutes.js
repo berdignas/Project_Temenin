@@ -11,13 +11,13 @@ const {
 const { protect, optionalProtect } = require('../middleware/authMiddleware');
 
 router.get('/stories', optionalProtect, getStories);
-router.post('/stories', optionalProtect, createStory);
+router.post('/stories', protect, createStory);
 
 router.get('/posts', optionalProtect, getPosts);
-router.post('/posts', optionalProtect, createPost);
+router.post('/posts', protect, createPost);
 
-router.post('/posts/:postId/like', optionalProtect, toggleLikePost);
-router.post('/posts/:postId/comments', optionalProtect, addComment);
+router.post('/posts/:postId/like', protect, toggleLikePost);
+router.post('/posts/:postId/comments', protect, addComment);
 
 module.exports = router;
 

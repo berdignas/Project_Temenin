@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'core/services/notification_sound_service.dart';
 import 'core/theme/app_theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/booking_provider.dart';
@@ -14,12 +15,19 @@ void main() async {
   // Initialize Supabase (matching client configurations)
   try {
     await Supabase.initialize(
-      url: 'https://wdjjaevfuxqrephhdacp.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkamphZXZmdXhxcmVwaGhkYWNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4ODI5MjQ0MSwiZXhwIjoyMTAzODY4NDQxfQ.GCnanHjOJ095gHvQwHXHLy_zpgAg1c7VRc90ZpO4ROc',
+      url: const String.fromEnvironment('SUPABASE_URL', defaultValue: ''),
+      anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: ''),
     );
     debugPrint('✅ Supabase initialized successfully on Driver App');
   } catch (e) {
     debugPrint('❌ Error initializing Supabase on Driver App: $e');
+  }
+
+  // Initialize Notification Audio Service
+  try {
+    await NotificationSoundService().init();
+  } catch (e) {
+    debugPrint('ℹ️ NotificationSoundService init info: $e');
   }
   
   runApp(const MyApp());

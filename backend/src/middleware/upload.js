@@ -16,19 +16,10 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     // 🔴 PERBAIKI: Dapatkan ekstensi dari originalname atau mimetype
-    let ext = path.extname(file.originalname);
-    if (!ext && file.mimetype) {
-      // Jika tidak ada ekstensi, buat dari mimetype
-      const mimeToExt = {
-        'image/jpeg': '.jpg',
-        'image/jpg': '.jpg',
-        'image/png': '.png',
-        'image/gif': '.gif',
-        'image/webp': '.webp'
-      };
-      ext = mimeToExt[file.mimetype] || '.jpg';
-    }
-    cb(null, 'avatar-' + uniqueSuffix + ext);
+    let ext = path.extname(file.originalname).toLowerCase();
+    const allowedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    const safeExt = allowedExt.includes(ext) ? ext : '.jpg';
+    cb(null, 'avatar-' + uniqueSuffix + safeExt);
   }
 });
 
@@ -41,21 +32,17 @@ const fileFilter = (req, file, cb) => {
     size: file.size
   });
   
-  // Izinkan semua file yang memiliki mimetype image
+  // Hanya izinkan file dengan mimetype dan ekstensi gambar yang valid
   const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-  const isAllowedMime = allowedMimeTypes.includes(file.mimetype);
-  
-  // Juga cek ekstensi file
   const ext = path.extname(file.originalname).toLowerCase();
   const allowedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-  const isAllowedExt = allowedExt.includes(ext);
-  
-  if (isAllowedMime || isAllowedExt) {
+
+  if (allowedMimeTypes.includes(file.mimetype) && allowedExt.includes(ext)) {
     console.log('✅ File accepted');
     return cb(null, true);
   } else {
     console.log('❌ File rejected:', file.mimetype, ext);
-    cb(new Error('Only image files are allowed (jpeg, jpg, png, gif, webp)'));
+    return cb(new Error('Only image files are allowed (jpeg, jpg, png, gif, webp)'));
   }
 };
 
