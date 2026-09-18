@@ -1,4 +1,5 @@
 import 'user_model.dart';
+import '../../core/utils/booking_date_helper.dart';
 
 class BookingModel {
   final String id;
@@ -37,6 +38,49 @@ class BookingModel {
     this.client,
   });
 
+  double? get reviewRating {
+    final r = additionalDetails?['rating'] ?? additionalDetails?['review']?['rating'];
+    if (r is num) return r.toDouble();
+    if (r != null) return double.tryParse(r.toString());
+    return null;
+  }
+
+  String? get reviewComment {
+    return additionalDetails?['comment']?.toString() ?? additionalDetails?['review']?['comment']?.toString();
+  }
+
+  double? get driverRatingClient {
+    final r = additionalDetails?['driver_rating_client'] ?? additionalDetails?['client_review']?['rating'];
+    if (r is num) return r.toDouble();
+    if (r != null) return double.tryParse(r.toString());
+    return null;
+  }
+
+  String? get driverCommentClient {
+    return additionalDetails?['driver_comment_client']?.toString() ?? additionalDetails?['client_review']?['comment']?.toString();
+  }
+
+  String get serviceType {
+    return additionalDetails?['serviceType']?.toString() ??
+           additionalDetails?['service_type']?.toString() ??
+           additionalDetails?['type']?.toString() ??
+           '';
+  }
+
+  bool get isFlexible {
+    if (additionalDetails?['is_flexible'] == true || additionalDetails?['isFlexible'] == true) {
+      return true;
+    }
+    final st = serviceType.toLowerCase();
+    return st == 'freedom' || 
+           st == 'freedom_request' || 
+           st == 'assistant' || 
+           st == 'detektif' || 
+           st == 'detective' ||
+           st.contains('suruh') ||
+           st.contains('fleksibel');
+  }
+
   factory BookingModel.fromJson(Map<String, dynamic> json) {
     final addDetails = json['additional_details'] is Map<String, dynamic>
         ? json['additional_details'] as Map<String, dynamic>
@@ -50,7 +94,7 @@ class BookingModel {
 
     final rawStatus = json['status']?.toString() ?? 'pending';
     final subStatus = addDetails?['sub_status']?.toString();
-    final isDpPaid = addDetails?['dp_paid'] == true || subStatus == 'dp_paid' || json['dp_paid'] == true;
+    final isDpPaid = addDetails?['dp_paid'] == true || subStatus == 'dp_paid';
 
     final isAdvanced = subStatus == 'on_the_way' || 
                        subStatus == 'arrived' || 
@@ -62,6 +106,8 @@ class BookingModel {
     String effectiveStatus = subStatus ?? rawStatus;
     if (isDpPaid && !isAdvanced) {
       effectiveStatus = 'dp_paid';
+    } else if (!isDpPaid && !isAdvanced && (rawStatus == 'accepted' || rawStatus == 'ongoing')) {
+      effectiveStatus = 'accepted';
     }
 
     return BookingModel(
@@ -77,7 +123,7 @@ class BookingModel {
       dropoffLongitude: json['dropoff_longitude'] != null ? (json['dropoff_longitude'] as num).toDouble() : null,
       duration: json['duration'] ?? 0,
       totalPrice: (json['total_price'] ?? json['totalPrice'] ?? 0.0).toDouble(),
-      bookingDate: json['booking_date'] != null ? DateTime.tryParse(json['booking_date'].toString()) : null,
+      bookingDate: BookingDateHelper.extractScheduledDateTime(json) ?? (json['booking_date'] != null ? DateTime.tryParse(json['booking_date'].toString()) : null),
       additionalDetails: addDetails,
       createdAt: json['created_at'] != null ? (DateTime.tryParse(json['created_at'].toString()) ?? DateTime.now()) : DateTime.now(),
       client: json['users'] != null ? UserModel.fromJson(json['users']) : null,
@@ -141,4 +187,41 @@ class BookingModel {
       client: client ?? this.client,
     );
   }
+
+  bool get isCompleted =>
+      status == 'completed' ||
+      status == 'paid' ||
+      status == 'closed' ||
+      additionalDetails?['pelunasan_paid'] == true ||
+      additionalDetails?['sub_status'] == 'paid' ||
+      additionalDetails?['sub_status'] == 'closed';
+
+  bool get isPelunasanPaid =>
+      additionalDetails?['pelunasan_paid'] == true ||
+      additionalDetails?['final_paid'] == true ||
+      additionalDetails?['sub_status'] == 'paid' ||
+      additionalDetails?['payment_status'] == 'LUNAS' ||
+      status == 'paid';
+
+  bool get isCancelled =>
+      status == 'cancelled' ||
+      additionalDetails?['sub_status'] == 'cancelled';
+
+  bool get isOngoingTrip {
+    if (isCompleted || isCancelled) return false;
+    final sub = additionalDetails?['sub_status']?.toString();
+    return sub == 'on_the_way' ||
+           sub == 'arrived' ||
+           sub == 'started' ||
+           sub == 'ongoing' ||
+           status == 'on_the_way' ||
+           status == 'arrived' ||
+           status == 'started';
+  }
+
+  bool get isUpcoming =>
+      !isCompleted &&
+      !isCancelled &&
+      !isOngoingTrip &&
+      (status == 'accepted' || status == 'dp_paid' || status == 'confirmed');
 }

@@ -92,17 +92,24 @@ class BookingService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        final innerData = (data['data'] is Map) ? (data['data'] as Map) : data;
+        final rawEarnings = data['totalEarnings'] ?? innerData['total_earnings'] ?? innerData['totalEarnings'] ?? 0;
+        final rawRides = data['totalRides'] ?? innerData['total_rides'] ?? innerData['totalRides'] ?? 0;
+        final rawEscrow = data['pendingEscrow'] ?? innerData['pending_escrow'] ?? innerData['pendingEscrow'] ?? 0;
+
         return {
           'success': true,
-          'totalEarnings': (data['totalEarnings'] ?? 0).toDouble(),
-          'totalRides': data['totalRides'] ?? 0,
-          'bookings': data['bookings'] ?? [],
+          'totalEarnings': (rawEarnings is num) ? rawEarnings.toDouble() : (double.tryParse(rawEarnings.toString()) ?? 0.0),
+          'totalRides': (rawRides is num) ? rawRides.toInt() : (int.tryParse(rawRides.toString()) ?? 0),
+          'pendingEscrow': (rawEscrow is num) ? rawEscrow.toDouble() : (double.tryParse(rawEscrow.toString()) ?? 0.0),
+          'bookings': data['bookings'] ?? innerData['bookings'] ?? [],
         };
       }
       return {
         'success': true,
         'totalEarnings': 0.0,
         'totalRides': 0,
+        'pendingEscrow': 0.0,
         'bookings': [],
       };
     } catch (e) {
@@ -110,6 +117,7 @@ class BookingService {
         'success': true,
         'totalEarnings': 0.0,
         'totalRides': 0,
+        'pendingEscrow': 0.0,
         'bookings': [],
       };
     }

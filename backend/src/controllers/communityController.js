@@ -1,11 +1,14 @@
 const { supabaseAdmin } = require('../config/supabase');
 
-// Get all active stories
+// Get all active stories (created within 24 hours)
 exports.getStories = async (req, res, next) => {
   try {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
     const { data: stories, error } = await supabaseAdmin
       .from('community_stories')
       .select('*, user:users(id, full_name, avatar_url, role)')
+      .gte('created_at', twentyFourHoursAgo)
       .order('created_at', { ascending: false });
 
     if (error) throw error;

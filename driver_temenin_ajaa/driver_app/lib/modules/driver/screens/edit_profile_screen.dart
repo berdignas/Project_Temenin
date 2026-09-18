@@ -4,6 +4,7 @@ import '../../../core/theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../providers/auth_provider.dart';
+import 'driver_addons_screen.dart';
 
 class EditDriverProfileScreen extends StatefulWidget {
   const EditDriverProfileScreen({super.key});
@@ -30,6 +31,7 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
   List<String> _selectedSkills = [];
   List<String> _selectedLanguages = [];
   List<Map<String, dynamic>> _vehicles = [];
+  List<Map<String, dynamic>> _addons = [];
   int _activeVehicleIndex = 0;
 
   final List<String> _allCities = [
@@ -122,6 +124,11 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
               (metadata['vehicles'] as List).map((v) => Map<String, dynamic>.from(v))
             );
           }
+          if (metadata['addons'] != null) {
+            _addons = List<Map<String, dynamic>>.from(
+              (metadata['addons'] as List).map((a) => Map<String, dynamic>.from(a))
+            );
+          }
           _activeVehicleIndex = metadata['active_vehicle_index'] ?? 0;
           bioText = metadata['bio'] ?? '';
         } catch (e) {
@@ -188,6 +195,7 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
       'skills': _selectedSkills,
       'languages': _selectedLanguages,
       'vehicles': _vehicles,
+      'addons': _addons,
       'active_vehicle_index': _activeVehicleIndex,
     };
     final String vehicleStnkJsonString = jsonEncode(metadata);
@@ -466,22 +474,85 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                   ),
                   const SizedBox(height: 30),
 
-                  _buildSectionHeader("PENGATURAN LAYANAN"),
-
-                  _buildFieldLabel("TARIF PER JAM (RP)"),
-                  _buildTextField(
-                    controller: _priceController,
-                    hint: "50000",
-                    icon: Icons.monetization_on_rounded,
-                    keyboardType: TextInputType.number,
-                    validator: (v) {
-                      if (v!.trim().isEmpty) return 'Tarif harus diisi';
-                      final price = double.tryParse(v);
-                      if (price == null || price < 25000) return 'Tarif minimal Rp 25.000';
-                      return null;
-                    },
+                  _buildSectionHeader("KEBIJAKAN TARIF & STANDARISASI"),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.cardDeep,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryPink.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.verified_rounded, color: AppTheme.primaryPink, size: 20),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "Tarif Ditetapkan Oleh Admin",
+                                    style: GoogleFonts.plusJakartaSans(
+                                      color: AppTheme.textHighContrast,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  Text(
+                                    "Standarisasi Resmi Platform",
+                                    style: GoogleFonts.inter(
+                                      color: AppTheme.primaryPink,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.green.withOpacity(0.4)),
+                              ),
+                              child: const Text(
+                                "HARGA PAS",
+                                style: TextStyle(
+                                  color: Colors.greenAccent,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "Untuk menjaga keadilan dan transparansi bagi Mitra dan Klien, seluruh tarif pesanan (Per KM & Per Jam) diatur terpusat oleh Admin. Driver tidak dapat mengubah tarif manual dan pesanan reguler langsung menggunakan tarif resmi tanpa tawar-menawar.",
+                          style: GoogleFonts.inter(
+                            color: AppTheme.textMuted,
+                            fontSize: 11.5,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
+
+                  _buildSectionHeader("PENGALAMAN & PROFIL"),
 
                   _buildFieldLabel("PENGALAMAN (TAHUN)"),
                   _buildTextField(
@@ -638,6 +709,95 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                         },
                       );
                     }).toList(),
+                  ),
+                  const SizedBox(height: 28),
+
+                  _buildSectionHeader("ADD-ONS & FASILITAS TAMBAHAN"),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildFieldLabel("FASILITAS EKSTRA UNTUK KLIEN"),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryPink.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          "${_addons.where((a) => a['is_active'] == true).length} Aktif",
+                          style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Text(
+                    "Atur add-ons yang Anda sediakan (Kamera Pro, AC, Outfit Match, Snack, Tour Guide, dll) agar klien dapat memilihnya di form pemesanan.",
+                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                  ),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const DriverAddonsScreen()),
+                      );
+                      // Reload addons from driver profile
+                      final auth = Provider.of<AuthProvider>(context, listen: false);
+                      final String vehicleStnk = auth.driverProfileData?['vehicle_stnk'] ?? '';
+                      if (vehicleStnk.startsWith('{')) {
+                        try {
+                          final meta = jsonDecode(vehicleStnk);
+                          if (meta['addons'] != null) {
+                            setState(() {
+                              _addons = List<Map<String, dynamic>>.from(meta['addons']);
+                            });
+                          }
+                        } catch (_) {}
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: AppTheme.fuchsiaLight,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(Icons.extension_rounded, color: AppTheme.primaryPink, size: 22),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Kelola & Tambah Add-on Mitra",
+                                  style: GoogleFonts.plusJakartaSans(
+                                    color: AppTheme.textHighContrast,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  "Atur tarif tambahan & fasilitas kustom Anda",
+                                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.primaryPink, size: 16),
+                        ],
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 40),
 

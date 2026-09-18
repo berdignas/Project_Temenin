@@ -12,6 +12,11 @@ class DriverProvider extends ChangeNotifier {
   String? _errorMessage;
   StreamSubscription? _driversStreamSub;
 
+  DriverProvider() {
+    fetchDrivers();
+    subscribeToDriversRealtime();
+  }
+
   List<Map<String, dynamic>> get drivers => _drivers;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -39,7 +44,7 @@ class DriverProvider extends ChangeNotifier {
     try {
       final List<dynamic> dbDrivers = await Supabase.instance.client
           .from('drivers')
-          .select('*, users(*), reviews(rating)');
+          .select('*, users(*)');
 
       if (dbDrivers.isNotEmpty) {
         _drivers = dbDrivers.map((d) {
@@ -48,16 +53,16 @@ class DriverProvider extends ChangeNotifier {
           
           final activeServices = rawMeta['active_services'] != null
               ? List<String>.from(rawMeta['active_services'])
-              : ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant'];
+              : ['sleep', 'telepon', 'gaming', 'ride', 'hangout', 'sporty', 'freedom'];
 
           // Calculate average rating from real reviews
           final reviewsList = d['reviews'] as List<dynamic>? ?? [];
-          double ratingVal = 5.0; // default
+          double ratingVal = 0.0;
           if (reviewsList.isNotEmpty) {
             final sum = reviewsList.map((r) => (r['rating'] as num).toDouble()).reduce((a, b) => a + b);
             ratingVal = (sum / reviewsList.length).clamp(1.0, 5.0);
-          } else {
-             ratingVal = double.tryParse(d['rating']?.toString() ?? '5.0') ?? 5.0;
+          } else if (d['rating'] != null) {
+            ratingVal = double.tryParse(d['rating']?.toString() ?? '0.0') ?? 0.0;
           }
 
           final ridesVal = d['total_rides'] is int ? d['total_rides'] as int : (int.tryParse(d['total_rides']?.toString() ?? '0') ?? 0);
@@ -83,6 +88,19 @@ class DriverProvider extends ChangeNotifier {
               ? user['avatar_url']
               : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user['full_name'] ?? 'Driver')}&background=D64573&color=fff&bold=true';
 
+          final String vehicleStnk = d['vehicle_stnk'] ?? '';
+          List<Map<String, dynamic>> driverAddons = [];
+          if (vehicleStnk.startsWith('{')) {
+            try {
+              final meta = jsonDecode(vehicleStnk);
+              if (meta['addons'] != null && meta['addons'] is List) {
+                driverAddons = List<Map<String, dynamic>>.from(
+                  (meta['addons'] as List).map((a) => Map<String, dynamic>.from(a)),
+                );
+              }
+            } catch (_) {}
+          }
+
           return {
             'id': d['id'].toString(),
             'driverId': d['id'].toString(),
@@ -104,6 +122,8 @@ class DriverProvider extends ChangeNotifier {
             'plateNumber': d['plate_number'] ?? 'B 1234 ABC',
             'description': 'Driver profesional dan terverifikasi siap menemani perjalanan atau aktivitas Anda dengan aman dan nyaman.',
             'activeServices': activeServices,
+            'addons': driverAddons,
+            'vehicle_stnk': vehicleStnk,
           };
         }).toList();
         _isLoading = false;
@@ -134,7 +154,7 @@ class DriverProvider extends ChangeNotifier {
           final List<dynamic> driversList = data['data'];
           _drivers = driversList.map((d) {
             final user = d['users'] ?? {};
-            final ratingVal = double.tryParse(d['rating']?.toString() ?? '5.0') ?? 5.0;
+            final ratingVal = d['rating'] != null ? (double.tryParse(d['rating'].toString()) ?? 0.0) : 0.0;
             final ridesVal = d['total_rides'] is int ? d['total_rides'] as int : (int.tryParse(d['total_rides']?.toString() ?? '0') ?? 0);
             
             String tier = 'Gold';
@@ -182,7 +202,7 @@ class DriverProvider extends ChangeNotifier {
       try {
         final List<dynamic> dbDrivers = await Supabase.instance.client
             .from('drivers')
-            .select('*, users(*), reviews(rating)');
+            .select('*, users(*)');
 
         if (dbDrivers.isNotEmpty) {
           _drivers = dbDrivers.map((d) {
@@ -191,16 +211,16 @@ class DriverProvider extends ChangeNotifier {
             
             final activeServices = rawMeta['active_services'] != null
                 ? List<String>.from(rawMeta['active_services'])
-                : ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant'];
+                : ['sleep', 'telepon', 'gaming', 'ride', 'hangout', 'sporty', 'freedom'];
 
             // Calculate average rating from real reviews
             final reviewsList = d['reviews'] as List<dynamic>? ?? [];
-            double ratingVal = 5.0; // default
+            double ratingVal = 0.0;
             if (reviewsList.isNotEmpty) {
               final sum = reviewsList.map((r) => (r['rating'] as num).toDouble()).reduce((a, b) => a + b);
               ratingVal = (sum / reviewsList.length).clamp(1.0, 5.0);
-            } else {
-               ratingVal = double.tryParse(d['rating']?.toString() ?? '5.0') ?? 5.0;
+            } else if (d['rating'] != null) {
+              ratingVal = double.tryParse(d['rating']?.toString() ?? '0.0') ?? 0.0;
             }
             
             final ridesVal = d['total_rides'] is int ? d['total_rides'] as int : (int.tryParse(d['total_rides']?.toString() ?? '0') ?? 0);
@@ -226,6 +246,19 @@ class DriverProvider extends ChangeNotifier {
                 ? user['avatar_url']
                 : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(user['full_name'] ?? 'Driver')}&background=D64573&color=fff&bold=true';
 
+            final String vehicleStnk = d['vehicle_stnk'] ?? '';
+            List<Map<String, dynamic>> driverAddons = [];
+            if (vehicleStnk.startsWith('{')) {
+              try {
+                final meta = jsonDecode(vehicleStnk);
+                if (meta['addons'] != null && meta['addons'] is List) {
+                  driverAddons = List<Map<String, dynamic>>.from(
+                    (meta['addons'] as List).map((a) => Map<String, dynamic>.from(a)),
+                  );
+                }
+              } catch (_) {}
+            }
+
             return {
               'id': d['id'].toString(),
               'driverId': d['id'].toString(),
@@ -247,6 +280,8 @@ class DriverProvider extends ChangeNotifier {
               'plateNumber': d['plate_number'] ?? 'B 1234 ABC',
               'description': 'Driver profesional dan terverifikasi siap menemani perjalanan atau aktivitas Anda dengan aman dan nyaman.',
               'activeServices': activeServices,
+              'addons': driverAddons,
+              'vehicle_stnk': vehicleStnk,
             };
           }).toList();
         }

@@ -64,6 +64,9 @@ CREATE TABLE bookings (
     dropoff_longitude NUMERIC,
     duration INTEGER, -- in minutes
     total_price NUMERIC,
+    platform_fee NUMERIC DEFAULT 0,
+    escrow_balance NUMERIC DEFAULT 0,
+    payout_status TEXT DEFAULT 'held' CHECK (payout_status IN ('held', 'released', 'cancelled', 'refunded', 'forfeited')),
     booking_date TIMESTAMP WITH TIME ZONE,
     additional_details JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
@@ -121,13 +124,15 @@ CREATE TABLE otp_codes (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 10. Setup RLS (Row Level Security) - Disable temporarily for simple backend access or set permissive rules
-ALTER TABLE users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE bookings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE booking_negotiations DISABLE ROW LEVEL SECURITY;
-ALTER TABLE community_posts DISABLE ROW LEVEL SECURITY;
-ALTER TABLE post_likes DISABLE ROW LEVEL SECURITY;
-ALTER TABLE community_stories DISABLE ROW LEVEL SECURITY;
-ALTER TABLE otp_codes DISABLE ROW LEVEL SECURITY;
+-- 10. Setup RLS (Row Level Security) - Hardened with strict security rules
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE drivers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE booking_negotiations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE community_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE post_likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE community_stories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE otp_codes ENABLE ROW LEVEL SECURITY;
+
+-- Jalankan backend/fix_supabase_rls_security.sql untuk mengonfigurasi set policy lengkap.
 

@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../providers/booking_provider.dart';
+import '../../../providers/auth_provider.dart';
 
 class DriverEarningsScreen extends StatefulWidget {
   const DriverEarningsScreen({super.key});
@@ -29,16 +30,25 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
   @override
   Widget build(BuildContext context) {
     final bookingProvider = context.watch<BookingProvider>();
+    final authProvider = context.watch<AuthProvider>();
+    final double currentBalance = authProvider.user?.balance ?? 0.0;
 
     String formatCurrency(double amount) {
       return "Rp ${amount.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
     }
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    return RefreshIndicator(
+      color: AppTheme.primaryPink,
+      backgroundColor: AppTheme.surface,
+      onRefresh: () async {
+        await authProvider.refreshProfile();
+        await bookingProvider.loadEarnings(_selectedPeriod);
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           // ======================================================
           // 1. TOP HERO SECTION (Vibrant Pink Fuchsia Curved Container)
           // ======================================================
@@ -244,6 +254,145 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
                               ),
                             ],
                           ),
+
+                          const SizedBox(height: 14),
+                          const Divider(height: 1, color: AppTheme.border),
+                          const SizedBox(height: 14),
+
+                          // Withdrawable Active Wallet Balance & Withdraw Button
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "SALDO DOMPET AKTIF",
+                                    style: GoogleFonts.inter(
+                                      color: AppTheme.textMuted,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.6,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    formatCurrency(currentBalance),
+                                    style: GoogleFonts.plusJakartaSans(
+                                      color: const Color(0xFF10B981), // Emerald Green
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () => _showWithdrawalModal(context, currentBalance),
+                                icon: const Icon(Icons.account_balance_wallet_rounded, size: 16, color: Colors.white),
+                                label: Text(
+                                  "Tarik Saldo",
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppTheme.primaryPink,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  elevation: 0,
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 14),
+                          const Divider(height: 1, color: AppTheme.border),
+                          const SizedBox(height: 14),
+
+                          // Dana Tertahan (Escrow / DP Pending) Section
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: bookingProvider.pendingEscrowBalance > 0
+                                  ? const Color(0xFFFFFBEB) // Soft Amber background
+                                  : AppTheme.cardDeep,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: bookingProvider.pendingEscrowBalance > 0
+                                    ? const Color(0xFFFDE68A)
+                                    : AppTheme.border,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: bookingProvider.pendingEscrowBalance > 0
+                                        ? const Color(0xFFF59E0B).withOpacity(0.15)
+                                        : Colors.grey.withOpacity(0.12),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.shield_outlined,
+                                    color: bookingProvider.pendingEscrowBalance > 0
+                                        ? const Color(0xFFD97706)
+                                        : AppTheme.textMuted,
+                                    size: 18,
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            "DANA TERTAHAN (ESCROW / DP)",
+                                            style: GoogleFonts.inter(
+                                              color: bookingProvider.pendingEscrowBalance > 0
+                                                  ? const Color(0xFF92400E)
+                                                  : AppTheme.textMuted,
+                                              fontSize: 9.5,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.5,
+                                            ),
+                                          ),
+                                          Text(
+                                            formatCurrency(bookingProvider.pendingEscrowBalance),
+                                            style: GoogleFonts.plusJakartaSans(
+                                              color: bookingProvider.pendingEscrowBalance > 0
+                                                  ? const Color(0xFFD97706)
+                                                  : AppTheme.textMuted,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        bookingProvider.pendingEscrowBalance > 0
+                                            ? "Uang DP klien tersimpan aman di rekening penampung. Otomatis cair ke Saldo Dompet saat perjalanan selesai."
+                                            : "Tidak ada dana yang sedang tertahan di sistem escrow.",
+                                        style: GoogleFonts.inter(
+                                          color: bookingProvider.pendingEscrowBalance > 0
+                                              ? const Color(0xFFB45309)
+                                              : AppTheme.textMuted,
+                                          fontSize: 10,
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -295,7 +444,7 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
                     ),
                   )
                 else if (bookingProvider.earningsBookings.isEmpty)
-                  _buildEmptyStateWithMockHistory()
+                  _buildEmptyState()
                 else
                   ListView.builder(
                     shrinkWrap: true,
@@ -335,11 +484,12 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ============================================================
-  Widget _buildEmptyStateWithMockHistory() {
+  Widget _buildEmptyState() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 24),
@@ -521,6 +671,324 @@ class _DriverEarningsScreenState extends State<DriverEarningsScreen> {
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
           ),
         ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // WITHDRAWAL MODAL BOTTOM SHEET
+  // ============================================================
+  void _showWithdrawalModal(BuildContext context, double currentBalance) {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final amountController = TextEditingController();
+    final accountNumberController = TextEditingController();
+    final accountNameController = TextEditingController(text: authProvider.user?.fullName ?? '');
+    String selectedBank = 'Bank BCA';
+
+    final bankOptions = [
+      'Bank BCA',
+      'Bank Mandiri',
+      'Bank BRI',
+      'Bank BNI',
+      'DANA',
+      'GoPay',
+      'OVO',
+      'ShopeePay'
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final double enteredAmount = double.tryParse(amountController.text.replaceAll(RegExp(r'\D'), '')) ?? 0.0;
+            final bool isExceeding = enteredAmount > currentBalance;
+            final bool isBelowMin = enteredAmount > 0 && enteredAmount < 10000;
+            final bool canSubmit = enteredAmount >= 10000 && !isExceeding && accountNumberController.text.trim().isNotEmpty && accountNameController.text.trim().isNotEmpty;
+
+            return Container(
+              padding: EdgeInsets.only(
+                top: 20,
+                left: 20,
+                right: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+              ),
+              decoration: const BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Handle Bar
+                    Center(
+                      child: Container(
+                        width: 44,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppTheme.border,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "Tarik Saldo Dompet",
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: AppTheme.textHighContrast,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            "Maks: Rp ${currentBalance.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
+                            style: GoogleFonts.inter(
+                              color: const Color(0xFF10B981),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Nominal Field
+                    Text(
+                      "Nominal Penarikan (Rp)",
+                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.textHighContrast),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: amountController,
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setModalState(() {}),
+                      decoration: InputDecoration(
+                        hintText: "Contoh: 50000",
+                        prefixText: "Rp ",
+                        filled: true,
+                        fillColor: AppTheme.cardDeep,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      ),
+                    ),
+                    if (isExceeding) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        "⚠️ Nominal tidak boleh melebihi saldo aktif Anda!",
+                        style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ] else if (isBelowMin) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        "⚠️ Minimal penarikan adalah Rp 10.000",
+                        style: GoogleFonts.inter(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+
+                    // Quick Nominal Chips
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        _buildQuickChip(50000, "50rb", amountController, setModalState),
+                        _buildQuickChip(100000, "100rb", amountController, setModalState),
+                        _buildQuickChip(250000, "250rb", amountController, setModalState),
+                        GestureDetector(
+                          onTap: () {
+                            setModalState(() {
+                              amountController.text = currentBalance.toInt().toString();
+                            });
+                          },
+                          child: Chip(
+                            label: Text("Tarik Semua", style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: AppTheme.primaryPink)),
+                            backgroundColor: AppTheme.primaryPink.withOpacity(0.12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            side: BorderSide.none,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Bank Selection
+                    Text(
+                      "Bank / E-Wallet Tujuan",
+                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.textHighContrast),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: AppTheme.cardDeep,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: selectedBank,
+                          isExpanded: true,
+                          items: bankOptions.map((b) => DropdownMenuItem(value: b, child: Text(b, style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textHighContrast)))).toList(),
+                          onChanged: (val) {
+                            if (val != null) setModalState(() => selectedBank = val);
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Account Number
+                    Text(
+                      "Nomor Rekening / No. E-Wallet",
+                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.textHighContrast),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: accountNumberController,
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setModalState(() {}),
+                      decoration: InputDecoration(
+                        hintText: "Masukkan no. rekening penerima",
+                        filled: true,
+                        fillColor: AppTheme.cardDeep,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Account Name
+                    Text(
+                      "Nama Pemilik Rekening",
+                      style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700, color: AppTheme.textHighContrast),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: accountNameController,
+                      onChanged: (_) => setModalState(() {}),
+                      decoration: InputDecoration(
+                        hintText: "Sesuai nama di buku tabungan / e-wallet",
+                        filled: true,
+                        fillColor: AppTheme.cardDeep,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+
+                    // Submit Button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: canSubmit
+                            ? () async {
+                                showDialog(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (_) => const Center(
+                                    child: CircularProgressIndicator(color: AppTheme.primaryPink),
+                                  ),
+                                );
+
+                                final res = await authProvider.requestWithdrawal(
+                                  amount: enteredAmount,
+                                  bankName: selectedBank,
+                                  accountNumber: accountNumberController.text.trim(),
+                                  accountName: accountNameController.text.trim(),
+                                );
+
+                                if (context.mounted) {
+                                  Navigator.pop(context); // close loading
+                                }
+
+                                if (res['success'] == true) {
+                                  if (context.mounted) {
+                                    Navigator.pop(context); // close modal
+                                    showDialog(
+                                      context: context,
+                                      builder: (dCtx) => AlertDialog(
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                        title: Row(
+                                          children: [
+                                            const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981)),
+                                            const SizedBox(width: 8),
+                                            Text("Penarikan Diajukan", style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w800, fontSize: 16)),
+                                          ],
+                                        ),
+                                        content: Text(
+                                          "Permintaan penarikan sebesar Rp ${enteredAmount.toStringAsFixed(0)} berhasil dikirim ke Admin. Saldo dompet Anda telah dipotong dan akan segera ditransfer setelah diverifikasi.",
+                                          style: GoogleFonts.inter(fontSize: 13, height: 1.4),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(dCtx),
+                                            child: Text("Mengerti", style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: AppTheme.primaryPink)),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(res['message'] ?? 'Gagal mengajukan penarikan dana'),
+                                        backgroundColor: Colors.redAccent,
+                                      ),
+                                    );
+                                  }
+                                }
+                              }
+                            : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryPink,
+                          disabledBackgroundColor: AppTheme.border,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          elevation: 0,
+                        ),
+                        child: Text(
+                          "Ajukan Penarikan Dana",
+                          style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildQuickChip(int amount, String label, TextEditingController controller, StateSetter setModalState) {
+    return GestureDetector(
+      onTap: () {
+        setModalState(() {
+          controller.text = amount.toString();
+        });
+      },
+      child: Chip(
+        label: Text("Rp $label", style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600)),
+        backgroundColor: AppTheme.cardDeep,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        side: BorderSide.none,
       ),
     );
   }

@@ -9,76 +9,41 @@ class ApiConstants {
     }
     return dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:3002';
   }
+
   // Auth Endpoints
   static const String login = '/api/auth/login';
   static const String register = '/api/auth/register';
   static const String getMe = '/api/auth/me';
   static const String updateProfile = '/api/auth/profile';
-  static const String googleLogin = '/api/auth/google';
-  static const String refreshToken = '/api/auth/refresh';
-  static const String logout = '/api/auth/logout';
   static const String changePassword = '/api/profile/change-password';
-  static const String forgotPassword = '/api/auth/forgot-password';
-  static const String resetPassword = '/api/auth/reset-password';
-  static const String verifyEmail = '/api/auth/verify-email';
+  static const String sendOtp = '/api/auth/send-otp';
+  static const String verifyOtp = '/api/auth/verify-otp';
+  static const String registerOtp = '/api/auth/register-otp';
+  static const String loginOtp = '/api/auth/login-otp';
+  static const String setupAccount = '/api/auth/setup-account';
   
-  // User Endpoints
-  static const String getUserById = '/api/users';
-  static const String deleteAccount = '/api/users/account';
-  static const String updateAvatar = '/api/users/avatar';
-  
-
+  // User & Profile Endpoints
   static const String profile = '/api/profile/profile';
   static const String avatar = '/api/profile/avatar';
-  static const String bookings = '/api/profile/bookings';
+  static const String bookings = '/api/bookings';
 
   // Driver Endpoints
   static const String drivers = '/api/drivers';
-  static const String nearbyDrivers = '/api/drivers/nearby';
-  static const String driverDetail = '/api/drivers/detail';
-  static const String driverAvailability = '/api/drivers/availability';
-  static const String updateDriverLocation = '/api/drivers/location';
   
   // Booking Endpoints
-  static const String createBooking = '/api/bookings/create';
-  static const String myBookings = '/api/bookings/my-bookings';
-  static const String bookingDetail = '/api/bookings/detail';
-  static const String cancelBooking = '/api/bookings/cancel';
-  static const String confirmBooking = '/api/bookings/confirm';
-  static const String completeBooking = '/api/bookings/complete';
-  static const String ongoingBooking = '/api/bookings/ongoing';
-  
-  // Chat Endpoints
-  static const String chats = '/api/chats';
-  static const String sendMessage = '/api/chats/send';
-  static const String getMessages = '/api/chats/messages';
-  static const String markAsRead = '/api/chats/mark-read';
-  static const String getChatHistory = '/api/chats/history';
-  
-  // Review Endpoints
-  static const String reviews = '/api/reviews';
-  static const String createReview = '/api/reviews/create';
-  static const String driverReviews = '/api/reviews/driver';
-  static const String userReviews = '/api/reviews/user';
+  static const String createBooking = '/api/bookings';
+  static const String openBookings = '/api/bookings/open';
+  static const String myBookings = '/api/bookings';
   
   // Payment Endpoints
   static const String payments = '/api/payments';
-  static const String createPayment = '/api/payments/create';
-  static const String paymentStatus = '/api/payments/status';
-  static const String topUpBalance = '/api/payments/topup';
+  static const String paymentMethods = '/api/payments/methods';
+  static const String processPayment = '/api/payments/pay';
   static const String paymentHistory = '/api/payments/history';
   
-  // Location Endpoints
-  static const String searchLocation = '/api/location/search';
-  static const String reverseGeocode = '/api/location/reverse';
-  static const String getPlaces = '/api/location/places';
-  static const String calculateDistance = '/api/location/distance';
-  
-  // Notification Endpoints
-  static const String notifications = '/api/notifications';
-  static const String markNotificationRead = '/api/notifications/mark-read';
-  static const String deleteNotification = '/api/notifications/delete';
-  static const String notificationSettings = '/api/notifications/settings';
+  // Community Endpoints
+  static const String stories = '/api/community/stories';
+  static const String posts = '/api/community/posts';
 
   static String get driverRegister => '$baseUrl/api/drivers/register';
   static String get driverProfile => '$baseUrl/api/drivers/profile';
@@ -92,9 +57,5 @@ class ApiConstants {
   // Helper method untuk mendapatkan full URL
   static String getFullUrl(String endpoint) {
     return '$baseUrl$endpoint';
-  }
-  
-  // Helper method untuk debugging
-  static void logEndpoint(String endpointName, String endpoint) {
   }
 }

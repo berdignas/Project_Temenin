@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:temenin_ajaa/core/services/payment_service.dart';
+import 'package:temenin_ajaa/modules/clients/services/payment_service.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
 

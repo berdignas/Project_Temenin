@@ -2,10 +2,12 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/api_constants.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../providers/auth_provider.dart';
 
 class BookingReviewDialog extends StatefulWidget {
   final String bookingId;
@@ -85,23 +87,41 @@ class _BookingReviewDialogState extends State<BookingReviewDialog> {
     } catch (_) {
       // 2. Direct Supabase Fallback
       try {
-        final user = Supabase.instance.client.auth.currentUser;
-        if (user != null) {
+        final authProv = Provider.of<AuthProvider>(context, listen: false);
+        final userId = Supabase.instance.client.auth.currentUser?.id ?? authProv.user?.id;
+        if (userId != null) {
           final bookingRes = await Supabase.instance.client
               .from('bookings')
-              .select('driver_id')
+              .select('driver_id, additional_details')
               .eq('id', widget.bookingId)
               .maybeSingle();
 
           final driverId = bookingRes?['driver_id'];
+          final existingDetails = bookingRes?['additional_details'] is Map
+              ? Map<String, dynamic>.from(bookingRes!['additional_details'] as Map)
+              : <String, dynamic>{};
+          final commentText = _commentController.text.trim();
+
           if (driverId != null) {
-            await Supabase.instance.client.from('reviews').insert({
-              'booking_id': widget.bookingId,
-              'user_id': user.id,
-              'driver_id': driverId,
-              'rating': _rating,
-              'comment': _commentController.text.trim(),
-            });
+            try {
+              await Supabase.instance.client.from('reviews').insert({
+                'booking_id': widget.bookingId,
+                'user_id': userId,
+                'driver_id': driverId,
+                'rating': _rating,
+                'comment': commentText,
+              });
+            } catch (e) {
+              try {
+                await Supabase.instance.client.from('reviews').insert({
+                  'booking_id': widget.bookingId,
+                  'customer_id': userId,
+                  'driver_id': driverId,
+                  'rating': _rating,
+                  'comment': commentText,
+                });
+              } catch (_) {}
+            }
 
             // Recalculate average rating
             final allReviews = await Supabase.instance.client
@@ -118,6 +138,22 @@ class _BookingReviewDialogState extends State<BookingReviewDialog> {
                   .update({'rating': double.parse(avg.toStringAsFixed(1))})
                   .eq('id', driverId);
             }
+
+            // Also persist into bookings.additional_details
+            existingDetails['has_reviewed'] = true;
+            existingDetails['rating'] = _rating;
+            existingDetails['comment'] = commentText;
+            final user = Supabase.instance.client.auth.currentUser;
+            existingDetails['client_name'] = authProv.user?.fullName ?? user?.userMetadata?['full_name'] ?? 'Pelanggan';
+            existingDetails['client_avatar'] = authProv.user?.avatarUrl ?? user?.userMetadata?['avatar_url'] ?? '';
+            await Supabase.instance.client
+                .from('bookings')
+                .update({
+                  'status': 'completed',
+                  'additional_details': existingDetails,
+                })
+                .eq('id', widget.bookingId);
+
             success = true;
           }
         }
@@ -149,7 +185,7 @@ class _BookingReviewDialogState extends State<BookingReviewDialog> {
   @override
   Widget build(BuildContext context) {
     final driverName = widget.driverName ?? 'Partner Temenin Ajaa';
-    final driverImage = widget.driverImage ?? 'https://i.pravatar.cc/300?img=14';
+    final driverImage = widget.driverImage ?? '';
 
     return Dialog(
       backgroundColor: const Color(0xFF16151A),
@@ -164,8 +200,9 @@ class _BookingReviewDialogState extends State<BookingReviewDialog> {
           children: [
             CircleAvatar(
               radius: 36,
-              backgroundColor: AppTheme.primaryPink.withOpacity(0.2),
-              backgroundImage: NetworkImage(driverImage),
+              backgroundColor: const Color(0xFFFF007A).withOpacity(0.15),
+              backgroundImage: (driverImage.isNotEmpty) ? NetworkImage(driverImage) : null,
+              child: (driverImage.isEmpty) ? const Icon(Icons.person, color: Color(0xFFFF007A), size: 36) : null,
             ),
             const SizedBox(height: 14),
             Text(

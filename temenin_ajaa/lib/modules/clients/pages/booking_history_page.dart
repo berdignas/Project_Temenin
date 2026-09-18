@@ -1,11 +1,17 @@
 // lib/modules/home/pages/booking_history_page.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../data/models/booking_model.dart';
 import '../../../core/theme/app_theme.dart';
 import '../services/booking_service.dart';
+import '../booking/screens/tracking_driver_screen.dart';
+import '../booking/screens/client_waiting_countdown_screen.dart';
+import '../booking/screens/call_lobby_screen.dart';
+import '../booking/screens/call_room_screen.dart';
 
 class BookingHistoryPage extends StatefulWidget {
   const BookingHistoryPage({super.key});
@@ -25,45 +31,100 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   String _searchQuery = '';
 
   final List<String> _filters = ['All', 'Ongoing', 'Completed', 'Cancelled'];
+  StreamSubscription<List<Map<String, dynamic>>>? _realtimeSub;
 
   @override
   void initState() {
     super.initState();
     _loadBookings();
+    _subscribeToRealtime();
+  }
+
+  void _subscribeToRealtime() {
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final userId = authProvider.user?.id ?? Supabase.instance.client.auth.currentUser?.id;
+      if (userId != null && userId.isNotEmpty) {
+        _realtimeSub = Supabase.instance.client
+            .from('bookings')
+            .stream(primaryKey: ['id'])
+            .eq('user_id', userId)
+            .listen((_) {
+              if (mounted) {
+                _loadBookings(showLoading: false);
+              }
+            });
+      }
+    } catch (e) {
+      debugPrint("BookingHistoryPage realtime subscription error: $e");
+    }
   }
 
   @override
   void dispose() {
+    _realtimeSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadBookings() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+  Future<void> _loadBookings({bool showLoading = true}) async {
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final userId = authProvider.user?.id ?? '';
-      final result = await _bookingService.getBookingHistory(userId);
+      final userId = authProvider.user?.id ?? Supabase.instance.client.auth.currentUser?.id;
       
-      if (!mounted) return;
-      
-      if (result['success'] == true) {
-        setState(() {
-          _bookings = result['bookings'];
-          _isLoading = false;
-          _errorMessage = null;
-        });
-      } else {
-        setState(() {
-          _bookings = [];
-          _isLoading = false;
-          _errorMessage = result['message'] ?? 'Gagal memuat riwayat booking';
-        });
+      List<BookingModel> loadedBookings = [];
+
+      // 1. Fetch real bookings from Supabase database
+      if (userId != null && userId.isNotEmpty) {
+        try {
+          final List<dynamic> rows = await Supabase.instance.client
+              .from('bookings')
+              .select('*, drivers(*, users(*))')
+              .eq('user_id', userId)
+              .order('created_at', ascending: false);
+
+          if (rows.isNotEmpty) {
+            loadedBookings = rows.map((r) => BookingModel.fromJson(r)).toList();
+          }
+        } catch (e) {
+          debugPrint("Supabase fetch bookings with drivers error: $e. Retrying flat select...");
+          try {
+            final List<dynamic> flatRows = await Supabase.instance.client
+                .from('bookings')
+                .select('*')
+                .eq('user_id', userId)
+                .order('created_at', ascending: false);
+            if (flatRows.isNotEmpty) {
+              loadedBookings = flatRows.map((r) => BookingModel.fromJson(r)).toList();
+            }
+          } catch (err) {
+            debugPrint("Supabase flat fetch bookings error: $err");
+          }
+        }
       }
+
+      // 2. Fallback to API endpoint if Supabase fetch is empty
+      if (loadedBookings.isEmpty && userId != null && userId.isNotEmpty) {
+        final result = await _bookingService.getBookingHistory(userId);
+        if (result['success'] == true && result['bookings'] != null) {
+          loadedBookings = List<BookingModel>.from(result['bookings']);
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _bookings = loadedBookings;
+        _isLoading = false;
+        _errorMessage = null;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -77,12 +138,35 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   List<BookingModel> get _filteredBookings {
     List<BookingModel> filtered = _bookings;
     if (_selectedFilter != 'All') {
-      filtered = filtered.where((b) => b.status == _selectedFilter).toList();
+      final filterLower = _selectedFilter.toLowerCase();
+      filtered = filtered.where((b) {
+        final statusLower = b.status.toLowerCase();
+        if (filterLower == 'completed') {
+          return b.isCompleted;
+        }
+        if (filterLower == 'ongoing') {
+          return !b.isCompleted &&
+                 (statusLower == 'ongoing' || 
+                  statusLower == 'accepted' || 
+                  statusLower == 'confirmed' ||
+                  statusLower == 'started' || 
+                  statusLower == 'on_the_way' || 
+                  statusLower == 'arrived' || 
+                  statusLower == 'pending' ||
+                  statusLower == 'dp_paid');
+        }
+        if (filterLower == 'cancelled') {
+          return statusLower == 'cancelled' || statusLower == 'canceled' || statusLower == 'rejected';
+        }
+        return statusLower == filterLower;
+      }).toList();
     }
     if (_searchQuery.isNotEmpty) {
       final query = _searchQuery.toLowerCase();
       filtered = filtered.where((b) {
+        final partnerName = (b.driver?.fullName ?? b.driver?.vehicleName ?? b.additionalDetails?['driverName'] ?? '').toLowerCase();
         return b.id.toLowerCase().contains(query) ||
+               partnerName.contains(query) ||
                (b.driver?.vehicleName?.toLowerCase().contains(query) ?? false) ||
                (b.pickupLocation?.toLowerCase().contains(query) ?? false);
       }).toList();
@@ -319,17 +403,21 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                 ),
                               ),
                             )
-                          : ListView.builder(
-                              physics: const BouncingScrollPhysics(),
-                              padding: const EdgeInsets.all(16),
-                              itemCount: _filteredBookings.length,
-                              itemBuilder: (context, index) {
-                                final booking = _filteredBookings[index];
-                                return GestureDetector(
-                                  onTap: () => _showBookingDetail(context, booking),
-                                  child: _buildBookingCard(booking),
-                                );
-                              },
+                          : RefreshIndicator(
+                              onRefresh: _loadBookings,
+                              color: AppTheme.primaryPink,
+                              child: ListView.builder(
+                                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                                padding: const EdgeInsets.all(16),
+                                itemCount: _filteredBookings.length,
+                                itemBuilder: (context, index) {
+                                  final booking = _filteredBookings[index];
+                                  return GestureDetector(
+                                    onTap: () => _showBookingDetail(context, booking),
+                                    child: _buildBookingCard(booking),
+                                  );
+                                },
+                              ),
                             ),
             ),
             const SizedBox(height: 100), // Prevent bottom overflow
@@ -382,19 +470,23 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: booking.status.toLowerCase() == 'completed'
+                              color: booking.isCompleted
                                   ? AppTheme.success.withOpacity(0.12)
-                                  : booking.status.toLowerCase() == 'cancelled'
+                                  : (booking.status.toLowerCase() == 'cancelled' || booking.status.toLowerCase() == 'canceled')
                                       ? AppTheme.danger.withOpacity(0.12)
                                       : AppTheme.primaryPink.withOpacity(0.12),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
-                              booking.status.toUpperCase(),
+                              booking.isCompleted
+                                  ? 'SELESAI (COMPLETED)'
+                                  : (booking.status.toLowerCase() == 'cancelled' || booking.status.toLowerCase() == 'canceled')
+                                      ? 'DIBATALKAN'
+                                      : 'SEDANG BERJALAN',
                               style: GoogleFonts.inter(
-                                color: booking.status.toLowerCase() == 'completed'
+                                color: booking.isCompleted
                                     ? AppTheme.success
-                                    : booking.status.toLowerCase() == 'cancelled'
+                                    : (booking.status.toLowerCase() == 'cancelled' || booking.status.toLowerCase() == 'canceled')
                                         ? AppTheme.danger
                                         : AppTheme.primaryPink,
                                 fontSize: 12,
@@ -427,7 +519,12 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                             CircleAvatar(
                               radius: 24,
                               backgroundColor: AppTheme.fuchsiaLight,
-                              child: const Icon(Icons.person, color: AppTheme.primaryPink),
+                              backgroundImage: (booking.driver?.avatarUrl != null && booking.driver!.avatarUrl!.isNotEmpty)
+                                  ? NetworkImage(booking.driver!.avatarUrl!)
+                                  : null,
+                              child: (booking.driver?.avatarUrl == null || booking.driver!.avatarUrl!.isEmpty)
+                                  ? const Icon(Icons.person, color: AppTheme.primaryPink)
+                                  : null,
                             ),
                             const SizedBox(width: 16),
                             Expanded(
@@ -435,7 +532,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    booking.driver?.vehicleName ?? 'Partner Name',
+                                    booking.driver?.fullName ?? booking.driver?.vehicleName ?? booking.additionalDetails?['driverName'] ?? 'Partner Temenin',
                                     style: GoogleFonts.plusJakartaSans(
                                       color: AppTheme.textHighContrast,
                                       fontWeight: FontWeight.bold,
@@ -444,7 +541,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    booking.driver?.vehicleType ?? 'Service Type',
+                                    booking.driver?.vehicleType ?? booking.additionalDetails?['serviceType'] ?? 'Layanan Pendampingan',
                                     style: GoogleFonts.inter(
                                       color: AppTheme.textMuted,
                                       fontSize: 13,
@@ -515,8 +612,55 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
+                                Text('Status Pembayaran', style: GoogleFonts.inter(color: AppTheme.textMuted)),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: (booking.isPaid ? AppTheme.success : AppTheme.warning).withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    booking.isPaid ? 'LUNAS (100%)' : 'DP TERBAYAR (50%)',
+                                    style: GoogleFonts.inter(
+                                      color: booking.isPaid ? AppTheme.success : AppTheme.warning,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 8),
+                              child: Divider(color: AppTheme.border, height: 1),
+                            ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
                                 Text('Biaya Layanan', style: GoogleFonts.inter(color: AppTheme.textMuted)),
                                 Text('Rp ${_formatPrice(booking.totalPrice)}', style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('DP 50% (Awal)', style: GoogleFonts.inter(color: AppTheme.textMuted)),
+                                Text('Rp ${_formatPrice(booking.downPayment)}', style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Pelunasan Sisa', style: GoogleFonts.inter(color: AppTheme.textMuted)),
+                                Text(
+                                  booking.isPaid ? 'Rp ${_formatPrice(booking.remainingPayment)} (Lunas)' : 'Rp ${_formatPrice(booking.remainingPayment)} (Belum)',
+                                  style: GoogleFonts.inter(
+                                    color: booking.isPaid ? AppTheme.success : AppTheme.warning,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ],
                             ),
                             const SizedBox(height: 8),
@@ -544,12 +688,169 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                           ],
                         ),
                       ),
+
+                      if (booking.reviewRating != null || (booking.reviewComment != null && booking.reviewComment!.isNotEmpty)) ...[
+                        const SizedBox(height: 20),
+                        Text(
+                          'Ulasan & Penilaian Anda',
+                          style: GoogleFonts.plusJakartaSans(
+                            color: AppTheme.textHighContrast,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppTheme.card,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppTheme.border),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Row(
+                                    children: List.generate(5, (index) {
+                                      final starVal = index + 1;
+                                      final isFilled = starVal <= (booking.reviewRating ?? 5.0);
+                                      return Icon(
+                                        isFilled ? Icons.star_rounded : Icons.star_outline_rounded,
+                                        color: const Color(0xFFF59E0B),
+                                        size: 20,
+                                      );
+                                    }),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "${(booking.reviewRating ?? 5.0).toStringAsFixed(1)} / 5.0",
+                                    style: GoogleFonts.inter(
+                                      color: AppTheme.textHighContrast,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (booking.reviewComment != null && booking.reviewComment!.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  '"${booking.reviewComment!}"',
+                                  style: GoogleFonts.inter(
+                                    color: AppTheme.textMuted,
+                                    fontSize: 13,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+
+                      if (booking.driverRatingClient != null || (booking.driverCommentClient != null && booking.driverCommentClient!.isNotEmpty)) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          'Catatan & Penilaian dari Companion',
+                          style: GoogleFonts.plusJakartaSans(
+                            color: AppTheme.textHighContrast,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: AppTheme.card,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFF00FF7F).withOpacity(0.3)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Row(
+                                    children: List.generate(5, (index) {
+                                      final starVal = index + 1;
+                                      final isFilled = starVal <= (booking.driverRatingClient ?? 5.0);
+                                      return Icon(
+                                        isFilled ? Icons.star_rounded : Icons.star_outline_rounded,
+                                        color: const Color(0xFF00FF7F),
+                                        size: 20,
+                                      );
+                                    }),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "${(booking.driverRatingClient ?? 5.0).toStringAsFixed(1)} / 5.0",
+                                    style: GoogleFonts.inter(
+                                      color: AppTheme.textHighContrast,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (booking.driverCommentClient != null && booking.driverCommentClient!.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                Text(
+                                  '"${booking.driverCommentClient!}"',
+                                  style: GoogleFonts.inter(
+                                    color: AppTheme.textHighContrast,
+                                    fontSize: 13,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 30),
+                      
+                      // Action button for active/ongoing bookings
+                      if (!booking.isCompleted && !booking.isCancelled) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _trackBooking(booking);
+                            },
+                            icon: const Icon(Icons.play_circle_fill_rounded, color: Colors.white, size: 20),
+                            label: Text(
+                              booking.status.toLowerCase() == 'pending'
+                                  ? 'Pantau Status / Tunggu Konfirmasi'
+                                  : (booking.status.toLowerCase() == 'accepted'
+                                      ? 'Lanjutkan Pembayaran DP'
+                                      : (booking.isVirtual ? 'Buka Sesi Virtual' : 'Buka Halaman Pesanan Berlangsung')),
+                              style: GoogleFonts.plusJakartaSans(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                fontSize: 15,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryPink,
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              elevation: 4,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       
                       // Download Invoice Button
                       SizedBox(
                         width: double.infinity,
-                        child: ElevatedButton.icon(
+                        child: OutlinedButton.icon(
                           onPressed: () {
                             Navigator.pop(context);
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -560,17 +861,17 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                               ),
                             );
                           },
-                          icon: const Icon(Icons.download_rounded, color: Colors.white),
+                          icon: const Icon(Icons.download_rounded, color: Colors.white70),
                           label: Text(
                             'Download Invoice / Faktur',
                             style: GoogleFonts.plusJakartaSans(
                               fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              fontSize: 16,
+                              color: Colors.white70,
+                              fontSize: 15,
                             ),
                           ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryPink,
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppTheme.border),
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
@@ -624,25 +925,36 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   }
 
   Widget _buildBookingCard(BookingModel booking) {
+    final isDone = booking.isCompleted;
+    final isCancelled = booking.isCancelled;
+    final isOngoing = !isDone && !isCancelled && (
+      booking.status.toLowerCase() == 'ongoing' ||
+      booking.status.toLowerCase() == 'started' ||
+      booking.status.toLowerCase() == 'in_progress' ||
+      booking.status.toLowerCase() == 'on_the_way' ||
+      booking.status.toLowerCase() == 'arrived'
+    );
+
     Color statusColor;
     IconData statusIcon;
+    String displayStatus;
     
-    switch (booking.status.toLowerCase()) {
-      case 'ongoing':
-        statusColor = AppTheme.primaryPink;
-        statusIcon = Icons.play_circle_outline;
-        break;
-      case 'completed':
-        statusColor = AppTheme.success;
-        statusIcon = Icons.check_circle_outline;
-        break;
-      case 'cancelled':
-        statusColor = AppTheme.danger;
-        statusIcon = Icons.cancel_outlined;
-        break;
-      default:
-        statusColor = Colors.orange;
-        statusIcon = Icons.check_circle_outline;
+    if (isDone) {
+      statusColor = AppTheme.success;
+      statusIcon = Icons.check_circle_outline;
+      displayStatus = 'SELESAI';
+    } else if (isCancelled) {
+      statusColor = AppTheme.danger;
+      statusIcon = Icons.cancel_outlined;
+      displayStatus = 'DIBATALKAN';
+    } else if (isOngoing) {
+      statusColor = AppTheme.primaryPink;
+      statusIcon = Icons.play_circle_outline;
+      displayStatus = 'SEDANG BERJALAN';
+    } else {
+      statusColor = Colors.orange;
+      statusIcon = Icons.schedule;
+      displayStatus = booking.status.toUpperCase();
     }
 
     return Container(
@@ -670,7 +982,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                 Icon(statusIcon, color: statusColor, size: 18),
                 const SizedBox(width: 8),
                 Text(
-                  booking.status.toUpperCase(),
+                  displayStatus,
                   style: GoogleFonts.plusJakartaSans(
                     color: statusColor,
                     fontWeight: FontWeight.bold,
@@ -678,6 +990,25 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                     letterSpacing: 0.5,
                   ),
                 ),
+                if (booking.isPaid) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppTheme.success.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: AppTheme.success.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(
+                      "LUNAS",
+                      style: GoogleFonts.inter(
+                        color: AppTheme.success,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
                 const Spacer(),
                 Text(
                   _formatDate(booking.bookingDate),
@@ -699,16 +1030,25 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
                         color: AppTheme.fuchsiaLight,
                         borderRadius: BorderRadius.circular(12),
+                        image: (booking.driver?.avatarUrl != null && booking.driver!.avatarUrl!.isNotEmpty)
+                            ? DecorationImage(
+                                image: NetworkImage(booking.driver!.avatarUrl!),
+                                fit: BoxFit.cover,
+                              )
+                            : null,
                       ),
-                      child: const Icon(
-                        Icons.person_pin_rounded,
-                        size: 24,
-                        color: AppTheme.primaryPink,
-                      ),
+                      child: (booking.driver?.avatarUrl == null || booking.driver!.avatarUrl!.isEmpty)
+                          ? const Icon(
+                              Icons.person_pin_rounded,
+                              size: 24,
+                              color: AppTheme.primaryPink,
+                            )
+                          : null,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -716,7 +1056,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            booking.driver?.vehicleName ?? 'Partner Name',
+                            booking.driver?.fullName ?? booking.driver?.vehicleName ?? booking.additionalDetails?['driverName'] ?? 'Partner Temenin',
                             style: GoogleFonts.plusJakartaSans(
                               color: AppTheme.textHighContrast,
                               fontWeight: FontWeight.bold,
@@ -725,12 +1065,25 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            booking.driver?.vehicleType ?? 'Service',
+                            booking.driver?.vehicleType ?? booking.additionalDetails?['serviceType'] ?? 'Layanan Pendampingan',
                             style: GoogleFonts.inter(
                               color: AppTheme.textMuted,
                               fontSize: 12,
                             ),
                           ),
+                          if (booking.reviewRating != null) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                const Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                                const SizedBox(width: 3),
+                                Text(
+                                  "${booking.reviewRating!.toStringAsFixed(1)} ★ Ulasan Anda",
+                                  style: GoogleFonts.inter(color: const Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -739,7 +1092,7 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                       decoration: BoxDecoration(
                         color: AppTheme.fuchsiaLight,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.2)),
+                        border: Border.all(color: AppTheme.primaryPink.withValues(alpha: 0.2)),
                       ),
                       child: Text(
                         'Rp ${_formatPrice(booking.totalPrice)}',
@@ -796,29 +1149,33 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
             ),
           ),
           
-          // Action buttons (if ongoing)
-          if (booking.status.toLowerCase() == 'ongoing')
+          // Action buttons (for all active / upcoming / ongoing bookings)
+          if (!isDone && !isCancelled)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => _showCancelDialog(context, booking),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.danger,
-                        side: const BorderSide(color: AppTheme.danger),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  if (booking.status.toLowerCase() == 'pending' || booking.status.toLowerCase() == 'accepted')
+                    Expanded(
+                      flex: 2,
+                      child: OutlinedButton(
+                        onPressed: () => _showCancelDialog(context, booking),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.danger,
+                          side: const BorderSide(color: AppTheme.danger),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
+                        child: Text('Batalkan', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                       ),
-                      child: Text('Batalkan', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                     ),
-                  ),
-                  const SizedBox(width: 12),
+                  if (booking.status.toLowerCase() == 'pending' || booking.status.toLowerCase() == 'accepted')
+                    const SizedBox(width: 12),
                   Expanded(
-                    child: ElevatedButton(
+                    flex: 3,
+                    child: ElevatedButton.icon(
                       onPressed: () => _trackBooking(booking),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primaryPink,
@@ -827,8 +1184,20 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
+                        elevation: 3,
                       ),
-                      child: Text('Lacak', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+                      icon: Icon(
+                        booking.isVirtual ? Icons.sports_esports_rounded : Icons.play_arrow_rounded,
+                        size: 18,
+                      ),
+                      label: Text(
+                        booking.status.toLowerCase() == 'pending'
+                            ? 'Pantau Status'
+                            : (booking.status.toLowerCase() == 'accepted'
+                                ? 'Bayar DP'
+                                : (booking.isVirtual ? 'Buka Sesi' : (isOngoing ? 'Lacak Driver' : 'Jadwal Reservasi'))),
+                        style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
                     ),
                   ),
                 ],
@@ -898,8 +1267,80 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
   }
 
   void _trackBooking(BookingModel booking) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Melacak pesanan: ${booking.id}')),
-    );
+    final st = booking.status.toLowerCase();
+    final add = booking.additionalDetails;
+    final sub = add?['sub_status']?.toString().toLowerCase();
+    final isVirtual = booking.isVirtual;
+
+    if (isVirtual) {
+      final isOngoing = st == 'ongoing' || st == 'started' || st == 'in_progress' || sub == 'ongoing' || sub == 'started';
+      final partnerName = booking.driver?.fullName ?? booking.driver?.vehicleName ?? add?['driverName'] ?? add?['partnerName'] ?? 'Mitra Gamer';
+      final sType = booking.driver?.vehicleType ?? add?['serviceType'] ?? (add?['service_type'] ?? 'Pendampingan Virtual');
+      final durationMins = booking.callDurationMinutes ?? (booking.duration != null && booking.duration! > 0 ? (booking.duration! > 24 ? booking.duration! : booking.duration! * 60) : 60);
+      final isSleep = sType.toString().toLowerCase().contains('sleep');
+      final topic = booking.chatTopic ?? add?['game_name'] ?? add?['chat_topic'] ?? 'Mabar & Voice Chat';
+
+      if (isOngoing) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CallRoomScreen(
+              partnerName: partnerName.toString(),
+              serviceType: sType.toString(),
+              durationMinutes: durationMins,
+              isSleepCall: isSleep,
+              topicOrAlarm: topic.toString(),
+              bookingId: booking.id,
+            ),
+          ),
+        ).then((_) => _loadBookings(showLoading: false));
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CallLobbyScreen(
+              bookingDetails: booking.toJson(),
+              bookingId: booking.id,
+            ),
+          ),
+        ).then((_) => _loadBookings(showLoading: false));
+      }
+    } else {
+      final isCountdownEnded = add?['countdown_ended'] == true;
+      final isWaiting = (st == 'accepted' || st == 'dp_paid' || sub == 'dp_paid' || 
+                        (sub == null && st != 'on_the_way' && st != 'arrived' && st != 'started' && st != 'ongoing' && st != 'completed' && st != 'paid'));
+
+      if (st == 'pending') {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TrackingDriverScreen(
+              bookingData: booking.toJson(),
+              bookingId: booking.id,
+            ),
+          ),
+        ).then((_) => _loadBookings(showLoading: false));
+      } else if (isWaiting && !isCountdownEnded) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ClientWaitingCountdownScreen(
+              bookingId: booking.id,
+              bookingData: booking.toJson(),
+            ),
+          ),
+        ).then((_) => _loadBookings(showLoading: false));
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => TrackingDriverScreen(
+              bookingData: booking.toJson(),
+              bookingId: booking.id,
+            ),
+          ),
+        ).then((_) => _loadBookings(showLoading: false));
+      }
+    }
   }
 }

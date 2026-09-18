@@ -1,5 +1,6 @@
 // Path: lib\main.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,17 +15,36 @@ import 'providers/auth_provider.dart';
 import 'providers/driver_provider.dart';
 import 'providers/client_booking_provider.dart';
 import 'providers/community_provider.dart';
+import 'providers/client_notification_provider.dart';
 import 'routes/app_routes.dart';
-
+import 'core/services/pricing_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Load .env configuration
+  try {
+    await dotenv.load(fileName: ".env");
+    debugPrint('✅ .env loaded successfully');
+  } catch (e) {
+    debugPrint('ℹ️ .env file not loaded: $e');
+  }
+
+  // Pre-fetch Admin Pricing Configuration in background
+  PricingService().fetchPricingConfig().catchError((e) {
+    debugPrint('ℹ️ Initial pricing fetch failed: $e');
+  });
+  
   // Initialize Supabase
   try {
+    final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? 
+        const String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://wdjjaevfuxqrephhdacp.supabase.co');
+    final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'] ?? 
+        const String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+
     await Supabase.initialize(
-      url: const String.fromEnvironment('SUPABASE_URL', defaultValue: ''),
-      anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: ''),
+      url: supabaseUrl,
+      anonKey: supabaseAnonKey,
     );
     print('✅ Supabase initialized successfully');
   } catch (e) {
@@ -52,6 +72,9 @@ class MyApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<CommunityProvider>(
           create: (_) => CommunityProvider(),
+        ),
+        ChangeNotifierProvider<ClientNotificationProvider>(
+          create: (_) => ClientNotificationProvider(),
         ),
       ],
       child: MaterialApp(
@@ -206,13 +229,6 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
     /// LOGIN SUCCESS - USER AUTHENTICATED
     if (authProvider.isAuthenticated && authProvider.user != null) {
-      final user = authProvider.user!;
-      if (user.email == null || user.email!.isEmpty || user.email!.endsWith('@temenin.aja')) {
-        return const SetupAccountScreen();
-      }
-      if (user.isVerified == false) {
-        return const VerifyEmailWaitingScreen();
-      }
       return const HomeLoggedInScreen();
     }
 

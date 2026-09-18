@@ -71,8 +71,8 @@ CREATE TABLE bookings (
     booking_number TEXT UNIQUE NOT NULL,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
     driver_id UUID REFERENCES drivers(id) ON DELETE SET NULL,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'ongoing', 'completed', 'cancelled')),
-    service_type TEXT DEFAULT 'antar_jemput' CHECK (service_type IN ('antar_jemput', 'hangout', 'freedom_request')),
+    status TEXT DEFAULT 'pending',
+    service_type TEXT DEFAULT 'antar_jemput',
     pickup_location TEXT,
     dropoff_location TEXT,
     pickup_latitude NUMERIC,
@@ -211,16 +211,38 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER set_booking_number BEFORE INSERT ON bookings FOR EACH ROW EXECUTE PROCEDURE generate_booking_number();
 
 -- 15. ROW LEVEL SECURITY (RLS) POLICIES
-ALTER TABLE users DISABLE ROW LEVEL SECURITY;
-ALTER TABLE drivers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE bookings DISABLE ROW LEVEL SECURITY;
-ALTER TABLE booking_items DISABLE ROW LEVEL SECURITY;
-ALTER TABLE itineraries DISABLE ROW LEVEL SECURITY;
-ALTER TABLE addons DISABLE ROW LEVEL SECURITY;
-ALTER TABLE timelines DISABLE ROW LEVEL SECURITY;
-ALTER TABLE reviews DISABLE ROW LEVEL SECURITY;
-ALTER TABLE vouchers DISABLE ROW LEVEL SECURITY;
-ALTER TABLE rewards DISABLE ROW LEVEL SECURITY;
+-- Aktifkan RLS dan gunakan kebijakan ketat dari backend/fix_supabase_rls_security.sql
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE drivers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bookings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE booking_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE itineraries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE addons ENABLE ROW LEVEL SECURITY;
+ALTER TABLE timelines ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vouchers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rewards ENABLE ROW LEVEL SECURITY;
+
+-- Helper admin check
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN (
+        (auth.jwt() ->> 'role') = 'service_role'
+        OR EXISTS (
+            SELECT 1 FROM public.users 
+            WHERE id = auth.uid() AND role = 'admin'
+        )
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER STABLE;
+
+-- Kebijakan Dasar Keamanan
+CREATE POLICY "Users Self Select" ON users FOR SELECT TO authenticated USING (auth.uid() = id OR public.is_admin());
+CREATE POLICY "Bookings Participant Select" ON bookings FOR SELECT TO authenticated USING (auth.uid() = user_id OR public.is_admin());
+CREATE POLICY "Reviews Public Select" ON reviews FOR SELECT USING (true);
+CREATE POLICY "Vouchers Public Select" ON vouchers FOR SELECT USING (is_active = true OR public.is_admin());
+CREATE POLICY "Rewards Public Select" ON rewards FOR SELECT USING (stock > 0 OR public.is_admin());
 
 -- 16. SEED DATA
 

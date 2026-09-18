@@ -80,7 +80,7 @@ class _ProfileTabState extends State<ProfileTab> {
         if (authProvider.isLoading) {
           return const Center(
             child: CircularProgressIndicator(
-              color: Color(0xFFFF9DCC),
+              color: AppTheme.primaryPink,
             ),
           );
         }
@@ -93,20 +93,20 @@ class _ProfileTabState extends State<ProfileTab> {
                 Icon(
                   Icons.person_off_outlined,
                   size: 64,
-                  color: Colors.white.withOpacity(0.3),
+                  color: const Color(0xFF1E1B2E).withOpacity(0.2),
                 ),
                 const SizedBox(height: 16),
                 Text(
                   'User not found',
                   style: GoogleFonts.poppins(
-                    color: Colors.white.withOpacity(0.5),
+                    color: AppTheme.textMuted,
                   ),
                 ),
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: () => _refreshUserData(),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFF9DCC),
+                    backgroundColor: AppTheme.primaryPink,
                   ),
                   child: const Text('Refresh'),
                 ),
@@ -360,6 +360,13 @@ class _ProfileTabState extends State<ProfileTab> {
         color: AppTheme.card,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppTheme.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -431,15 +438,7 @@ class _ProfileTabState extends State<ProfileTab> {
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF2D1121),
-            Color(0xFF6B2142),
-            Color(0xFF3B122A),
-          ],
-        ),
+        gradient: AppTheme.primaryGradient,
         boxShadow: [
           BoxShadow(
             color: AppTheme.primaryPink.withOpacity(0.2),
@@ -504,7 +503,7 @@ class _ProfileTabState extends State<ProfileTab> {
                       value: 0.68,
                       strokeWidth: 6,
                       backgroundColor: Colors.white24,
-                      valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryPink),
+                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
                     ),
                     Column(
                       mainAxisSize: MainAxisSize.min,
@@ -560,7 +559,7 @@ class _ProfileTabState extends State<ProfileTab> {
                 child: _buildActionButton(
                   label: "Top Up",
                   icon: Icons.add_card_rounded,
-                  color: AppTheme.primaryPink,
+                  color: Colors.white,
                   onPressed: () {},
                 ),
               ),
@@ -655,7 +654,7 @@ class _ProfileTabState extends State<ProfileTab> {
       ),
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
-        foregroundColor: const Color(0xFF631841),
+        foregroundColor: color == Colors.white ? AppTheme.primaryPink : Colors.white,
         padding: const EdgeInsets.symmetric(vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         elevation: 0,
@@ -706,7 +705,13 @@ class _ProfileTabState extends State<ProfileTab> {
             blurRadius: 10,
             spreadRadius: 0,
           )
-        ] : null,
+        ] : [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 2),
+          )
+        ],
       ),
       child: Column(
         children: [
@@ -768,6 +773,13 @@ class _ProfileTabState extends State<ProfileTab> {
             color: AppTheme.card,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: AppTheme.border),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 2),
+              ),
+            ],
           ),
           child: Column(
             children: children,

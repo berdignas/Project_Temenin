@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants/api_constants.dart';
+import '../core/services/auth_service.dart';
 
 class CommunityProvider extends ChangeNotifier {
   static const String _postsCacheKey = 'driver_community_posts_cache_v6';
@@ -29,6 +30,157 @@ class CommunityProvider extends ChangeNotifier {
     await _loadFromLocalStorage();
     // 2. Fetch from Supabase / Backend API and sync
     await fetchCommunityData();
+  }
+
+  static List<Map<String, dynamic>> _getDefaultSeedPosts() {
+    return [
+      {
+        'id': 'seed_post_1',
+        'partnerName': 'Sarah Amelia',
+        'avatar': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300',
+        'image': 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=800',
+        'mediaType': 'image',
+        'videoUrl': '',
+        'caption': 'Nemenin kak Nisa cobain matcha latte & pastry hits di Senopati ✨ Seru banget ngobrolin karir & ide bisnis bareng!',
+        'location': 'Senopati, Jakarta Selatan',
+        'likes': 42,
+        'isLiked': false,
+        'comments': 3,
+        'commentsList': [
+          {'author': 'Nisa A.', 'text': 'Makasih banyak kak Sarah seru banget temenin hari ini ❤️'},
+          {'author': 'Dimas P.', 'text': 'Tempatnya estetik bgt kak!'},
+        ],
+        'time': '1 jam yang lalu',
+        'rating': 5.0,
+      },
+      {
+        'id': 'seed_post_2',
+        'partnerName': 'Dimas Pratama',
+        'avatar': 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300',
+        'image': 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800',
+        'mediaType': 'image',
+        'videoUrl': '',
+        'caption': 'Jalan santai keliling Braga & kulineran malam sama client dari Jakarta. Bandung lagi adem & seru abis!',
+        'location': 'Braga, Bandung',
+        'likes': 38,
+        'isLiked': false,
+        'comments': 2,
+        'commentsList': [
+          {'author': 'Andi Wijaya', 'text': 'Recommended banget mas Dimas driver & guide nya ramah pol!'},
+        ],
+        'time': '3 jam yang lalu',
+        'rating': 4.9,
+      },
+      {
+        'id': 'seed_post_3',
+        'partnerName': 'Jessica Tan',
+        'avatar': 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300',
+        'image': 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=800',
+        'mediaType': 'image',
+        'videoUrl': '',
+        'caption': 'Study & working session di cafe Surabaya Barat. Nemenin nugas skripsi & riset biar ga jenuh sendirian 💪☕',
+        'location': 'Pakuwon, Surabaya',
+        'likes': 55,
+        'isLiked': false,
+        'comments': 4,
+        'commentsList': [
+          {'author': 'Clara M.', 'text': 'Sangat membantu kak Jessica, fokus nugas jadi maksimal!'},
+        ],
+        'time': '5 jam yang lalu',
+        'rating': 5.0,
+      },
+      {
+        'id': 'seed_post_4',
+        'partnerName': 'Rizky Firmansyah',
+        'avatar': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300',
+        'image': 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800',
+        'mediaType': 'image',
+        'videoUrl': '',
+        'caption': 'Nemenin nonton bioskop premiere di Grand Indonesia & lanjut dinner santai. Mitra tepat waktu & profesional!',
+        'location': 'Grand Indonesia, Jakarta',
+        'likes': 29,
+        'isLiked': false,
+        'comments': 1,
+        'commentsList': [
+          {'author': 'Budi S.', 'text': 'Mantap mas bro!'},
+        ],
+        'time': '1 hari yang lalu',
+        'rating': 4.9,
+      },
+      {
+        'id': 'seed_post_5',
+        'partnerName': 'Nabila Putri',
+        'avatar': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=300',
+        'image': 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800',
+        'mediaType': 'image',
+        'videoUrl': '',
+        'caption': 'Night ride keliling Tugu & Malioboro Jogja. Ngobrol santai seputar kehidupan dan kulineran malam khas Jogja ✨',
+        'location': 'Malioboro, Yogyakarta',
+        'likes': 64,
+        'isLiked': false,
+        'comments': 5,
+        'commentsList': [
+          {'author': 'Rian Pratama', 'text': 'Jogja emang terbaik, mba Nabila ramah bgt!'},
+        ],
+        'time': '1 hari yang lalu',
+        'rating': 5.0,
+      },
+    ];
+  }
+
+  static List<Map<String, dynamic>> _getDefaultSeedStories() {
+    return [
+      {
+        'id': 'seed_story_1',
+        'name': 'Sarah Amelia',
+        'avatar': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300',
+        'storyImage': 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=800',
+        'title': 'Ngopi Senopati ☕',
+        'caption': 'Afternoon coffee vibes with lovely client! ✨',
+        'rating': 5.0,
+        'time': '2 jam lalu',
+      },
+      {
+        'id': 'seed_story_2',
+        'name': 'Dimas Pratama',
+        'avatar': 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=300',
+        'storyImage': 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=800',
+        'title': 'Braga Malam 🌙',
+        'caption': 'Bandung dingin tapi selalu ngangenin...',
+        'rating': 4.9,
+        'time': '3 jam lalu',
+      },
+      {
+        'id': 'seed_story_3',
+        'name': 'Jessica Tan',
+        'avatar': 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300',
+        'storyImage': 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?w=800',
+        'title': 'Working Space 💻',
+        'caption': 'Semangat nugasnya kak Clara! 💪',
+        'rating': 5.0,
+        'time': '4 jam lalu',
+      },
+      {
+        'id': 'seed_story_4',
+        'name': 'Rizky Firmansyah',
+        'avatar': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300',
+        'storyImage': 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=800',
+        'title': 'Cinema Time 🎬',
+        'caption': 'Standby di lobby Grand Indonesia',
+        'rating': 4.9,
+        'time': '5 jam lalu',
+      },
+      {
+        'id': 'seed_story_5',
+        'name': 'Nabila Putri',
+        'avatar': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=300',
+        'storyImage': 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=800',
+        'title': 'Jogja Vibes 🛵',
+        'caption': 'Keliling Malioboro malam ini seru banget!',
+        'rating': 5.0,
+        'time': '6 jam lalu',
+      },
+    ];
   }
 
   // =========================================================================
@@ -58,9 +210,19 @@ class CommunityProvider extends ChangeNotifier {
         }
       }
 
+      if (_posts.isEmpty) {
+        _posts.addAll(_getDefaultSeedPosts());
+      }
+      if (_stories.isEmpty) {
+        _stories.addAll(_getDefaultSeedStories());
+      }
+
       notifyListeners();
     } catch (e) {
       debugPrint("⚠️ Error loading local community cache: $e");
+      if (_posts.isEmpty) _posts.addAll(_getDefaultSeedPosts());
+      if (_stories.isEmpty) _stories.addAll(_getDefaultSeedStories());
+      notifyListeners();
     }
   }
 
@@ -224,9 +386,23 @@ class CommunityProvider extends ChangeNotifier {
       }
 
       if (remotePosts.isNotEmpty) {
+        final Map<String, Map<String, dynamic>> map = {};
+        for (final p in remotePosts) {
+          map[p['id'].toString()] = p;
+        }
+        for (final p in _posts) {
+          if (!map.containsKey(p['id'].toString())) {
+            map[p['id'].toString()] = p;
+          }
+        }
         _posts.clear();
-        _posts.addAll(remotePosts);
+        _posts.addAll(map.values);
         await _saveToLocalStorage();
+      } else {
+        if (_posts.isEmpty) {
+          _posts.addAll(_getDefaultSeedPosts());
+          await _saveToLocalStorage();
+        }
       }
 
       // 2. Fetch Stories from Backend / Supabase
@@ -268,9 +444,11 @@ class CommunityProvider extends ChangeNotifier {
 
       if (remoteStories.isEmpty) {
         try {
+          final cutoff = DateTime.now().subtract(const Duration(hours: 24)).toIso8601String();
           final storiesResponse = await Supabase.instance.client
               .from('community_stories')
               .select()
+              .gte('created_at', cutoff)
               .order('created_at', ascending: false)
               .timeout(const Duration(seconds: 4));
 
@@ -289,12 +467,28 @@ class CommunityProvider extends ChangeNotifier {
       }
 
       if (remoteStories.isNotEmpty) {
+        final Map<String, Map<String, dynamic>> sMap = {};
+        for (final s in remoteStories) {
+          sMap[s['id'].toString()] = s;
+        }
+        for (final s in _stories) {
+          if (!sMap.containsKey(s['id'].toString())) {
+            sMap[s['id'].toString()] = s;
+          }
+        }
         _stories.clear();
-        _stories.addAll(remoteStories);
+        _stories.addAll(sMap.values);
         await _saveToLocalStorage();
+      } else {
+        if (_stories.isEmpty) {
+          _stories.addAll(_getDefaultSeedStories());
+          await _saveToLocalStorage();
+        }
       }
     } catch (e) {
       debugPrint('ℹ️ Community fetch info: $e');
+      if (_posts.isEmpty) _posts.addAll(_getDefaultSeedPosts());
+      if (_stories.isEmpty) _stories.addAll(_getDefaultSeedStories());
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -544,13 +738,28 @@ class CommunityProvider extends ChangeNotifier {
       await _saveToLocalStorage();
 
       final userId = await _getSavedUserId();
+      final token = await AuthService().getToken();
+      final headers = <String, String>{'Content-Type': 'application/json'};
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
       try {
         final url = '${ApiConstants.baseUrl}/api/community/posts/$postId/like';
-        await http.post(
+        final res = await http.post(
           Uri.parse(url),
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
           body: jsonEncode({'user_id': userId}),
         ).timeout(const Duration(seconds: 3));
+
+        if (res.statusCode != 200) {
+          // Direct Supabase Fallback
+          final supabase = Supabase.instance.client;
+          if (isLiked) {
+            await supabase.from('post_likes').delete().eq('post_id', postId).eq('user_id', userId ?? '');
+          } else {
+            await supabase.from('post_likes').insert({'post_id': postId, 'user_id': userId});
+          }
+        }
       } catch (_) {}
     }
   }
@@ -570,17 +779,33 @@ class CommunityProvider extends ChangeNotifier {
       await _saveToLocalStorage();
 
       final userId = await _getSavedUserId();
+      final token = await AuthService().getToken();
+      final headers = <String, String>{'Content-Type': 'application/json'};
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
       try {
         final url = '${ApiConstants.baseUrl}/api/community/posts/$postId/comments';
-        await http.post(
+        final res = await http.post(
           Uri.parse(url),
-          headers: {'Content-Type': 'application/json'},
+          headers: headers,
           body: jsonEncode({
             'user_id': userId,
             'author_name': authorName,
             'comment_text': commentText,
           }),
         ).timeout(const Duration(seconds: 3));
+
+        if (res.statusCode != 200 && res.statusCode != 201) {
+          // Direct Supabase Fallback
+          final supabase = Supabase.instance.client;
+          await supabase.from('community_comments').insert({
+            'post_id': postId,
+            'user_id': userId,
+            'author_name': authorName,
+            'comment_text': commentText,
+          });
+        }
       } catch (_) {}
     }
   }

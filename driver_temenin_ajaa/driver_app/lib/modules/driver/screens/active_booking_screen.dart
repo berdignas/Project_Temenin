@@ -36,6 +36,25 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
     return null;
   }
 
+  String? _extractCompletionOtp(dynamic data) {
+    if (data == null) return null;
+    if (data is Map) {
+      final direct = data['completion_otp']?.toString().trim() ?? data['end_otp']?.toString().trim();
+      if (direct != null && direct.isNotEmpty && direct != 'null') {
+        return direct;
+      }
+      if (data['additional_details'] is Map) {
+        final sub = _extractCompletionOtp(data['additional_details']);
+        if (sub != null) return sub;
+      }
+      if (data['additionalDetails'] is Map) {
+        final sub = _extractCompletionOtp(data['additionalDetails']);
+        if (sub != null) return sub;
+      }
+    }
+    return null;
+  }
+
   // Timer & state variables
   Timer? _driverEtaTimer;
   int _driverEta = 300; // 5 minutes in seconds
@@ -177,12 +196,26 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
     );
   }
 
+  BookingModel? _lastBooking;
+
   @override
   Widget build(BuildContext context) {
     final bookingProvider = context.watch<BookingProvider>();
     final active = bookingProvider.activeBooking;
 
+    if (active != null) {
+      _lastBooking = active;
+    }
+
     if (active == null) {
+      final reviewBooking = bookingProvider.pendingReviewBooking ?? 
+                            (_lastBooking != null && (_lastBooking!.isCompleted || _lastBooking!.isPelunasanPaid) ? _lastBooking : null) ?? 
+                            bookingProvider.lastCompletedBooking;
+
+      if (reviewBooking != null) {
+        return DriverOrderSummaryScreen(booking: reviewBooking);
+      }
+
       return Scaffold(
         backgroundColor: AppTheme.background,
         body: Center(
@@ -252,12 +285,22 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
         nextStatus = '';
         break;
       case 'completed':
-        actionText = "KONFIRMASI PELUNASAN SISA PEMBAYARAN";
-        nextStatus = 'closed';
+        final isPaid = active.additionalDetails?['sub_status'] == 'paid' || 
+                       active.additionalDetails?['final_paid'] == true || 
+                       active.additionalDetails?['pelunasan_paid'] == true ||
+                       active.additionalDetails?['payment_status'] == 'LUNAS' ||
+                       active.status == 'paid';
+        if (isPaid) {
+          actionText = "BERI RATING CLIENT & CATATAN ➔";
+          nextStatus = 'rate_client';
+        } else {
+          actionText = "MENUNGGU PELUNASAN SISA PEMBAYARAN KLIEN...";
+          nextStatus = '';
+        }
         break;
       case 'paid':
-        actionText = "SELESAIKAN & TUTUP ORDER";
-        nextStatus = 'closed';
+        actionText = "BERI RATING CLIENT & CATATAN ➔";
+        nextStatus = 'rate_client';
         break;
     }
 
@@ -299,6 +342,9 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                       // Waiting for DP card, GPS Map Simulator, or Active session details
                       if (active.status == 'accepted' || active.status == 'confirmed') ...[
                         _buildWaitingForDpCard(active),
+                        const SizedBox(height: 20),
+                      ] else if (active.status == 'dp_paid') ...[
+                        _buildScheduledCountdownCard(active),
                         const SizedBox(height: 20),
                       ] else if (active.status == 'started' || active.status == 'ongoing') ...[
                         _buildActiveSessionCard(bookingProvider, active),
@@ -652,54 +698,46 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
             width: double.infinity,
             height: 48,
             child: ElevatedButton.icon(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    backgroundColor: const Color(0xFF16151A),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      side: BorderSide(color: AppTheme.primaryPink.withOpacity(0.3)),
-                    ),
-                    title: Text(
-                      "Selesaikan Sesi Layanan?",
-                      style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    content: Text(
-                      "Apakah Anda yakin ingin menyelesaikan sesi pendampingan sekarang? Tagihan sisa akan diterbitkan ke klien.",
-                      style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        child: Text("Batal", style: GoogleFonts.poppins(color: Colors.white38)),
-                      ),
-                      ElevatedButton(
-                        onPressed: () async {
-                          Navigator.pop(ctx);
-                          final success = await provider.updateBookingProgress(
-                            'completed',
-                            authProvider: Provider.of<AuthProvider>(context, listen: false),
-                          );
-                          if (success && mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text("Sesi layanan berhasil diselesaikan! Menunggu pelunasan klien."),
-                                backgroundColor: Colors.green,
-                              ),
-                            );
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryPink,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: Text("Ya, Selesaikan", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
-                );
+              onPressed: () async {
+                final activeBooking = provider.activeBooking;
+                dynamic rawOtp = _extractCompletionOtp(activeBooking?.additionalDetails) ?? 
+                                 _extractCompletionOtp(activeBooking) ?? 
+                                 _extractOtp(activeBooking?.additionalDetails) ?? 
+                                 _extractOtp(activeBooking);
+                if (activeBooking != null) {
+                  try {
+                    final dynamic queryId = int.tryParse(activeBooking.id) ?? activeBooking.id;
+                    final freshData = await Supabase.instance.client
+                        .from('bookings')
+                        .select('additional_details')
+                        .eq('id', queryId)
+                        .maybeSingle();
+                    if (freshData != null) {
+                      final fOtp = _extractCompletionOtp(freshData['additional_details']) ?? 
+                                   _extractCompletionOtp(freshData) ?? 
+                                   _extractOtp(freshData['additional_details']) ?? 
+                                   _extractOtp(freshData);
+                      if (fOtp != null && fOtp.isNotEmpty) {
+                        rawOtp = fOtp;
+                      }
+                    }
+                  } catch (e) {
+                    debugPrint("Error fetching latest OTP: $e");
+                  }
+                }
+                final expectedPin = (rawOtp != null && rawOtp.toString().trim().isNotEmpty)
+                    ? rawOtp.toString().trim()
+                    : '';
+
+                if (context.mounted) {
+                  _showPinVerificationDialog(
+                    context,
+                    provider,
+                    expectedPin,
+                    targetStatus: 'completed',
+                    subtitleText: "Masukkan 4-digit PIN dari aplikasi Klien untuk mengonfirmasi penyelesaian sesi pendampingan secara aman.",
+                  );
+                }
               },
               icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
               label: Text(
@@ -1018,7 +1056,7 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
             onPressed: provider.isLoading
                 ? null
                 : () async {
-                    if (nextStatus == 'started') {
+                    if (nextStatus == 'started' || nextStatus == 'on_the_way') {
                       final active = provider.activeBooking;
                       // Ambil OTP dari active booking
                       dynamic rawOtp = _extractOtp(active?.additionalDetails) ?? _extractOtp(active);
@@ -1048,15 +1086,31 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                           : '';
                       debugPrint("🔑 Real Client PIN from DB for booking ${active?.id}: '$expectedPin'");
                       if (context.mounted) {
-                        _showPinVerificationDialog(context, provider, expectedPin);
+                        _showPinVerificationDialog(
+                          context, 
+                          provider, 
+                          expectedPin, 
+                          targetStatus: nextStatus,
+                          subtitleText: nextStatus == 'on_the_way' 
+                              ? "Masukkan 4-digit PIN dari aplikasi Klien untuk memverifikasi dan memulai perjalanan OTW." 
+                              : "Tanyakan 4-digit PIN keamanan kepada klien untuk memverifikasi kedatangan dan memulai sesi.",
+                        );
                       }
+                    } else if (nextStatus == 'rate_client') {
+                      final target = provider.activeBooking ?? _lastBooking ?? provider.pendingReviewBooking ?? provider.lastCompletedBooking;
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => DriverOrderSummaryScreen(booking: target),
+                        ),
+                      );
                     } else {
                       final success = await provider.updateBookingProgress(
                         nextStatus,
                         authProvider: Provider.of<AuthProvider>(context, listen: false),
                       );
-                      if (success && nextStatus == 'closed' && context.mounted) {
-                        final activeBooking = provider.activeBooking;
+                      if (success && (nextStatus == 'closed' || nextStatus == 'rate_client') && context.mounted) {
+                        final activeBooking = provider.activeBooking ?? _lastBooking ?? provider.pendingReviewBooking ?? provider.lastCompletedBooking;
                         Navigator.pushReplacement(
                           context,
                           MaterialPageRoute(
@@ -1173,10 +1227,40 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
+                        final provider = Provider.of<BookingProvider>(context, listen: false);
+                        final active = provider.activeBooking;
+                        if (active != null) {
+                          try {
+                            final bId = active.id;
+                            final details = Map<String, dynamic>.from(active.additionalDetails ?? {});
+                            details['driver_rating_client'] = rating;
+                            details['driver_comment_client'] = reviewController.text.trim();
+                            details['sub_status'] = 'closed';
+                            final dynamic queryId = int.tryParse(bId) ?? bId;
+                            await Supabase.instance.client
+                                .from('bookings')
+                                .update({
+                                  'status': 'completed',
+                                  'additional_details': details,
+                                })
+                                .eq('id', queryId);
+
+                            if (context.mounted) {
+                              final authProv = Provider.of<AuthProvider>(context, listen: false);
+                              await provider.updateBookingProgress('closed', authProvider: authProv);
+                              await authProv.refreshProfile();
+                              await provider.loadEarnings('daily');
+                            }
+                          } catch (e) {
+                            debugPrint("Error closing booking from driver review: $e");
+                          }
+                          provider.clearActiveBooking();
+                        }
+                        if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text("Ulasan untuk Klien berhasil dikirim! Terima kasih."),
+                            content: Text("Ulasan untuk Klien berhasil dikirim! Sesi selesai sepenuhnya."),
                             backgroundColor: Colors.green,
                           ),
                         );
@@ -1247,21 +1331,116 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
         ),
         actions: [
           ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              final provider = Provider.of<BookingProvider>(context, listen: false);
-              await provider.updateBookingProgress(
-                'on_the_way',
-                authProvider: Provider.of<AuthProvider>(context, listen: false),
-              );
-            },
+            onPressed: () => Navigator.pop(context),
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00FF7F),
               foregroundColor: Colors.black,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             ),
-            child: Text("MULAI PERJALANAN ➔", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13)),
+            child: Text("MENGERTI ➔", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduledCountdownCard(dynamic active) {
+    final details = active.additionalDetails as Map<String, dynamic>? ?? {};
+    final dateStr = details['scheduled_at'] ?? details['date'] ?? 'Hari Pertemuan';
+    final timeStr = details['time'] ?? 'Waktu Terjadwal';
+
+    DateTime? scheduledDate;
+    if (details['scheduled_at'] != null) {
+      try {
+        scheduledDate = DateTime.parse(details['scheduled_at'].toString());
+      } catch (_) {}
+    }
+
+    final now = DateTime.now();
+    Duration diff = scheduledDate != null ? scheduledDate.difference(now) : const Duration(hours: 12);
+    if (diff.isNegative) diff = Duration.zero;
+
+    final days = diff.inDays;
+    final hours = diff.inHours % 24;
+    final minutes = diff.inMinutes % 60;
+    final seconds = diff.inSeconds % 60;
+
+    final countdownStr = "${days.toString().padLeft(2, '0')} Hari : ${hours.toString().padLeft(2, '0')} Jam : ${minutes.toString().padLeft(2, '0')} Mnt : ${seconds.toString().padLeft(2, '0')} Dtk";
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.4), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryPink.withOpacity(0.08),
+            blurRadius: 15,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryPink.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.event_available_rounded, color: AppTheme.primaryPink, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "JADWAL PERTEMUAN TERKONFIRMASI",
+                  style: GoogleFonts.poppins(
+                    color: AppTheme.primaryPink,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            "Hitung Mundur Waktu Pertemuan:",
+            style: GoogleFonts.poppins(color: AppTheme.textMuted, fontSize: 11),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppTheme.cardDeep,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Center(
+              child: Text(
+                countdownStr,
+                style: GoogleFonts.shareTechMono(
+                  color: AppTheme.textHighContrast,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text("Jadwal: $dateStr ($timeStr)", style: GoogleFonts.poppins(color: AppTheme.textHighContrast, fontSize: 12, fontWeight: FontWeight.w600)),
+            ],
           ),
         ],
       ),
@@ -1354,6 +1533,138 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
               ],
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettlementCard(dynamic active) {
+    final isPaid = active.status == 'paid' ||
+                   active.additionalDetails?['sub_status'] == 'paid' ||
+                   active.additionalDetails?['pelunasan_paid'] == true ||
+                   active.additionalDetails?['payment_status'] == 'LUNAS';
+    final total = active.totalPrice.toDouble();
+    final remaining = total * 0.5;
+    final clientName = active.client?.fullName ?? 'Klien';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: isPaid ? const Color(0xFF00FF7F) : AppTheme.primaryPink,
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: (isPaid ? const Color(0xFF00FF7F) : AppTheme.primaryPink).withOpacity(0.1),
+            blurRadius: 15,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: (isPaid ? const Color(0xFF00FF7F) : AppTheme.primaryPink).withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isPaid ? Icons.check_circle_rounded : Icons.pending_actions_rounded,
+                  color: isPaid ? const Color(0xFF00FF7F) : AppTheme.primaryPink,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isPaid ? "PELUNASAN DITERIMA! 🎉" : "MENUNGGU PELUNASAN KLIEN ⏳",
+                      style: GoogleFonts.poppins(
+                        color: isPaid ? const Color(0xFF00FF7F) : AppTheme.primaryPink,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isPaid ? "Klien telah melunasi sisa tagihan." : "Sesi selesai. Klien sedang melunasi.",
+                      style: GoogleFonts.poppins(
+                        color: AppTheme.textHighContrast,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          const Divider(color: Colors.white10),
+          const SizedBox(height: 12),
+          _infoItem("Total Tarif Sesi", "Rp ${total.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}"),
+          _infoItem("Status Pelunasan Sisa", isPaid ? "LUNAS (100%)" : "Belum Lunas (Sisa Rp ${remaining.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')})"),
+          const SizedBox(height: 16),
+          if (isPaid) ...[
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  final target = active is BookingModel ? active : _lastBooking;
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DriverOrderSummaryScreen(booking: target),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.rate_review_rounded, color: Colors.black, size: 20),
+                label: Text(
+                  "BERI RATING & CATATAN KLIEN ➔",
+                  style: GoogleFonts.poppins(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00FF7F),
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ] else ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.cardDeep,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline_rounded, color: Colors.white70, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      "Klien sedang diarahkan ke halaman pelunasan pembayaran. Tombol ulasan klien akan aktif begitu pelunasan dikonfirmasi.",
+                      style: GoogleFonts.poppins(color: Colors.white70, fontSize: 11, height: 1.4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1611,8 +1922,10 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
   void _showPinVerificationDialog(
     BuildContext context,
     BookingProvider provider,
-    String expectedPin,
-  ) {
+    String expectedPin, {
+    String targetStatus = 'started',
+    String? subtitleText,
+  }) {
     final controller = TextEditingController();
     String? errorMessage;
 
@@ -1636,7 +1949,7 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Tanyakan 4-digit PIN keamanan kepada klien untuk memulai perjalanan.",
+                  subtitleText ?? "Tanyakan 4-digit PIN keamanan kepada klien untuk memverifikasi tindakan ini.",
                   style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13),
                 ),
                 const SizedBox(height: 16),
@@ -1692,16 +2005,27 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                                   Navigator.pop(context);
                                   
                                   final success = await provider.updateBookingProgress(
-                                    'started',
+                                    targetStatus,
                                     authProvider: Provider.of<AuthProvider>(context, listen: false),
                                   );
                                   if (success && context.mounted) {
+                                    final msg = targetStatus == 'completed'
+                                        ? "PIN Terverifikasi! Sesi pendampingan diselesaikan."
+                                        : "PIN Terverifikasi! Layanan pendampingan dimulai.";
                                     ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text("PIN Terverifikasi! Layanan pendampingan dimulai."),
+                                      SnackBar(
+                                        content: Text(msg),
                                         backgroundColor: Colors.green,
                                       ),
                                     );
+                                    if (targetStatus == 'completed') {
+                                      Navigator.pushReplacement(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => DriverOrderSummaryScreen(booking: provider.activeBooking),
+                                        ),
+                                      );
+                                    }
                                   }
                                 } else {
                                   setState(() {
@@ -1732,57 +2056,7 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
     );
   }
 
-  Widget _buildSettlementCard(dynamic active) {
-    final double total = active.totalPrice.toDouble();
-    final double dp = total * 0.3;
-    final double remaining = total - dp;
-    
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF16181D),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFFF2E93).withOpacity(0.3), width: 1.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "PELUNASAN SISA PEMBAYARAN KLIEN",
-            style: GoogleFonts.poppins(
-              color: const Color(0xFFFF2E93),
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(height: 15),
-          _infoItem("Total Tarif Layanan", "Rp ${total.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}"),
-          _infoItem("DP 30% Terbayar (Escrow)", "Rp ${dp.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}"),
-          const Divider(color: Colors.white10),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                "Sisa Pembayaran (Sisa Tagihan):",
-                style: GoogleFonts.poppins(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-              ),
-              Text(
-                "Rp ${remaining.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
-                style: GoogleFonts.poppins(color: const Color(0xFF00FF7F), fontSize: 15, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 15),
-          Text(
-            "Pastikan Klien telah melunasi sisa tagihan tersebut sebelum Anda menekan tombol konfirmasi di bawah.",
-            style: GoogleFonts.poppins(color: Colors.white54, fontSize: 11, height: 1.4),
-          ),
-        ],
-      ),
-    );
-  }
+
 }
 
 class DriverOrderSummaryScreen extends StatefulWidget {
@@ -1808,7 +2082,15 @@ class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
   Future<void> _submitClientReview() async {
     final bId = widget.booking?.id;
     final reviewText = _reviewController.text.trim();
-    if (reviewText.isEmpty) return;
+    if (reviewText.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Silakan tuliskan catatan atau rekomendasi untuk klien."),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
     setState(() { _isSaving = true; });
 
@@ -1825,17 +2107,40 @@ class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
             ? Map<String, dynamic>.from(currentRec['additional_details'] as Map)
             : Map<String, dynamic>.from(widget.booking?.additionalDetails ?? {});
 
+        final authProv = Provider.of<AuthProvider>(context, listen: false);
+        final driverUserId = Supabase.instance.client.auth.currentUser?.id ?? authProv.user?.id;
+
         updatedDetails['client_review'] = {
           'rating': _rating,
           'comment': reviewText,
-          'driver_id': Supabase.instance.client.auth.currentUser?.id,
+          'driver_id': driverUserId,
           'created_at': DateTime.now().toIso8601String(),
         };
+        updatedDetails['driver_rating_client'] = _rating;
+        updatedDetails['driver_comment_client'] = reviewText;
+        updatedDetails['driver_reviewed'] = true;
+        updatedDetails['sub_status'] = 'closed';
 
         await Supabase.instance.client
             .from('bookings')
-            .update({'additional_details': updatedDetails})
+            .update({
+              'status': 'completed',
+              'additional_details': updatedDetails,
+            })
             .eq('id', queryId);
+
+        try {
+          final clientUserId = widget.booking?.userId ?? updatedDetails['userId'] ?? updatedDetails['user_id'];
+          if (clientUserId != null && driverUserId != null) {
+            await Supabase.instance.client.from('user_ratings').insert({
+              'booking_id': queryId.toString(),
+              'user_id': clientUserId.toString(),
+              'driver_id': driverUserId.toString(),
+              'rating': _rating,
+              'comment': reviewText,
+            });
+          }
+        } catch (_) {}
       }
     } catch (e) {
       debugPrint("Error saving client review: $e");
@@ -1846,6 +2151,11 @@ class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
         _isSaving = false;
         _isSaved = true;
       });
+      try {
+        final prov = Provider.of<BookingProvider>(context, listen: false);
+        prov.clearActiveBooking();
+        prov.clearPendingReview();
+      } catch (_) {}
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("✅ Ulasan & rekomendasi Klien berhasil disimpan! Terima kasih."),
@@ -1855,9 +2165,18 @@ class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
     }
   }
 
+  void _finishAndReturnHome() {
+    try {
+      final prov = Provider.of<BookingProvider>(context, listen: false);
+      prov.clearActiveBooking();
+      prov.clearPendingReview();
+    } catch (_) {}
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final clientName = widget.booking?.client?.fullName ?? widget.booking?.additionalDetails?['driverName'] ?? 'Klien';
+    final clientName = widget.booking?.client?.fullName ?? widget.booking?.additionalDetails?['clientName'] ?? widget.booking?.additionalDetails?['driverName'] ?? 'Klien';
     final totalPrice = widget.booking?.totalPrice ?? 150000.0;
     final pickup = widget.booking?.pickupLocation ?? 'Lokasi Penjemputan';
     final dropoff = widget.booking?.dropoffLocation ?? 'Tujuan';
@@ -1894,7 +2213,7 @@ class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
                 children: [
                   const Icon(Icons.check_circle_rounded, color: Colors.white, size: 54),
                   const SizedBox(height: 10),
-                  Text("ORDER BERHASIL DISLESAIKAN!", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text("ORDER BERHASIL DISELESAIKAN!", style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 4),
                   Text("Pendapatan Anda telah ditambahkan ke dompet", style: GoogleFonts.inter(color: Colors.white70, fontSize: 12)),
                   const SizedBox(height: 14),
@@ -1968,7 +2287,7 @@ class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    "ℹ️ Ulasan ini akan disimpan sebagai rekomendasi bagi Mitra Driver lain sebelum menerima pesanan Klien ini.",
+                    "ℹ️ Ulasan dan catatan ini akan disimpan sebagai rekomendasi bagi Mitra Driver lain sebelum menerima pesanan Klien ini.",
                     style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11, height: 1.4),
                   ),
                   const SizedBox(height: 14),
@@ -2028,9 +2347,7 @@ class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    },
+                    onPressed: _finishAndReturnHome,
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: AppTheme.border),
                       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -2042,15 +2359,13 @@ class _DriverOrderSummaryScreenState extends State<DriverOrderSummaryScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    },
+                    onPressed: _finishAndReturnHome,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF10B981),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
-                    child: Text("Lihat di Pendapatan", style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                    child: Text("Selesai", style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                   ),
                 ),
               ],

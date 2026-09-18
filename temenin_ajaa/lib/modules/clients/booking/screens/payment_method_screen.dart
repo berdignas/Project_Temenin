@@ -1,34 +1,40 @@
-// lib/modules/booking/screens/payment_method_screen.dart
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
-import '../../../../providers/auth_provider.dart';
+import 'package:temenin_ajaa/providers/client_booking_provider.dart';
+import 'package:temenin_ajaa/modules/clients/services/payment_service.dart';
 import 'tracking_driver_screen.dart';
+import 'call_lobby_screen.dart';
+import 'qris_payment_screen.dart';
+import 'client_waiting_countdown_screen.dart';
 
 class PaymentMethodScreen extends StatefulWidget {
   final Map<String, dynamic>? bookingData;
   final String? bookingId;
+  final bool isPelunasan;
   
-  const PaymentMethodScreen({super.key, this.bookingData, this.bookingId});
+  const PaymentMethodScreen({super.key, this.bookingData, this.bookingId, this.isPelunasan = false});
 
   @override
   State<PaymentMethodScreen> createState() => _PaymentMethodScreenState();
 }
 
 class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
-  String selectedMethod = "gopay";
+  String selectedMethod = "qris";
   
   late int totalPayment;
   late int dpAmount;
+  late int payAmount;
 
   @override
   void initState() {
     super.initState();
-    totalPayment = widget.bookingData?['totalPayment'] ?? 250000;
-    dpAmount = widget.bookingData?['dp'] ?? 125000;
+    final rawTotal = widget.bookingData?['totalPayment'] ?? widget.bookingData?['total_price'] ?? 250000;
+    totalPayment = rawTotal is num ? rawTotal.toInt() : (int.tryParse(rawTotal.toString()) ?? 250000);
+    dpAmount = widget.bookingData?['dp'] ?? (totalPayment * 0.5).toInt();
+    payAmount = widget.isPelunasan ? (totalPayment - dpAmount) : dpAmount;
   }
 
   @override
@@ -64,7 +70,16 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                     const SizedBox(height: 10),
                     _buildTotalPaymentCard(),
                     const SizedBox(height: 24),
-                    _buildSectionTitle("Metode Utama & E-Wallet"),
+                    _buildSectionTitle("Rekomendasi Utama (Instan)"),
+                    const SizedBox(height: 12),
+                    _buildPaymentTile(
+                      id: "qris",
+                      icon: Icons.qr_code_2_rounded,
+                      title: "QRIS (Semua Bank & E-Wallet)",
+                      subtitle: "BCA, Mandiri, BRI, GoPay, OVO, DANA, dll",
+                    ),
+                    const SizedBox(height: 20),
+                    _buildSectionTitle("Metode Lainnya & E-Wallet"),
                     const SizedBox(height: 12),
                     _buildPaymentTile(
                       id: "gopay",
@@ -169,7 +184,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                "TOTAL DP WAJIB (SEKARANG)",
+                widget.isPelunasan ? "TOTAL PELUNASAN SISA (SEKARANG)" : "TOTAL DP WAJIB (SEKARANG)",
                 style: GoogleFonts.inter(
                   color: AppTheme.textMuted,
                   fontSize: 11,
@@ -179,7 +194,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                formatCurrency(dpAmount),
+                formatCurrency(payAmount),
                 style: GoogleFonts.inter(
                   color: AppTheme.primaryPink,
                   fontSize: 26, 
@@ -188,7 +203,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                "Total transaksi penuh: ${formatCurrency(totalPayment)}",
+                widget.isPelunasan ? "DP yang telah terbayar: ${formatCurrency(dpAmount)}" : "Total transaksi penuh: ${formatCurrency(totalPayment)}",
                 style: GoogleFonts.inter(
                   color: AppTheme.textMuted,
                   fontSize: 12,
@@ -382,9 +397,6 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                   ),
                 );
 
-                final authProvider = Provider.of<AuthProvider>(context, listen: false);
-                final userId = authProvider.user?.id;
-                
                 final bookingDetails = Map<String, dynamic>.from(widget.bookingData ?? {});
                 final existingOtp = bookingDetails['otp'] ?? 
                                    (bookingDetails['additional_details'] is Map ? bookingDetails['additional_details']['otp'] : null);
@@ -395,119 +407,150 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                   bookingDetails['otp'] = (random.nextInt(9000) + 1000).toString();
                 }
 
-                String? bookingId = widget.bookingId;
-                try {
-                  if (userId != null) {
-                    if (bookingId != null && !bookingId.startsWith('mock')) {
-                      bookingDetails['sub_status'] = 'dp_paid';
-                      bookingDetails['dp_paid'] = true;
-                      String? updateDriverId = bookingDetails['driverId'] ?? bookingDetails['partnerId'] ?? bookingDetails['driver_id'];
-                      final updateData = <String, dynamic>{
-                        'status': 'ongoing',
-                        'additional_details': bookingDetails,
-                      };
-                      if (updateDriverId != null && !updateDriverId.startsWith('mock') && !updateDriverId.startsWith('drv-') && !updateDriverId.startsWith('d1')) {
-                        updateData['driver_id'] = updateDriverId;
-                      }
-                      await Supabase.instance.client
-                          .from('bookings')
-                          .update(updateData)
-                          .eq('id', bookingId);
-                    } else {
-                      // Resolve target driver ID
-                      String? driverId = bookingDetails['driverId'] ?? 
-                                         bookingDetails['partnerId'] ?? 
-                                         bookingDetails['selectedPartner']?['id'] ??
-                                         bookingDetails['partner']?['id'];
-                      
-                      if (driverId == null || driverId.isEmpty || driverId.startsWith('mock') || driverId.startsWith('drv-') || driverId.startsWith('d1')) {
-                        try {
-                          final onlineDriver = await Supabase.instance.client
-                              .from('drivers')
-                              .select('id')
-                              .eq('is_available', true)
-                              .limit(1)
-                              .maybeSingle();
-                          if (onlineDriver != null && onlineDriver['id'] != null) {
-                            driverId = onlineDriver['id'].toString();
-                          } else {
-                            final approvedDriver = await Supabase.instance.client
-                                .from('drivers')
-                                .select('id')
-                                .limit(1)
-                                .maybeSingle();
-                            if (approvedDriver != null && approvedDriver['id'] != null) {
-                              driverId = approvedDriver['id'].toString();
-                            }
-                          }
-                        } catch (e) {
-                          debugPrint("Error fetching default driver: $e");
-                        }
-                      }
+                String? currentBookingId = widget.bookingId;
 
-                      String? validDriverId;
-                      if (driverId != null && !driverId.startsWith('mock') && !driverId.startsWith('drv-') && !driverId.startsWith('d1')) {
-                        validDriverId = driverId;
-                      }
+                // 1. Jika booking belum ada di server backend, buat terlebih dahulu via REST API (/api/bookings)
+                if (currentBookingId == null || currentBookingId.isEmpty || currentBookingId.startsWith('mock')) {
+                  final bookingProvider = Provider.of<ClientBookingProvider>(context, listen: false);
+                  final createRes = await bookingProvider.createBookingRequest(bookingDetails);
 
-                      final totalPriceVal = bookingDetails['totalPrice'] ?? bookingDetails['price'] ?? bookingDetails['totalPayment'] ?? 50000;
-                      final numPrice = totalPriceVal is num ? totalPriceVal.toDouble() : (double.tryParse(totalPriceVal.toString()) ?? 50000.0);
-
-                      bookingDetails['sub_status'] = 'dp_paid';
-                      bookingDetails['dp_paid'] = true;
-                      final insertPayload = <String, dynamic>{
-                        'user_id': userId,
-                        'status': 'ongoing',
-                        'pickup_location': bookingDetails['pickup'] ?? bookingDetails['location'] ?? 'Lokasi Penjemputan',
-                        'dropoff_location': bookingDetails['destination'] ?? bookingDetails['location'] ?? 'Tujuan',
-                        'total_price': numPrice,
-                        'additional_details': bookingDetails,
-                      };
-                      if (validDriverId != null && validDriverId.isNotEmpty) {
-                        insertPayload['driver_id'] = validDriverId;
-                      }
-
-                      try {
-                        final response = await Supabase.instance.client
-                            .from('bookings')
-                            .insert(insertPayload)
-                            .select('id')
-                            .single();
-                        bookingId = response['id']?.toString();
-                      } catch (err) {
-                        debugPrint("First insert attempt failed in payment: $err. Retrying without driver_id...");
-                        insertPayload.remove('driver_id');
-                        final response = await Supabase.instance.client
-                            .from('bookings')
-                            .insert(insertPayload)
-                            .select('id')
-                            .single();
-                        bookingId = response['id']?.toString();
-                      }
+                  if (createRes['success'] != true) {
+                    if (mounted) {
+                      Navigator.pop(context); // close loading dialog
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(createRes['message'] ?? 'Gagal membuat pesanan'),
+                          backgroundColor: Colors.redAccent,
+                        ),
+                      );
                     }
+                    return;
                   }
-                } catch (e) {
-                  debugPrint("Failed saving booking to Supabase: $e");
+
+                  final createdBooking = createRes['booking'] ?? createRes['data'];
+                  currentBookingId = createdBooking?['id']?.toString();
                 }
+
+                if (currentBookingId == null) {
+                  if (mounted) {
+                    Navigator.pop(context); // close loading dialog
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('ID pesanan tidak valid untuk pemrosesan pembayaran.'),
+                        backgroundColor: Colors.redAccent,
+                      ),
+                    );
+                  }
+                  return;
+                }
+
+                final paymentService = PaymentService();
+
+                // 2. Jika metode pembayaran adalah QRIS (Xendit Sandbox / Production)
+                if (selectedMethod == "qris") {
+                  final qrisRes = await paymentService.createQrisPayment(
+                    bookingId: currentBookingId,
+                    amount: payAmount.toDouble(),
+                    paymentType: widget.isPelunasan ? 'pelunasan' : 'dp',
+                  );
+
+                  if (mounted) {
+                    Navigator.pop(context); // Close loading dialog
+
+                    final qrisData = qrisRes['data'] ?? {};
+                    final qrString = qrisData['qr_string']?.toString() ?? 
+                        '00020101021226680016ID.CO.XENDIT.WWW01189360091430000000000215200458115303360540${payAmount.toInt()}5802ID5912TEMENIN AJAA6007JAKARTA61051219062070703A016304C7B9';
+
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => QrisPaymentScreen(
+                          bookingData: bookingDetails,
+                          bookingId: currentBookingId!,
+                          amount: payAmount.toDouble(),
+                          paymentType: widget.isPelunasan ? 'pelunasan' : 'dp',
+                          qrString: qrString,
+                          qrisId: qrisData['qris_id']?.toString() ?? 'qr_simulated_${DateTime.now().millisecondsSinceEpoch}',
+                          isSimulated: true,
+                        ),
+                      ),
+                    );
+                  }
+                  return;
+                }
+
+                // 3. Jika metode E-Wallet / Saldo Wallet
+                final paymentResult = await paymentService.processPayment(
+                  bookingId: currentBookingId,
+                  amount: payAmount.toDouble(),
+                  paymentType: widget.isPelunasan ? 'pelunasan' : 'dp',
+                  useWallet: true,
+                );
 
                 if (mounted) {
                   Navigator.pop(context); // Close loading dialog
-                  
-                  // Update local state so TrackingDriverScreen knows DP is paid
-                  bookingDetails['status'] = 'dp_paid';
-                  bookingDetails['sub_status'] = 'dp_paid';
-                  bookingDetails['dp_paid'] = true;
 
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => TrackingDriverScreen(
-                        bookingData: bookingDetails,
-                        bookingId: bookingId,
+                  if (paymentResult['success'] == true) {
+                    if (widget.isPelunasan) {
+                      bookingDetails['status'] = 'completed';
+                      bookingDetails['sub_status'] = 'paid';
+                      bookingDetails['final_paid'] = true;
+                      bookingDetails['pelunasan_paid'] = true;
+                    } else {
+                      bookingDetails['status'] = 'ongoing';
+                      bookingDetails['sub_status'] = 'dp_paid';
+                      bookingDetails['dp_paid'] = true;
+                    }
+
+                    final isVirtual = bookingDetails['service_category'] == 'VIRTUAL' || 
+                                      bookingDetails['call_type'] != null ||
+                                      (bookingDetails['serviceType']?.toString().toLowerCase().contains('telepon') ?? false) ||
+                                      (bookingDetails['serviceType']?.toString().toLowerCase().contains('sleep') ?? false);
+
+                    if (isVirtual) {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => CallLobbyScreen(
+                            bookingDetails: bookingDetails,
+                            bookingId: currentBookingId,
+                          ),
+                        ),
+                        (route) => false,
+                      );
+                    } else if (!widget.isPelunasan) {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ClientWaitingCountdownScreen(
+                            bookingData: bookingDetails,
+                            bookingId: currentBookingId,
+                          ),
+                        ),
+                        (route) => false,
+                      );
+                    } else {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => TrackingDriverScreen(
+                            bookingData: bookingDetails,
+                            bookingId: currentBookingId,
+                            initialStatus: 'review',
+                          ),
+                        ),
+                        (route) => false,
+                      );
+                    }
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(paymentResult['message'] ?? 'Gagal memproses pembayaran'),
+                        backgroundColor: Colors.redAccent,
+                        duration: const Duration(seconds: 4),
                       ),
-                    ),
-                    (route) => false,
-                  );
+                    );
+                  }
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -517,7 +560,7 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                 elevation: 0,
               ),
               child: Text(
-                "Bayar DP ${formatCurrency(dpAmount)}",
+                widget.isPelunasan ? "Pelunasan Sisa ${formatCurrency(payAmount)}" : "Bayar DP ${formatCurrency(payAmount)}",
                 style: GoogleFonts.inter(
                   color: Colors.white, 
                   fontWeight: FontWeight.bold, 

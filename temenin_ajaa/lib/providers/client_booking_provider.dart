@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/constants/api_constants.dart';
 import 'package:temenin_ajaa/core/services/auth_service.dart';
+import 'package:temenin_ajaa/core/utils/booking_date_helper.dart';
 
 class ClientBookingProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
@@ -12,12 +13,14 @@ class ClientBookingProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _errorMessage;
   Map<String, dynamic>? _currentBooking;
+  List<Map<String, dynamic>> _activeBookings = [];
   List<dynamic> _negotiations = [];
   StreamSubscription<List<Map<String, dynamic>>>? _realtimeSubscription;
 
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   Map<String, dynamic>? get currentBooking => _currentBooking;
+  List<Map<String, dynamic>> get activeBookings => List.unmodifiable(_activeBookings);
   List<dynamic> get negotiations => _negotiations;
 
   /// Subscribe to real-time updates for any booking belonging to the logged-in client
@@ -33,13 +36,14 @@ class ClientBookingProvider extends ChangeNotifier {
           .listen((List<Map<String, dynamic>> data) async {
             debugPrint('⚡ Client Realtime: Received ${data.length} bookings for user $userId');
             if (data.isNotEmpty) {
-              final activeBookings = data.where((b) {
+              final activeList = data.where((b) {
                 final s = b['status']?.toString();
                 final addDetails = b['additional_details'] is Map ? b['additional_details'] as Map : null;
                 final sub = addDetails?['sub_status']?.toString();
 
-                if (s == 'completed' || s == 'closed' || s == 'cancelled' || s == 'paid' ||
-                    sub == 'completed' || sub == 'closed' || sub == 'cancelled' || sub == 'paid') {
+                if (s == 'completed' || s == 'closed' || s == 'cancelled' || s == 'paid' || s == 'selesai' ||
+                    sub == 'completed' || sub == 'closed' || sub == 'cancelled' || sub == 'paid' || sub == 'selesai' ||
+                    addDetails?['pelunasan_paid'] == true || addDetails?['final_paid'] == true || addDetails?['has_reviewed'] == true || addDetails?['review'] != null || addDetails?['payment_status'] == 'LUNAS') {
                   return false;
                 }
 
@@ -48,6 +52,10 @@ class ClientBookingProvider extends ChangeNotifier {
                        s == 'confirmed' ||
                        s == 'ongoing' ||
                        s == 'in_progress' ||
+                       s == 'started' ||
+                       s == 'on_the_way' ||
+                       s == 'arrived' ||
+                       s == 'dp_paid' ||
                        sub == 'dp_paid' ||
                        sub == 'on_the_way' ||
                        sub == 'arrived' ||
@@ -55,10 +63,52 @@ class ClientBookingProvider extends ChangeNotifier {
                        sub == 'ongoing';
               }).toList();
 
-              if (activeBookings.isNotEmpty) {
-                final latestRaw = activeBookings.last;
-                final driverId = latestRaw['driver_id'];
+              _activeBookings = List<Map<String, dynamic>>.from(activeList);
 
+              if (activeList.isNotEmpty) {
+                // Prioritize which booking to display as main currentBooking:
+                // 1. Actively in trip (started, ongoing, on_the_way, arrived)
+                // 2. Confirmed & DP Paid (dp_paid == true or sub_status == 'dp_paid')
+                // 3. Accepted by driver (waiting DP)
+                // 4. Pending request
+                Map<String, dynamic>? selectedBooking;
+
+                final ongoingTrips = activeList.where((b) {
+                  final s = b['status']?.toString().toLowerCase();
+                  final add = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+                  final sub = add?['sub_status']?.toString().toLowerCase();
+                  return s == 'ongoing' && (sub == 'started' || sub == 'on_the_way' || sub == 'arrived' || sub == 'ongoing');
+                }).toList();
+
+                if (ongoingTrips.isNotEmpty) {
+                  selectedBooking = ongoingTrips.first;
+                } else {
+                  final dpPaidBookings = activeList.where((b) {
+                    final s = b['status']?.toString().toLowerCase();
+                    final add = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+                    final sub = add?['sub_status']?.toString().toLowerCase();
+                    return add?['dp_paid'] == true || sub == 'dp_paid' || s == 'dp_paid' || s == 'ongoing' || s == 'confirmed';
+                  }).toList();
+
+                  if (dpPaidBookings.isNotEmpty) {
+                    // Sort by earliest scheduled date
+                    dpPaidBookings.sort((a, b) {
+                      final dtA = BookingDateHelper.extractScheduledDateTime(a) ?? DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.now();
+                      final dtB = BookingDateHelper.extractScheduledDateTime(b) ?? DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime.now();
+                      return dtA.compareTo(dtB);
+                    });
+                    selectedBooking = dpPaidBookings.first;
+                  } else {
+                    final acceptedBookings = activeList.where((b) => b['status'] == 'accepted').toList();
+                    if (acceptedBookings.isNotEmpty) {
+                      selectedBooking = acceptedBookings.first;
+                    } else {
+                      selectedBooking = activeList.last;
+                    }
+                  }
+                }
+
+                final driverId = selectedBooking['driver_id'];
                 Map<String, dynamic>? driverData;
                 if (driverId != null && driverId.toString().isNotEmpty) {
                   try {
@@ -74,7 +124,7 @@ class ClientBookingProvider extends ChangeNotifier {
                 }
 
                 _currentBooking = {
-                  ...latestRaw,
+                  ...selectedBooking,
                   if (driverData != null) 'driver': driverData,
                 };
               } else {
@@ -82,6 +132,7 @@ class ClientBookingProvider extends ChangeNotifier {
               }
               notifyListeners();
             } else {
+              _activeBookings = [];
               _currentBooking = null;
               notifyListeners();
             }
@@ -93,9 +144,16 @@ class ClientBookingProvider extends ChangeNotifier {
     }
   }
 
+  void clearBooking() {
+    _currentBooking = null;
+    notifyListeners();
+  }
+
   void unsubscribeFromBookings() {
     _realtimeSubscription?.cancel();
     _realtimeSubscription = null;
+    _currentBooking = null;
+    notifyListeners();
   }
 
   @override
@@ -104,7 +162,7 @@ class ClientBookingProvider extends ChangeNotifier {
     super.dispose();
   }
 
-  // 1. Create a Booking Request
+  // 1. Create a Booking Request via REST API
   Future<Map<String, dynamic>> createBookingRequest(Map<String, dynamic> bookingData) async {
     _isLoading = true;
     _errorMessage = null;
@@ -116,7 +174,85 @@ class ClientBookingProvider extends ChangeNotifier {
         throw Exception('User is not authenticated');
       }
 
+      // Resolve driver ID ONLY if booking directly to a driver (NOT an open offer / freedom request / lelang)
+      final bool isOpenOffer = bookingData['isOpenOffer'] == true || 
+                               bookingData['is_open_offer'] == true || 
+                               bookingData['serviceType'] == 'freedom_request' || 
+                               bookingData['isDirectBooking'] == false;
+
+      String? driverId;
+      if (!isOpenOffer) {
+        driverId = bookingData['driver_id'] ?? 
+                   bookingData['driverId'] ?? 
+                   bookingData['partnerId'] ?? 
+                   bookingData['selectedPartner']?['id'] ?? 
+                   bookingData['partner']?['id'];
+      }
+
+      String? validDriverId;
+      if (driverId != null && 
+          !driverId.startsWith('mock') && 
+          !driverId.startsWith('drv-') && 
+          !driverId.startsWith('d1') && 
+          driverId.isNotEmpty) {
+        validDriverId = driverId;
+      }
+
+      final totalPriceVal = bookingData['total_price'] ?? 
+                            bookingData['totalPrice'] ?? 
+                            bookingData['price'] ?? 
+                            bookingData['totalPayment'] ?? 
+                            bookingData['userInitialPrice'] ?? 
+                            bookingData['serviceFee'] ?? 
+                            50000;
+      final numPrice = totalPriceVal is num ? totalPriceVal.toDouble() : (double.tryParse(totalPriceVal.toString()) ?? 50000.0);
+
+      final pickup = bookingData['pickup_location'] ?? 
+                     bookingData['pickupLocation'] ?? 
+                     bookingData['pickup'] ?? 
+                     bookingData['location'] ?? 
+                     'Lokasi Penjemputan';
+
+      final dropoff = bookingData['dropoff_location'] ?? 
+                      bookingData['dropoffLocation'] ?? 
+                      bookingData['destination'] ?? 
+                      bookingData['location'] ?? 
+                      'Lokasi Tujuan';
+
+      final String unitStr = (bookingData['duration_unit'] ?? 
+                              bookingData['unit'] ?? 
+                              bookingData['additional_details']?['duration_unit'] ?? 
+                              '').toString().toLowerCase();
+
+      final int rawDurVal = int.tryParse(
+        (bookingData['duration'] ?? 
+         bookingData['call_duration_minutes'] ?? 
+         bookingData['duration_minutes'] ?? 
+         '60').toString()
+      ) ?? 60;
+
+      // Pure integer minutes standardization without heuristic multiplication
+      int durationInMinutes;
+      if (unitStr == 'hours' || unitStr == 'jam' || unitStr == 'hour') {
+        durationInMinutes = rawDurVal * 60;
+      } else {
+        durationInMinutes = rawDurVal;
+      }
+
       final url = Uri.parse('${ApiConstants.baseUrl}/api/bookings');
+      debugPrint('📡 Sending create booking request to $url (Driver: $validDriverId, Total: $numPrice, Duration: ${durationInMinutes}m)');
+
+      // Resolve real scheduled booking date & time
+      final scheduledDt = BookingDateHelper.extractScheduledDateTime(bookingData);
+      final String bookingDateIso = scheduledDt?.toIso8601String() ?? 
+                                    bookingData['booking_date']?.toString() ?? 
+                                    bookingData['bookingDate']?.toString() ?? 
+                                    DateTime.now().toIso8601String();
+
+      final enrichedDetails = Map<String, dynamic>.from(bookingData);
+      enrichedDetails['booking_date'] = bookingDateIso;
+      enrichedDetails['bookingDate'] = bookingDateIso;
+
       final response = await http.post(
         url,
         headers: {
@@ -124,32 +260,31 @@ class ClientBookingProvider extends ChangeNotifier {
           'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
-          'pickup_location': bookingData['pickupLocation'],
-          'dropoff_location': bookingData['dropoffLocation'],
-          'pickup_latitude': bookingData['pickupLatitude'],
-          'pickup_longitude': bookingData['pickupLongitude'],
-          'dropoff_latitude': bookingData['dropoffLatitude'],
-          'dropoff_longitude': bookingData['dropoffLongitude'],
-          'duration': bookingData['duration'] != null ? int.tryParse(bookingData['duration'].toString()) : 1,
-          'total_price': bookingData['userInitialPrice'] ?? bookingData['serviceFee'] ?? 50000,
-          'booking_date': DateTime.now().toIso8601String(),
-          'additional_details': {
-            'serviceType': bookingData['serviceType'] ?? 'freedom',
-            'description': bookingData['description'] ?? '',
-            'negotiation': true,
-          }
+          'pickup_location': pickup,
+          'dropoff_location': dropoff,
+          'pickup_latitude': bookingData['pickup_latitude'] ?? bookingData['pickupLatitude'],
+          'pickup_longitude': bookingData['pickup_longitude'] ?? bookingData['pickupLongitude'],
+          'dropoff_latitude': bookingData['dropoff_latitude'] ?? bookingData['dropoffLatitude'],
+          'dropoff_longitude': bookingData['dropoff_longitude'] ?? bookingData['dropoffLongitude'],
+          'duration': durationInMinutes,
+          'duration_unit': 'minutes',
+          'total_price': numPrice,
+          'booking_date': bookingDateIso,
+          if (validDriverId != null) 'driver_id': validDriverId,
+          'additional_details': enrichedDetails,
         }),
       );
 
+      debugPrint('📡 Create booking response (${response.statusCode}): ${response.body}');
       final data = jsonDecode(response.body);
       _isLoading = false;
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         _currentBooking = data['data'];
         notifyListeners();
-        return {'success': true, 'booking': data['data']};
+        return {'success': true, 'booking': data['data'], 'data': data['data']};
       } else {
-        _errorMessage = data['message'] ?? 'Failed to create booking';
+        _errorMessage = data['message'] ?? 'Gagal membuat pesanan';
         notifyListeners();
         return {'success': false, 'message': _errorMessage};
       }

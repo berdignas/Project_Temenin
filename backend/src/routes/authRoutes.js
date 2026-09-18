@@ -7,8 +7,6 @@ const {
   updateProfile,
   sendOtp,
   verifyOtp,
-  registerWithOtp,
-  loginWithOtp,
   setupAccount
 } = require('../controllers/authController');
 const { protect } = require('../middleware/authMiddleware');
@@ -36,18 +34,15 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 } // limit 5MB
 });
 
-// === ALUR BARU: Registrasi dengan OTP ===
-router.post('/send-otp', sendOtp);
-router.post('/verify-otp', verifyOtp);
-// Registrasi: nomor HP + nama + foto profil
-router.post('/register-otp', upload.single('profile_picture'), registerWithOtp);
-router.post('/login-otp', loginWithOtp);
-router.post('/setup-account', protect, setupAccount);
-
-// === ALUR LAMA (Email/Password fallback jika masih dipakai Admin dsb) ===
-router.post('/register', register);
+// Autentikasi Utama (Email / Phone + Password)
+router.post('/register', upload.single('profile_picture'), register);
 router.post('/login', login);
 router.get('/me', protect, getMe);
 router.put('/profile', protect, updateProfile);
+
+// OTP Endpoints (Opsional jika ingin verifikasi nomor HP)
+router.post('/send-otp', sendOtp);
+router.post('/verify-otp', verifyOtp);
+router.post('/setup-account', protect, setupAccount);
 
 module.exports = router;

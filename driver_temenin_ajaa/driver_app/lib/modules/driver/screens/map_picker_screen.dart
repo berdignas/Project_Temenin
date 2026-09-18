@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -6,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import '../../../core/theme/app_theme.dart';
+import '../../../core/config/mapbox_config.dart';
 
 class MapPickerScreen extends StatefulWidget {
   const MapPickerScreen({super.key});
@@ -14,11 +16,11 @@ class MapPickerScreen extends StatefulWidget {
   State<MapPickerScreen> createState() => _MapPickerScreenState();
 }
 
-class _MapPickerScreenState extends State<MapPickerScreen> {
+class _MapPickerScreenState extends State<MapPickerScreen> with TickerProviderStateMixin {
   LatLng _selectedLocation = const LatLng(-6.2088, 106.8456); // Jakarta Pusat Default
   LatLng? _myCurrentLocation; // Real-time HP GPS position (blue dot)
   final MapController _mapController = MapController();
-  String _selectedAddress = "Monas, Jakarta Pusat (Peta Asli)";
+  String _selectedAddress = "Monas, Jakarta Pusat (Peta Mapbox)";
   bool _isLocating = false;
 
   final List<Map<String, dynamic>> _presetLocations = [
@@ -27,6 +29,43 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     {"name": "Bandara Soekarno Hatta", "lat": -6.1275, "lng": 106.6537, "addr": "Bandara Soetta, Tangerang"},
     {"name": "Alun-Alun Bandung", "lat": -6.9218, "lng": 107.6072, "addr": "Alun-Alun, Bandung"},
   ];
+
+  void _animatedMoveMap(LatLng destLocation, double destZoom) {
+    final camera = _mapController.camera;
+    final latTween = Tween<double>(begin: camera.center.latitude, end: destLocation.latitude);
+    final lngTween = Tween<double>(begin: camera.center.longitude, end: destLocation.longitude);
+    final zoomTween = Tween<double>(begin: camera.zoom, end: destZoom);
+
+    final animController = AnimationController(
+      duration: const Duration(milliseconds: 700),
+      vsync: this,
+    );
+
+    final animation = CurvedAnimation(parent: animController, curve: Curves.easeInOutCubic);
+
+    animController.addListener(() {
+      try {
+        _mapController.move(
+          LatLng(latTween.evaluate(animation), lngTween.evaluate(animation)),
+          zoomTween.evaluate(animation),
+        );
+      } catch (_) {}
+    });
+
+    animController.addStatusListener((status) {
+      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+        animController.dispose();
+      }
+    });
+
+    if (mounted) {
+      setState(() {
+        _selectedLocation = destLocation;
+      });
+    }
+
+    animController.forward();
+  }
 
   @override
   void initState() {
@@ -38,6 +77,32 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   }
 
   Future<String> _reverseGeocode(double lat, double lon) async {
+    final token = MapboxConfig.accessToken;
+
+    // A. Mapbox Reverse Geocoding
+    if (token.isNotEmpty) {
+      try {
+        final url = Uri.parse(
+          'https://api.mapbox.com/geocoding/v5/mapbox.places/$lon,$lat.json?types=address,poi,neighborhood,locality,place&language=id&access_token=$token',
+        );
+        final response = await http.get(url).timeout(const Duration(seconds: 4));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(utf8.decode(response.bodyBytes));
+          final features = data['features'] as List? ?? [];
+          if (features.isNotEmpty) {
+            final placeName = features.first['place_name']?.toString();
+            if (placeName != null && placeName.isNotEmpty) {
+              return placeName;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint("Mapbox Driver Geocoding error: $e");
+      }
+    }
+
+    // B. Fallback Nominatim
     try {
       final url = Uri.parse(
         'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lon&zoom=18&addressdetails=1',
@@ -70,57 +135,97 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   Future<void> _fetchGPSLocation() async {
     setState(() => _isLocating = true);
     try {
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Layanan GPS perangkat belum aktif. Mohon aktifkan GPS ponsel Anda.')),
-          );
-        }
-        return;
-      }
+      double? lat;
+      double? lng;
 
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Izin lokasi ditolak oleh pengguna.')),
-            );
+      // 1. Coba ambil dari Geolocator (Native Mobile / Browser HTML5 Geolocation)
+      try {
+        if (!kIsWeb) {
+          bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+          if (!serviceEnabled) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Layanan GPS perangkat belum aktif. Mohon aktifkan GPS ponsel Anda.')),
+              );
+            }
           }
-          return;
+        }
+
+        LocationPermission permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied) {
+          permission = await Geolocator.requestPermission();
+        }
+
+        if (permission != LocationPermission.denied && permission != LocationPermission.deniedForever) {
+          // A. Fast Cache Fix (0ms)
+          final cached = await Geolocator.getLastKnownPosition();
+          if (cached != null && mounted) {
+            lat = cached.latitude;
+            lng = cached.longitude;
+            final cachedPoint = LatLng(lat, lng);
+            _animatedMoveMap(cachedPoint, 16.5);
+            setState(() {
+              _myCurrentLocation = cachedPoint;
+              _selectedLocation = cachedPoint;
+              _selectedAddress = "Mencari nama jalan...";
+            });
+            _reverseGeocode(lat, lng).then((addr) {
+              if (mounted) setState(() => _selectedAddress = addr);
+            });
+          }
+
+          // B. High Accuracy / Fused GPS Fix
+          final position = await Geolocator.getCurrentPosition();
+          lat = position.latitude;
+          lng = position.longitude;
+        }
+      } catch (geoErr) {
+        debugPrint("Driver Geolocator fallback trigger: $geoErr");
+      }
+
+      // 2. Multi-tier Fallback IP Geolocation (Jika akses web HTTP / GPS browser diblokir / timeout)
+      if (lat == null || lng == null) {
+        try {
+          final ipRes = await http.get(Uri.parse('https://ipwho.is/')).timeout(const Duration(seconds: 4));
+          if (ipRes.statusCode == 200) {
+            final data = json.decode(utf8.decode(ipRes.bodyBytes));
+            if (data['success'] == true && data['latitude'] != null && data['longitude'] != null) {
+              lat = (data['latitude'] as num).toDouble();
+              lng = (data['longitude'] as num).toDouble();
+            }
+          }
+        } catch (_) {
+          try {
+            final ipRes2 = await http.get(Uri.parse('https://freeipapi.com/api/json')).timeout(const Duration(seconds: 4));
+            if (ipRes2.statusCode == 200) {
+              final data = json.decode(utf8.decode(ipRes2.bodyBytes));
+              if (data['latitude'] != null && data['longitude'] != null) {
+                lat = (data['latitude'] as num).toDouble();
+                lng = (data['longitude'] as num).toDouble();
+              }
+            }
+          } catch (_) {}
         }
       }
 
-      if (permission == LocationPermission.deniedForever) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Izin lokasi ditolak secara permanen. Mohon aktifkan di Pengaturan HP.')),
-          );
-        }
-        return;
-      }
+      // 3. Terapkan koordinat GPS ke Peta & Luncurkan Gerakan Halus
+      if (lat != null && lng != null && mounted) {
+        final myPoint = LatLng(lat, lng);
+        _animatedMoveMap(myPoint, 16.5);
 
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      final myPoint = LatLng(position.latitude, position.longitude);
-      _mapController.move(myPoint, 16.5);
-
-      setState(() {
-        _myCurrentLocation = myPoint;
-        _selectedLocation = myPoint;
-        _selectedAddress = "Mencari nama jalan...";
-      });
-
-      final addressName = await _reverseGeocode(position.latitude, position.longitude);
-
-      if (mounted) {
         setState(() {
-          _selectedAddress = addressName;
+          _myCurrentLocation = myPoint;
+          _selectedLocation = myPoint;
+          _selectedAddress = "Mencari nama jalan...";
         });
+
+        final addressName = await _reverseGeocode(lat, lng);
+
+        if (mounted) {
+          setState(() {
+            _selectedAddress = addressName;
+          });
+        }
       }
     } catch (e) {
       debugPrint("GPS error: $e");
@@ -153,7 +258,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       appBar: AppBar(
         backgroundColor: const Color(0xFF14101E),
         title: Text(
-          "Pilih Lokasi di Peta Asli",
+          "Pilih Lokasi di Mapbox HD",
           style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
         ),
         centerTitle: true,
@@ -164,18 +269,28 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
       ),
       body: Stack(
         children: [
-          // 1. OPENSTREETMAP INTERACTIVE WIDGET
+          // 1. MAPBOX HIGH-DEFINITION INTERACTIVE WIDGET
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
               initialCenter: _selectedLocation,
               initialZoom: 14.0,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.all,
+              ),
               onTap: _onTapMap,
+              onPositionChanged: (camera, hasGesture) {
+                if (hasGesture) {
+                  _selectedLocation = camera.center;
+                }
+              },
             ),
             children: [
               TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                urlTemplate: MapboxConfig.streetsTileUrl,
                 userAgentPackageName: 'com.temeninajaa.driver',
+                fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                maxZoom: 19,
               ),
               MarkerLayer(
                 markers: [
@@ -313,7 +428,7 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text("Lokasi Terpilih", style: GoogleFonts.inter(color: Colors.white54, fontSize: 11)),
+                            Text("Lokasi Terpilih (Mapbox HD)", style: GoogleFonts.inter(color: Colors.white54, fontSize: 11)),
                             const SizedBox(height: 2),
                             Text(
                               _selectedAddress,

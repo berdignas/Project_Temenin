@@ -2,6 +2,7 @@ const { supabase, supabaseAdmin } = require('../../config/supabase');
 const fs = require('fs').promises;
 const path = require('path');
 const sharp = require('sharp');
+const { atomicDeductPoints } = require('../../utils/balanceHelper');
 
 class ProfileService {
   /**
@@ -325,35 +326,24 @@ class ProfileService {
     }
   }
   /**
-   * Deduct points from user
+   * Deduct points from user atomically
    */
   async deductPoints(userId, pointsToDeduct) {
     try {
-      const { data: user, error: getError } = await supabase
+      const newPoints = await atomicDeductPoints(userId, pointsToDeduct);
+
+      const { data: updatedUser, error: fetchError } = await supabase
         .from('users')
-        .select('points')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (getError) throw getError;
-      if (!user) {
-        throw new Error('User not found');
-      }
-
-      if (user.points < pointsToDeduct) {
-        throw new Error('Poin tidak mencukupi');
-      }
-
-      const { data: updatedUser, error: updateError } = await supabase
-        .from('users')
-        .update({ points: user.points - pointsToDeduct, updated_at: new Date() })
-        .eq('id', userId)
         .select('id, email, full_name, points')
+        .eq('id', userId)
         .single();
 
-      if (updateError) throw updateError;
+      if (fetchError) throw fetchError;
       return updatedUser;
     } catch (error) {
+      if (error.message === 'INSUFFICIENT_POINTS') {
+        throw new Error('Poin tidak mencukupi');
+      }
       throw error;
     }
   }

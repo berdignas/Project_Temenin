@@ -4,7 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/modules/clients/chat/screens/chat_room_screen.dart';
-import 'package:temenin_ajaa/modules/clients/booking/screens/hangout_booking_screen.dart';
+import 'package:temenin_ajaa/modules/clients/booking/screens/booking_order_type_screen.dart';
+import '../../../../core/utils/booking_date_helper.dart';
 
 class PartnerProfileScreen extends StatefulWidget {
   final Map<String, dynamic>? partnerData;
@@ -22,9 +23,10 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   List<Map<String, dynamic>> _dbReviews = [];
   List<Map<String, dynamic>> _parsedVehicles = [];
   List<Map<String, dynamic>> _driverBookings = [];
+  List<Map<String, dynamic>> _driverAddons = [];
   List<String> _skills = [];
   List<String> _languages = [];
-  List<String> _activeServices = ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant'];
+  List<String> _activeServices = ['hangout', 'freedom', 'detektif', 'sporty_ride', 'counseling', 'hiking', 'assistant', 'sleep', 'telepon'];
   String _driverBio = '';
   List<String> _operationalCities = [];
   int _experienceYears = 1;
@@ -44,6 +46,127 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   String _getFullMonthName(int month) {
     const names = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     return names[(month - 1) % 12];
+  }
+
+  int _extractBookingDurationHours(Map<String, dynamic> b) {
+    final add = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+    final rawDur = b['duration'] ?? add?['duration'] ?? add?['duration_hours'] ?? add?['hangoutDurationHours'] ?? add?['totalHours'] ?? add?['hours'];
+    if (rawDur != null) {
+      final n = int.tryParse(rawDur.toString().replaceAll(RegExp(r'[^0-9]'), ''));
+      if (n != null && n > 0) {
+        if (n >= 30 && n % 30 == 0 && n > 24) {
+          return (n / 60).ceil();
+        }
+        return n;
+      }
+    }
+    return 2; // Default 2 jam
+  }
+
+  DateTime? _extractBookingDateTime(Map<String, dynamic> b) {
+    final dt = BookingDateHelper.extractScheduledDateTime(b);
+    if (dt != null) return dt;
+    final rawCreatedAt = b['created_at']?.toString();
+    if (rawCreatedAt != null && rawCreatedAt.isNotEmpty) {
+      return DateTime.tryParse(rawCreatedAt);
+    }
+    return null;
+  }
+
+  bool _isBookingActive(String status) {
+    final s = status.toLowerCase();
+    return s != 'cancelled' && s != 'rejected' && s != 'declined';
+  }
+
+  bool _isBookingWaitingOrActive(String status) {
+    final s = status.toLowerCase();
+    return s == 'waiting_dp' ||
+        s == 'dp_paid' ||
+        s == 'pending' ||
+        s == 'accepted' ||
+        s == 'waiting_client' ||
+        s == 'arrived' ||
+        s == 'in_trip' ||
+        s == 'ongoing' ||
+        s == 'confirmed' ||
+        s == 'waiting_final_payment';
+  }
+
+  List<Map<String, dynamic>> _getBookingsForDate(DateTime date) {
+    return _driverBookings.where((b) {
+      final status = (b['status'] ?? '').toString();
+      if (!_isBookingActive(status)) return false;
+
+      final dt = _extractBookingDateTime(b);
+      if (dt == null) return false;
+
+      return dt.year == date.year && dt.month == date.month && dt.day == date.day;
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> _computeHourlySlots(DateTime date, List<Map<String, dynamic>> dayBookings) {
+    final List<Map<String, dynamic>> slots = [];
+
+    // Operating hours: 08:00 to 22:00
+    for (int h = 8; h < 22; h++) {
+      final slotStart = DateTime(date.year, date.month, date.day, h, 0);
+      final slotEnd = DateTime(date.year, date.month, date.day, h + 1, 0);
+      final slotLabel = "${h.toString().padLeft(2, '0')}:00 - ${(h + 1).toString().padLeft(2, '0')}:00";
+
+      Map<String, dynamic>? overlappingBooking;
+      DateTime? bStart;
+      DateTime? bEnd;
+      int bDur = 2;
+
+      for (final b in dayBookings) {
+        final start = _extractBookingDateTime(b);
+        if (start == null) continue;
+        final dur = _extractBookingDurationHours(b);
+        final end = start.add(Duration(hours: dur));
+
+        if (slotStart.isBefore(end) && slotEnd.isAfter(start)) {
+          overlappingBooking = b;
+          bStart = start;
+          bEnd = end;
+          bDur = dur;
+          break;
+        }
+      }
+
+      if (overlappingBooking != null && bStart != null && bEnd != null) {
+        final add = overlappingBooking['additional_details'] is Map ? overlappingBooking['additional_details'] as Map : null;
+        final serviceName = overlappingBooking['service_type']?.toString() ??
+            add?['service_name']?.toString() ??
+            add?['service_type']?.toString() ??
+            'Layanan Pendamping';
+        final status = overlappingBooking['status']?.toString() ?? 'pending';
+        final timeRangeStr = "${bStart.hour.toString().padLeft(2, '0')}:${bStart.minute.toString().padLeft(2, '0')} - ${bEnd.hour.toString().padLeft(2, '0')}:${bEnd.minute.toString().padLeft(2, '0')} WIB";
+
+        slots.add({
+          'hour': h,
+          'label': slotLabel,
+          'isLocked': true,
+          'booking': overlappingBooking,
+          'serviceName': serviceName,
+          'timeRangeString': timeRangeStr,
+          'durationHours': bDur,
+          'status': status,
+        });
+      } else {
+        slots.add({
+          'hour': h,
+          'label': slotLabel,
+          'isLocked': false,
+          'booking': null,
+          'serviceName': null,
+          'timeRangeString': null,
+          'durationHours': 0,
+          'status': 'available',
+        });
+      }
+    }
+
+    return slots;
   }
 
   @override
@@ -97,11 +220,20 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                 (metadata['vehicles'] as List).map((v) => Map<String, dynamic>.from(v)),
               );
             }
+            if (metadata['addons'] != null && metadata['addons'] is List) {
+              _driverAddons = List<Map<String, dynamic>>.from(
+                (metadata['addons'] as List).map((a) => Map<String, dynamic>.from(a)),
+              );
+            }
           } catch (e) {
             debugPrint('Error parsing vehicle_stnk metadata in client: $e');
           }
         } else if (vehicleStnk.isNotEmpty && !vehicleStnk.startsWith('http')) {
           _driverBio = vehicleStnk;
+        }
+
+        if (_driverAddons.isEmpty && widget.partnerData?['addons'] != null) {
+          _driverAddons = List<Map<String, dynamic>>.from(widget.partnerData!['addons']);
         }
 
         if (_driverBio.isEmpty) {
@@ -130,36 +262,86 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
       final targetUserId = _dbDriverData?['user_id'] ?? userId;
       if (targetDriverId != null || targetUserId != null) {
         // Fetch reviews
-        final orFilter = targetUserId != null 
-            ? 'driver_id.eq.$targetDriverId,user_id.eq.$targetUserId' 
+        final orFilter = (targetUserId != null && targetUserId != targetDriverId)
+            ? 'driver_id.eq.$targetDriverId,driver_id.eq.$targetUserId' 
             : 'driver_id.eq.$targetDriverId';
-        final List<dynamic> revRows = await supabase
-            .from('reviews')
-            .select('*, users(full_name, avatar_url)')
-            .or(orFilter)
-            .order('created_at', ascending: false);
 
-        if (revRows.isNotEmpty) {
-          _dbReviews = revRows.map((r) {
+        final List<Map<String, dynamic>> loadedReviews = [];
+        final Set<String> seenIds = {};
+
+        try {
+          final List<dynamic> revRows = await supabase
+              .from('reviews')
+              .select('*, users(full_name, avatar_url)')
+              .or(orFilter)
+              .order('created_at', ascending: false);
+
+          for (final r in revRows) {
             final userObj = r['users'] ?? {};
-            return {
-              'author': userObj['full_name'] ?? 'Pelanggan Temenin Ajaa',
-              'avatar': userObj['avatar_url'] ?? '',
+            final comment = r['comment']?.toString().trim() ?? '';
+            final bId = r['booking_id']?.toString() ?? r['id']?.toString() ?? '';
+            if (seenIds.contains(bId)) continue;
+            seenIds.add(bId);
+
+            final authorName = userObj['full_name']?.toString().trim();
+            loadedReviews.add({
+              'author': (authorName != null && authorName.isNotEmpty) ? authorName : 'Pelanggan',
+              'avatar': userObj['avatar_url']?.toString() ?? '',
               'rating': double.tryParse(r['rating']?.toString() ?? '5.0') ?? 5.0,
-              'text': r['comment'] ?? 'Sangat ramah, tepat waktu & pelayanan luar biasa.',
+              'text': comment,
               'date': r['created_at']?.toString().split('T')[0] ?? '',
-            };
-          }).toList();
+            });
+          }
+        } catch (e) {
+          debugPrint('Error fetching reviews table in partner_profile: $e');
         }
 
-        // Fetch real driver bookings for availability calendar
-        final List<dynamic> bookingRows = await supabase
-            .from('bookings')
-            .select('*')
-            .or(orFilter)
-            .order('created_at', ascending: false);
+        // Fetch real driver bookings for availability calendar and review fallback
+        try {
+          final bookingFilter = (targetUserId != null && targetUserId != targetDriverId)
+              ? 'driver_id.eq.$targetDriverId,driver_id.eq.$targetUserId'
+              : 'driver_id.eq.$targetDriverId';
 
-        _driverBookings = List<Map<String, dynamic>>.from(bookingRows);
+          final List<dynamic> bookingRows = await supabase
+              .from('bookings')
+              .select('*')
+              .or(bookingFilter)
+              .order('created_at', ascending: false);
+
+          _driverBookings = List<Map<String, dynamic>>.from(bookingRows);
+
+          for (final b in bookingRows) {
+            final bId = b['id']?.toString() ?? '';
+            if (seenIds.contains(bId)) continue;
+
+            final details = b['additional_details'] is Map
+                ? Map<String, dynamic>.from(b['additional_details'] as Map)
+                : <String, dynamic>{};
+
+            final hasReviewed = details['has_reviewed'] == true || details['rating'] != null;
+            final clientRating = details['rating'] ?? details['review']?['rating'];
+            final clientComment = details['comment']?.toString().trim() ?? details['review']?['comment']?.toString().trim() ?? '';
+
+            if (hasReviewed && clientRating != null) {
+              seenIds.add(bId);
+              final clientName = details['client_name'] ?? details['userName'] ?? details['user_name'] ?? 'Pelanggan';
+              final clientAvatar = details['client_avatar'] ?? details['user_avatar'] ?? '';
+              final ratingNum = double.tryParse(clientRating.toString()) ?? 5.0;
+
+              loadedReviews.add({
+                'author': clientName.toString().trim().isNotEmpty ? clientName.toString().trim() : 'Pelanggan',
+                'avatar': clientAvatar.toString(),
+                'rating': ratingNum,
+                'text': clientComment,
+                'date': b['created_at']?.toString().split('T')[0] ?? '',
+              });
+            }
+          }
+        } catch (e) {
+          debugPrint('Error fetching driver bookings in partner_profile: $e');
+        }
+
+        _dbReviews = loadedReviews;
       }
     } catch (e) {
       debugPrint('Error fetching real driver details: $e');
@@ -288,7 +470,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
     final effectiveRating = _dbReviews.isNotEmpty
         ? (_dbReviews.map((r) => (r['rating'] as num).toDouble()).reduce((a, b) => a + b) / _dbReviews.length).toStringAsFixed(1)
-        : (_dbDriverData?['rating'] != null ? _dbDriverData!['rating'].toString() : rating);
+        : (_dbDriverData?['rating'] != null && (_dbDriverData!['total_rides'] ?? 0) > 0 ? _dbDriverData!['rating'].toString() : '0.0');
 
     return Stack(
       children: [
@@ -619,7 +801,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
         const SizedBox(height: 20),
 
         Text(
-          'Layanan yang Disediakan (${_activeServices.length})',
+          'Layanan yang Disediakan',
           style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 10),
@@ -631,15 +813,56 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
             IconData icon = Icons.check_circle_rounded;
             Color color = AppTheme.primaryPink;
 
-            if (key == 'ride') { title = '🚕 Ride Service'; icon = Icons.local_taxi_rounded; color = AppTheme.primaryPink; }
-            else if (key == 'sporty') { title = '🏎️ Antar Jemput Sporty'; icon = Icons.sports_motorsports_rounded; color = Colors.orange; }
-            else if (key == 'hangout') { title = '🍸 Hangout Companion'; icon = Icons.wine_bar_rounded; color = const Color(0xFFD97706); }
-            else if (key == 'freedom') { title = '✨ Freedom Request'; icon = Icons.auto_awesome_rounded; color = const Color(0xFFFF8552); }
-            else if (key == 'counseling') { title = '💬 Relationship Counseling'; icon = Icons.psychology_rounded; color = Colors.blueAccent; }
-            else if (key == 'curhat') { title = '👂 Mendengarkan Curhat'; icon = Icons.hearing_rounded; color = Colors.teal; }
-            else if (key == 'detective') { title = '🕵️ Detektif Relationship'; icon = Icons.policy_rounded; color = Colors.redAccent; }
-            else if (key == 'hiking') { title = '🧗 Hiking Partner'; icon = Icons.landscape_rounded; color = Colors.green; }
-            else if (key == 'assistant') { title = '💼 Personal Assistance'; icon = Icons.business_center_rounded; color = Colors.purple; }
+            final k = key.toLowerCase();
+            if (k == 'sleep' || k == 'sleep_call') {
+              title = '🌙 Sleep Call Companion';
+              icon = Icons.bedtime_rounded;
+              color = const Color(0xFF6366F1);
+            } else if (k == 'telepon' || k == 'counseling' || k == 'curhat' || k == 'virtual') {
+              title = '📞 Telepon Curhat & Konseling';
+              icon = Icons.phone_in_talk_rounded;
+              color = const Color(0xFF6366F1);
+            } else if (k == 'counseling_offline') {
+              title = '🛋️ Konseling Curhat Offline';
+              icon = Icons.psychology_rounded;
+              color = AppTheme.primaryPink;
+            } else if (k == 'gaming' || k == 'game' || k == 'mabar') {
+              title = '🎮 Gaming Buddy (Mabar)';
+              icon = Icons.sports_esports_rounded;
+              color = const Color(0xFF6366F1);
+            } else if (k == 'sporty_ride' || k == 'sporty' || k == 'motor_sport') {
+              title = '🏍️ Antar Jemput Sporty';
+              icon = Icons.two_wheeler_rounded;
+              color = const Color(0xFF06B6D4);
+            } else if (k == 'ride' || k == 'antar_jemput' || k == 'regular') {
+              title = '🚕 Antar Jemput Aman';
+              icon = Icons.local_taxi_rounded;
+              color = AppTheme.primaryPink;
+            } else if (k == 'hangout') {
+              title = '🍸 Hangout Partner';
+              icon = Icons.wine_bar_rounded;
+              color = AppTheme.primaryPink;
+            } else if (k == 'hiking') {
+              title = '🏔️ Hiking Partner (Gunung)';
+              icon = Icons.terrain_rounded;
+              color = const Color(0xFF10B981);
+            } else if (k == 'assistant') {
+              title = '💼 Personal Assistant';
+              icon = Icons.business_center_rounded;
+              color = const Color(0xFF8B5CF6);
+            } else if (k == 'detektif') {
+              title = '🕵️ Detektif Relationship';
+              icon = Icons.search_rounded;
+              color = const Color(0xFFE11D48);
+            } else if (k == 'freedom') {
+              title = '✨ Freedom Request (Jasa Suruh)';
+              icon = Icons.auto_awesome_rounded;
+              color = const Color(0xFFF97316);
+            } else {
+              title = '💼 $key';
+              icon = Icons.stars_rounded;
+              color = AppTheme.primaryPink;
+            }
 
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -666,6 +889,76 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
             );
           }).toList(),
         ),
+        if (_driverAddons.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Text(
+            'Add-ons & Fasilitas Mitra (${_driverAddons.length})',
+            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 10),
+          Column(
+            children: _driverAddons.map((addon) {
+              final title = addon['title'] ?? addon['name'] ?? 'Add-on';
+              final desc = addon['description'] ?? '';
+              final cat = addon['category'] ?? 'Layanan';
+              final price = addon['price'] is int ? addon['price'] as int : (int.tryParse(addon['price']?.toString() ?? '0') ?? 0);
+              final priceFmt = 'Rp ${price.toString().replaceAllMapped(
+                RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.'
+              )}';
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryPink.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        cat.toUpperCase(),
+                        style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 9, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12.5, fontWeight: FontWeight.bold),
+                          ),
+                          if (desc.isNotEmpty) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              desc,
+                              style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10.5),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      priceFmt,
+                      style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ],
     );
   }
@@ -679,7 +972,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
     final ratingVal = _dbReviews.isNotEmpty
         ? (_dbReviews.map((r) => (r['rating'] as num).toDouble()).reduce((a, b) => a + b) / _dbReviews.length).toStringAsFixed(1)
-        : (_dbDriverData?['rating'] != null ? _dbDriverData!['rating'].toString() : '5.0');
+        : (_dbDriverData?['rating'] != null && (_dbDriverData!['total_rides'] ?? 0) > 0 ? _dbDriverData!['rating'].toString() : '0.0');
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -845,12 +1138,13 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
         else
           Column(
             children: _dbReviews.map((r) {
+              final comment = r['text']?.toString().trim() ?? '';
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: _buildReviewCard(
                   r['author'] ?? 'Pelanggan',
                   (r['rating'] as num).toDouble(),
-                  '"${r['text']}"',
+                  comment.isNotEmpty ? '"$comment"' : '',
                 ),
               );
             }).toList(),
@@ -886,11 +1180,13 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            text,
-            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, height: 1.4, fontStyle: FontStyle.italic),
-          ),
+          if (text.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              text,
+              style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, height: 1.4, fontStyle: FontStyle.italic),
+            ),
+          ],
         ],
       ),
     );
@@ -925,7 +1221,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                       recipientName: name,
                       recipientImage: image,
                       status: "Online",
-                      tag: name == 'Sarah Jessica' ? 'Platinum' : 'Gold',
+                      tag: widget.partnerData?['tier']?.toString() ?? widget.partnerData?['category']?.toString() ?? 'Partner',
                     ),
                   ),
                 );
@@ -958,48 +1254,17 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                         'image': image,
                         'price': price,
                         'type': widget.partnerData?['type'] ?? 'Platinum',
+                        'addons': _driverAddons,
                       };
-                      if (service == 'ride') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => HangoutBookingScreen(
-                              selectedPartner: partnerInfo,
-                              serviceType: 'regular',
-                            ),
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => BookingOrderTypeScreen(
+                            partnerData: partnerInfo,
+                            serviceType: service,
                           ),
-                        );
-                      } else if (service == 'sporty') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => HangoutBookingScreen(
-                              selectedPartner: partnerInfo,
-                              serviceType: 'sporty',
-                            ),
-                          ),
-                        );
-                      } else if (service == 'freedom') {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => HangoutBookingScreen(
-                              selectedPartner: partnerInfo,
-                              serviceType: 'freedom',
-                            ),
-                          ),
-                        );
-                      } else {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => HangoutBookingScreen(
-                              selectedPartner: partnerInfo,
-                              serviceType: service,
-                            ),
-                          ),
-                        );
-                      }
+                        ),
+                      );
                     } else {
                       _showBookingOptionsDialog(
                         context, 
@@ -1040,6 +1305,17 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     String image,
     int price,
   ) {
+    final partnerInfo = {
+      'id': widget.partnerData?['id'] ?? 'drv-1',
+      'name': name,
+      'vehicle': vehicle,
+      'rating': rating,
+      'image': image,
+      'price': price,
+      'type': widget.partnerData?['type'] ?? 'Platinum',
+      'addons': _driverAddons,
+    };
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1090,168 +1366,168 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (_activeServices.contains('ride')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.local_taxi_rounded,
-                          title: '🚕 Ride Service',
-                          subtitle: 'Diantar perjalanan aman & nyaman',
-                          color: AppTheme.primaryPink,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'regular',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
+                      // --- PILAR 1: VIRTUAL COMPANION ---
+                      _buildPillarSectionHeader("PILAR 1: VIRTUAL COMPANION (ONLINE)", Icons.phone_iphone_rounded, const Color(0xFF6366F1)),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.bedtime_rounded,
+                        title: '🌙 Sleep Call Companion',
+                        subtitle: 'Teman tidur malam hari & alarm bangun pagi',
+                        color: const Color(0xFF6366F1),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'sleep',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.phone_in_talk_rounded,
+                        title: '📞 Telepon Curhat & Konseling',
+                        subtitle: 'Ruang aman pribadi via panggilan suara',
+                        color: const Color(0xFF6366F1),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'telepon',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.sports_esports_rounded,
+                        title: '🎮 Gaming Buddy (Mabar)',
+                        subtitle: 'Teman main game online bareng & push rank',
+                        color: const Color(0xFF6366F1),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'gaming',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 18),
 
-                      if (_activeServices.contains('sporty')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.sports_motorsports_rounded,
-                          title: '🏎️ Antar Jemput Sporty',
-                          subtitle: 'Kendaraan mewah & performa tinggi',
-                          color: Colors.orange,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'sporty',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
+                      // --- PILAR 2: OFFLINE COMPANION ---
+                      _buildPillarSectionHeader("PILAR 2: OFFLINE COMPANION (TATAP MUKA)", Icons.people_alt_rounded, AppTheme.primaryPink),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.wine_bar_rounded,
+                        title: '🍸 Hangout Partner',
+                        subtitle: 'Teman nongkrong di cafe, mall, bioskop, atau kondangan',
+                        color: AppTheme.primaryPink,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'hangout',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.psychology_rounded,
+                        title: '🛋️ Relationship Counseling (Offline)',
+                        subtitle: 'Mendengarkan curhat tatap muka di tempat santai/kafe',
+                        color: AppTheme.primaryPink,
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'counseling_offline',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.terrain_rounded,
+                        title: '🏔️ Hiking Partner (Mendaki Gunung)',
+                        subtitle: 'Jasa menemani naik gunung, tracking alam & camping aman',
+                        color: const Color(0xFF10B981),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'hiking',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.two_wheeler_rounded,
+                        title: '🏍️ Antar Jemput Sporty (Motor Sport)',
+                        subtitle: 'Dianterin / dijemput naik motor sport keren (ZX25R/CBR/Ninja)',
+                        color: const Color(0xFF06B6D4),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'sporty_ride',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 18),
 
-                      if (_activeServices.contains('hangout')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.wine_bar_rounded,
-                          title: '🍸 Hangout Service',
-                          subtitle: 'Teman nongkrong di cafe/restoran',
-                          color: const Color(0xFFD97706),
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'hangout',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-
-                      if (_activeServices.contains('freedom')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.auto_awesome_rounded,
-                          title: '✨ Freedom Request (Negosiasi)',
-                          subtitle: 'Tentukan acara & tawar harga sendiri',
-                          color: const Color(0xFFFF8552),
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'freedom',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-
-                      if (_activeServices.contains('counseling')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.psychology_rounded,
-                          title: '💬 Relationship Counseling',
-                          subtitle: 'Konsultasi masalah asmara profesional',
-                          color: Colors.blueAccent,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'counseling',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-
-                      if (_activeServices.contains('curhat')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.hearing_rounded,
-                          title: '👂 Mendengarkan Curhat',
-                          subtitle: 'Teman cerita yang penuh empati',
-                          color: Colors.teal,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'curhat',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-
-                      if (_activeServices.contains('detective')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.policy_rounded,
-                          title: '🕵️ Detektif Relationship',
-                          subtitle: 'Penyelidikan rahasia & pemantauan',
-                          color: Colors.redAccent,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'detective',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-
-                      if (_activeServices.contains('hiking')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.landscape_rounded,
-                          title: '🧗 Hiking Partner',
-                          subtitle: 'Teman mendaki alam yang seru',
-                          color: Colors.green,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'hiking',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-
-                      if (_activeServices.contains('assistant')) ...[
-                        _buildModalOption(
-                          context,
-                          icon: Icons.business_center_rounded,
-                          title: '💼 Personal Assistance',
-                          subtitle: 'Bantuan harian (bawa barang, dll)',
-                          color: Colors.purple,
-                          onTap: () {
-                            Navigator.pop(context);
-                            Navigator.push(context, MaterialPageRoute(builder: (context) => HangoutBookingScreen(
-                              serviceType: 'assistant',
-                              selectedPartner: {'id': widget.partnerData?['id'] ?? 'drv-1', 'name': name, 'vehicle': vehicle, 'rating': rating, 'image': image, 'price': price, 'type': widget.partnerData?['type'] ?? 'Platinum'},
-                            )));
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                      ],
+                      // --- PILAR 3: JASA SURUH & ASISTEN PRIBADI ---
+                      _buildPillarSectionHeader("PILAR 3: JASA SURUH & ASISTEN PRIBADI", Icons.auto_awesome_rounded, const Color(0xFFF97316)),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.auto_awesome_rounded,
+                        title: '✨ Freedom Request (Jasa Suruh)',
+                        subtitle: 'Permintaan bebas apa saja & tawar harga sendiri',
+                        color: const Color(0xFFF97316),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'freedom',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.business_center_rounded,
+                        title: '💼 Personal Assistant Service',
+                        subtitle: 'Asisten harian: bawain koper, belanjaan, bodyguard di club',
+                        color: const Color(0xFF8B5CF6),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'assistant',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildModalOption(
+                        context,
+                        icon: Icons.search_rounded,
+                        title: '🕵️ Detektif Relationship',
+                        subtitle: 'Investigasi kesetiaan pasangan & observasi aman terpercaya',
+                        color: const Color(0xFFE11D48),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
+                            serviceType: 'detektif',
+                            partnerData: partnerInfo,
+                          )));
+                        },
+                      ),
                     ],
                   ),
                 ),
@@ -1282,6 +1558,35 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildPillarSectionHeader(String title, IconData icon, Color color) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              style: GoogleFonts.inter(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1424,7 +1729,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
         // Date Strip
         SizedBox(
-          height: 96,
+          height: 106,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             itemCount: calendarDays.length,
@@ -1433,30 +1738,26 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
               final isSelected = index == _selectedScheduleDayIndex;
 
               // Calculate real bookings for this specific date
-              final dayBookings = _driverBookings.where((b) {
-                final rawDateStr = b['scheduled_at'] ?? b['created_at'] ?? '';
-                if (rawDateStr == null || rawDateStr.toString().isEmpty) return false;
-                try {
-                  final d = DateTime.parse(rawDateStr.toString());
-                  return d.year == date.year && d.month == date.month && d.day == date.day && b['status'] != 'cancelled';
-                } catch (_) {
-                  return false;
-                }
-              }).toList();
-
+              final dayBookings = _getBookingsForDate(date);
+              final slots = _computeHourlySlots(date, dayBookings);
               final count = dayBookings.length;
+              final hasActive = dayBookings.any((b) => _isBookingWaitingOrActive(b['status']?.toString() ?? ''));
+
               Color badgeColor;
               String statusLabel;
 
               if (count == 0) {
                 badgeColor = const Color(0xFF10B981); // Green
                 statusLabel = "Kosong";
-              } else if (count <= 2) {
+              } else if (hasActive) {
                 badgeColor = const Color(0xFFF59E0B); // Orange
-                statusLabel = "Sedikit";
-              } else {
+                statusLabel = "⚠️ Terisi ($count)";
+              } else if (count >= 3) {
                 badgeColor = const Color(0xFFEF4444); // Red
-                statusLabel = "Sibuk";
+                statusLabel = "Sibuk ($count)";
+              } else {
+                badgeColor = const Color(0xFF3B82F6); // Blue
+                statusLabel = "$count Selesai";
               }
 
               return GestureDetector(
@@ -1464,18 +1765,30 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                   setState(() {
                     _selectedScheduleDayIndex = index;
                   });
-                  _showDayScheduleBottomSheet(context, date, statusLabel, badgeColor, count, dayBookings);
+                  _showDayScheduleBottomSheet(
+                    context,
+                    date,
+                    statusLabel,
+                    badgeColor,
+                    count,
+                    dayBookings,
+                    slots,
+                  );
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  width: 72,
+                  width: 76,
                   margin: const EdgeInsets.only(right: 10),
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                   decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.primaryPink.withOpacity(0.15) : AppTheme.surface,
+                    color: isSelected
+                        ? AppTheme.primaryPink.withOpacity(0.15)
+                        : (hasActive ? badgeColor.withOpacity(0.08) : AppTheme.surface),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: isSelected ? AppTheme.primaryPink : AppTheme.border,
+                      color: isSelected
+                          ? AppTheme.primaryPink
+                          : (hasActive ? badgeColor.withOpacity(0.6) : AppTheme.border),
                       width: isSelected ? 2.0 : 1.0,
                     ),
                   ),
@@ -1502,7 +1815,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                       ),
                       const SizedBox(height: 4),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                         decoration: BoxDecoration(
                           color: badgeColor.withOpacity(0.2),
                           borderRadius: BorderRadius.circular(8),
@@ -1512,9 +1825,11 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                           statusLabel,
                           style: GoogleFonts.inter(
                             color: badgeColor,
-                            fontSize: 9,
+                            fontSize: 8.5,
                             fontWeight: FontWeight.bold,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -1530,27 +1845,29 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
         Builder(
           builder: (context) {
             final selectedDate = calendarDays[_selectedScheduleDayIndex < calendarDays.length ? _selectedScheduleDayIndex : 0];
-            final dayBookings = _driverBookings.where((b) {
-              final rawDateStr = b['scheduled_at'] ?? b['created_at'] ?? '';
-              if (rawDateStr == null || rawDateStr.toString().isEmpty) return false;
-              try {
-                final d = DateTime.parse(rawDateStr.toString());
-                return d.year == selectedDate.year && d.month == selectedDate.month && d.day == selectedDate.day && b['status'] != 'cancelled';
-              } catch (_) {
-                return false;
-              }
-            }).toList();
-
+            final dayBookings = _getBookingsForDate(selectedDate);
+            final slots = _computeHourlySlots(selectedDate, dayBookings);
+            final lockedHours = slots.where((s) => s['isLocked'] == true).length;
+            final freeHours = 14 - lockedHours;
             final count = dayBookings.length;
-            Color badgeColor = count == 0 ? const Color(0xFF10B981) : (count <= 2 ? const Color(0xFFF59E0B) : const Color(0xFFEF4444));
-            String statusLabel = count == 0 ? "Driver Tersedia Bebas" : (count <= 2 ? "Ada Beberapa Pesanan" : "Jadwal Padat / Sibuk");
+            final hasActive = dayBookings.any((b) => _isBookingWaitingOrActive(b['status']?.toString() ?? ''));
+
+            Color badgeColor = count == 0
+                ? const Color(0xFF10B981)
+                : (hasActive ? const Color(0xFFF59E0B) : (count >= 3 ? const Color(0xFFEF4444) : const Color(0xFF3B82F6)));
+            String statusLabel = count == 0
+                ? "Driver Tersedia Bebas"
+                : (hasActive ? "⚠️ Ada Jadwal Terkunci ($count)" : "Jadwal Selesai ($count)");
 
             return Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: AppTheme.surface,
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.border),
+                border: Border.all(
+                  color: hasActive ? badgeColor.withOpacity(0.6) : AppTheme.border,
+                  width: hasActive ? 1.5 : 1.0,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1573,23 +1890,118 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                           border: Border.all(color: badgeColor),
                         ),
                         child: Text(
-                          "$count Pesanan",
+                          statusLabel,
                           style: GoogleFonts.inter(color: badgeColor, fontSize: 10.5, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Text(
-                    statusLabel,
-                    style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12.5, fontWeight: FontWeight.w600),
+                  if (hasActive) ...[
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF59E0B).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "Terdapat pesanan yang mengunci jam tertentu driver ($lockedHours Jam Terkunci). Anda tetap dapat memesan di slot jam yang masih FREE.",
+                              style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11.5, height: 1.35),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                  ] else ...[
+                    Text(
+                      count == 0
+                          ? "Driver memiliki waktu luang penuh di tanggal ini. Siap menerima orderan Anda kapan saja!"
+                          : "Terdapat $count kegiatan terdaftar. Anda tetap dapat mengajukan pemesanan di jam yang belum terisi.",
+                      style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5, height: 1.4),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+
+                  // Hours chips
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEF4444).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.lock_rounded, color: Color(0xFFEF4444), size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                "$lockedHours Jam Terkunci",
+                                style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                "$freeHours Jam Free",
+                                style: GoogleFonts.inter(color: const Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    count == 0
-                        ? "Driver memiliki waktu luang penuh di tanggal ini. Siap menerima orderan Anda kapan saja!"
-                        : "Terdapat $count kegiatan terdaftar. Anda tetap dapat mengajukan pemesanan di jam yang belum terisi.",
-                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5, height: 1.4),
+                  const SizedBox(height: 12),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        _showDayScheduleBottomSheet(
+                          context,
+                          selectedDate,
+                          statusLabel,
+                          badgeColor,
+                          count,
+                          dayBookings,
+                          slots,
+                        );
+                      },
+                      icon: const Icon(Icons.schedule_rounded, size: 16),
+                      label: const Text("LIHAT DETAIL JAM TERKUNCI & FREE"),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primaryPink,
+                        side: const BorderSide(color: AppTheme.primaryPink),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -1607,7 +2019,11 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     Color badgeColor,
     int bookingCount,
     List<Map<String, dynamic>> dayBookings,
+    List<Map<String, dynamic>> slots,
   ) {
+    final lockedHours = slots.where((s) => s['isLocked'] == true).length;
+    final freeHours = 14 - lockedHours;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -1622,7 +2038,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
             ),
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.75,
+              maxHeight: MediaQuery.of(context).size.height * 0.85,
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1652,7 +2068,7 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            "$bookingCount Aktivitas Terjadwal",
+                            "$bookingCount Aktivitas Terjadwal ($lockedHours Jam Terkunci)",
                             style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
                           ),
                         ],
@@ -1672,83 +2088,82 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
+
+                // Summary chips
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardDeep,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.border),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      Text("Total Order: $bookingCount", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11.5, fontWeight: FontWeight.w600)),
+                      Container(height: 16, width: 1, color: AppTheme.border),
+                      Text("Terkunci: $lockedHours Jam", style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      Container(height: 16, width: 1, color: AppTheme.border),
+                      Text("Free: $freeHours Jam", style: GoogleFonts.inter(color: const Color(0xFF10B981), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
                 const Divider(color: AppTheme.border),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
 
                 Flexible(
-                  child: dayBookings.isEmpty
-                      ? Center(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 24),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.event_available_rounded, color: Color(0xFF10B981), size: 48),
-                                const SizedBox(height: 12),
-                                Text(
-                                  "Jadwal Masih Kosong",
-                                  style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  "Driver siap melayani sepanjang hari ini. Pesan sekarang untuk mengamankan jadwal!",
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          physics: const BouncingScrollPhysics(),
-                          itemCount: dayBookings.length,
-                          itemBuilder: (context, idx) {
-                            final b = dayBookings[idx];
-                            final timeStr = (b['scheduled_at'] ?? b['created_at'] ?? '').toString();
-                            String formattedTime = 'Waktu Fleksibel';
-                            try {
-                              if (timeStr.isNotEmpty) {
-                                final dt = DateTime.parse(timeStr);
-                                formattedTime = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} WIB';
-                              }
-                            } catch (_) {}
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Ketersediaan Jam (08:00 - 22:00 WIB)",
+                          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 10),
 
-                            final service = b['service_type'] ?? 'Companion Service';
-                            final duration = b['duration_hours'] != null ? '${b['duration_hours']} Jam' : 'Sesi Pemesanan';
+                        // Timeline slots
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: slots.length,
+                          itemBuilder: (ctx, sIdx) {
+                            final slot = slots[sIdx];
+                            final isLocked = slot['isLocked'] == true;
 
                             return Container(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(14),
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                               decoration: BoxDecoration(
-                                color: AppTheme.cardDeep,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: AppTheme.border),
+                                color: isLocked ? const Color(0xFFEF4444).withOpacity(0.08) : AppTheme.cardDeep,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isLocked ? const Color(0xFFEF4444).withOpacity(0.4) : AppTheme.border,
+                                ),
                               ),
                               child: Row(
                                 children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.primaryPink.withOpacity(0.12),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: const Icon(Icons.access_time_rounded, color: AppTheme.primaryPink, size: 18),
+                                  Icon(
+                                    isLocked ? Icons.lock_rounded : Icons.check_circle_outline_rounded,
+                                    color: isLocked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                                    size: 16,
                                   ),
-                                  const SizedBox(width: 12),
+                                  const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          service,
-                                          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12.5, fontWeight: FontWeight.bold),
+                                          slot['label'] as String,
+                                          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, fontWeight: FontWeight.bold),
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
-                                          '$formattedTime • Durasi: $duration',
-                                          style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                                          isLocked ? "Terkunci (${slot['timeRangeString']})" : "Driver Bebas / Siap Menerima Pesanan",
+                                          style: GoogleFonts.inter(color: isLocked ? const Color(0xFFEF4444) : AppTheme.textMuted, fontSize: 10.5),
                                         ),
                                       ],
                                     ),
@@ -1756,12 +2171,16 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFF59E0B).withOpacity(0.15),
+                                      color: isLocked ? const Color(0xFFEF4444).withOpacity(0.15) : const Color(0xFF10B981).withOpacity(0.15),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
-                                      'Terjadwal',
-                                      style: GoogleFonts.inter(color: const Color(0xFFF59E0B), fontSize: 10, fontWeight: FontWeight.bold),
+                                      isLocked ? "TERKUNCI" : "FREE",
+                                      style: GoogleFonts.inter(
+                                        color: isLocked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1769,6 +2188,101 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                             );
                           },
                         ),
+                        const SizedBox(height: 16),
+
+                        Text(
+                          "Rincian Pesanan Terjadwal ($bookingCount)",
+                          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 10),
+
+                        if (dayBookings.isEmpty)
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 20),
+                            child: Column(
+                              children: [
+                                const Icon(Icons.event_available_rounded, color: Color(0xFF10B981), size: 40),
+                                const SizedBox(height: 8),
+                                Text(
+                                  "Jadwal Masih Kosong Penuh",
+                                  style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  "Driver siap melayani Anda sepanjang hari ini.",
+                                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: dayBookings.length,
+                            itemBuilder: (context, idx) {
+                              final b = dayBookings[idx];
+                              final bStart = _extractBookingDateTime(b);
+                              final dur = _extractBookingDurationHours(b);
+                              final bEnd = bStart?.add(Duration(hours: dur));
+
+                              final timeFormatted = bStart != null && bEnd != null
+                                  ? "${bStart.hour.toString().padLeft(2, '0')}:${bStart.minute.toString().padLeft(2, '0')} - ${bEnd.hour.toString().padLeft(2, '0')}:${bEnd.minute.toString().padLeft(2, '0')} WIB"
+                                  : "Waktu Fleksibel";
+
+                              final service = b['service_type'] ?? 'Companion Service';
+
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 10),
+                                padding: const EdgeInsets.all(14),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.cardDeep,
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          service.toString(),
+                                          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12.5, fontWeight: FontWeight.bold),
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFEF4444).withOpacity(0.15),
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            'Terkunci',
+                                            style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 10, fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.lock_clock_rounded, color: Color(0xFFEF4444), size: 15),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          '$timeFormatted • Durasi: $dur Jam',
+                                          style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 11.5, fontWeight: FontWeight.w600),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 SizedBox(

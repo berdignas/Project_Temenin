@@ -26,6 +26,9 @@ class NotificationSoundService {
     }
   }
 
+  /// Play notification sound (alias to playOrderAlert)
+  Future<void> playNotificationSound({bool loop = false}) => playOrderAlert(loop: loop);
+
   /// Play order alert sound with haptic feedback
   Future<void> playOrderAlert({bool loop = false}) async {
     try {

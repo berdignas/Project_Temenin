@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle2, XCircle, ShieldAlert, FileText, UserCheck, RefreshCw } from 'lucide-react';
+import { CheckCircle2, XCircle, ShieldAlert, FileText, UserCheck, RefreshCw, Clock } from 'lucide-react';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
 import { adminApi } from '../services/api';
@@ -20,6 +20,44 @@ export const DriverApprovals = () => {
   useEffect(() => {
     fetchPending();
   }, []);
+
+  const getDriverSla = (createdAt) => {
+    // 1 x 24 jam kerja dari waktu pendaftaran mitra driver
+    const deadline = new Date(createdAt).getTime() + (24 * 3600 * 1000);
+    const now = Date.now();
+    const diffMs = deadline - now;
+    const diffHours = diffMs / (1000 * 3600);
+
+    if (diffMs <= 0) {
+      return {
+        label: 'Lewat SLA (24 Jam)',
+        status: 'CRITICAL',
+        badgeClass: 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse',
+        dotClass: 'bg-rose-400 animate-ping'
+      };
+    } else if (diffHours < 4) {
+      return {
+        label: `${Math.floor(diffHours)}j ${Math.floor((diffHours % 1) * 60)}m (KRITIS)`,
+        status: 'CRITICAL',
+        badgeClass: 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse',
+        dotClass: 'bg-rose-400 animate-ping'
+      };
+    } else if (diffHours < 12) {
+      return {
+        label: `${Math.floor(diffHours)}j ${Math.floor((diffHours % 1) * 60)}m (Peringatan)`,
+        status: 'WARNING',
+        badgeClass: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+        dotClass: 'bg-amber-400'
+      };
+    } else {
+      return {
+        label: `${Math.floor(diffHours)}j ${Math.floor((diffHours % 1) * 60)}m (Aman)`,
+        status: 'NORMAL',
+        badgeClass: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        dotClass: 'bg-emerald-400'
+      };
+    }
+  };
 
   const handleVerify = async (driverId, status) => {
     const res = await adminApi.verifyDriver(driverId, status);
@@ -77,26 +115,39 @@ export const DriverApprovals = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {pendingDrivers.map((driver) => (
-            <div
-              key={driver.id}
-              className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-5 backdrop-blur-md hover:border-amber-500/40 transition-all space-y-4"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 font-extrabold text-lg flex items-center justify-center border border-amber-500/30">
-                    {driver.users?.full_name?.charAt(0) || 'D'}
+          {pendingDrivers.map((driver) => {
+            const sla = getDriverSla(driver.created_at);
+            return (
+              <div
+                key={driver.id}
+                className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-5 backdrop-blur-md hover:border-amber-500/40 transition-all space-y-4"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 font-extrabold text-lg flex items-center justify-center border border-amber-500/30">
+                      {driver.users?.full_name?.charAt(0) || 'D'}
+                    </div>
+                    <div>
+                      <h3 className="font-extrabold text-white text-base">{driver.users?.full_name || 'Calon Driver'}</h3>
+                      <p className="text-xs text-slate-400">{driver.users?.phone || '-'} • {driver.users?.email || '-'}</p>
+                      <span className="text-[10px] text-slate-500">
+                        Daftar: {new Date(driver.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB • {new Date(driver.created_at).toLocaleDateString('id-ID')}
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-extrabold text-white text-base">{driver.users?.full_name || 'Calon Driver'}</h3>
-                    <p className="text-xs text-slate-400">{driver.users?.phone || '-'} • {driver.users?.email || '-'}</p>
-                    <span className="text-[10px] text-slate-500">
-                      Tanggal Daftar: {new Date(driver.created_at).toLocaleDateString('id-ID')}
-                    </span>
+
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border ${sla.badgeClass}`}>
+                        <span className={`w-2 h-2 rounded-full ${sla.dotClass}`} />
+                        <Clock className="w-3 h-3" />
+                        <span>{sla.label}</span>
+                      </span>
+                      <Badge variant="warning">Pending</Badge>
+                    </div>
+                    <span className="text-[9px] text-slate-400 font-medium">SLA: Maks. 1x24 jam kerja</span>
                   </div>
                 </div>
-                <Badge variant="warning">Pending</Badge>
-              </div>
 
               {/* Document Overview */}
               <div className="p-3.5 bg-slate-900/80 rounded-xl border border-slate-800 space-y-2 text-xs">
@@ -146,8 +197,9 @@ export const DriverApprovals = () => {
                 </div>
               </div>
             </div>
-          ))}
-        </div>
+          );
+        })}
+      </div>
       )}
 
       {/* Modal Review */}
@@ -163,7 +215,19 @@ export const DriverApprovals = () => {
                 <h4 className="font-extrabold text-sm text-white">{selectedDriver.users?.full_name}</h4>
                 <p className="text-slate-400">{selectedDriver.users?.phone}</p>
               </div>
-              <Badge variant="warning">Status: Pending</Badge>
+              <div className="flex items-center gap-1.5">
+                {(() => {
+                  const sla = getDriverSla(selectedDriver.created_at);
+                  return (
+                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border ${sla.badgeClass}`}>
+                      <span className={`w-2 h-2 rounded-full ${sla.dotClass}`} />
+                      <Clock className="w-3 h-3" />
+                      <span>{sla.label}</span>
+                    </span>
+                  );
+                })()}
+                <Badge variant="warning">Status: Pending</Badge>
+              </div>
             </div>
 
             <div className="space-y-3">

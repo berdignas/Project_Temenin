@@ -13,27 +13,46 @@ class BookingProvider extends ChangeNotifier {
   List<BookingModel> _bookings = [];
   BookingModel? _activeBooking;
   BookingModel? _incomingBooking;
+  BookingModel? _pendingReviewBooking;
+  BookingModel? _lastCompletedBooking;
+  BookingModel? _ongoingTrip;
+  List<BookingModel> _upcomingBookings = [];
+  List<BookingModel> _completedBookings = [];
+  List<BookingModel> _cancelledBookings = [];
   
   // In-app Notifications state
   final List<DriverNotificationModel> _notifications = [];
   DriverNotificationModel? _activeBannerNotification;
   final Set<String> _seenBookingIds = {};
+  final Set<String> _seenDpPaidBookingIds = {};
+  final Set<String> _seenPelunasanBookingIds = {};
+  final Set<String> _seenMessageKeys = {};
+  bool _isFirstBookingProcess = true;
   
   bool _isLoading = false;
   String? _errorMessage;
   
-  // Earnings state
+  // Earnings & Escrow state
   double _totalEarnings = 0.0;
   int _totalRides = 0;
+  double _pendingEscrowBalance = 0.0;
   List<dynamic> _earningsBookings = [];
   
   // Realtime subscription & Polling
   StreamSubscription<List<Map<String, dynamic>>>? _realtimeSubscription;
+  StreamSubscription<List<Map<String, dynamic>>>? _chatMessagesSubscription;
   Timer? _pollingTimer;
 
   List<BookingModel> get bookings => _bookings;
+  List<BookingModel> get completedBookings => _completedBookings;
+  List<BookingModel> get upcomingBookings => List.unmodifiable(_upcomingBookings);
+  List<BookingModel> get cancelledBookings => List.unmodifiable(_cancelledBookings);
+  BookingModel? get ongoingTrip => _ongoingTrip;
+  bool get isCurrentlyOnTrip => _ongoingTrip != null;
   BookingModel? get activeBooking => _activeBooking;
   BookingModel? get incomingBooking => _incomingBooking;
+  BookingModel? get pendingReviewBooking => _pendingReviewBooking;
+  BookingModel? get lastCompletedBooking => _lastCompletedBooking;
   List<DriverNotificationModel> get notifications => List.unmodifiable(_notifications);
   DriverNotificationModel? get activeBannerNotification => _activeBannerNotification;
   int get unreadNotificationsCount => _notifications.where((n) => !n.isRead).length;
@@ -43,10 +62,14 @@ class BookingProvider extends ChangeNotifier {
   
   double get totalEarnings => _totalEarnings;
   int get totalRides => _totalRides;
+  double get pendingEscrowBalance => _pendingEscrowBalance;
   List<dynamic> get earningsBookings => _earningsBookings;
 
   // Dismiss top floating banner
   void dismissBannerNotification() {
+    if (_activeBannerNotification != null) {
+      _activeBannerNotification!.isRead = true;
+    }
     _activeBannerNotification = null;
     NotificationSoundService().stopSound();
     notifyListeners();
@@ -72,6 +95,9 @@ class BookingProvider extends ChangeNotifier {
   // Clear current incoming request
   void clearIncomingRequest() {
     _incomingBooking = null;
+    if (_activeBannerNotification != null) {
+      _activeBannerNotification!.isRead = true;
+    }
     _activeBannerNotification = null;
     NotificationSoundService().stopSound();
     notifyListeners();
@@ -80,6 +106,16 @@ class BookingProvider extends ChangeNotifier {
   // Set active booking manually (e.g. on click from list)
   void setActiveBooking(BookingModel? booking) {
     _activeBooking = booking;
+    notifyListeners();
+  }
+
+  void clearActiveBooking() {
+    _activeBooking = null;
+    notifyListeners();
+  }
+
+  void clearPendingReview() {
+    _pendingReviewBooking = null;
     notifyListeners();
   }
 
@@ -118,6 +154,7 @@ class BookingProvider extends ChangeNotifier {
   }
 
   Future<void> _processBookingsData(List<Map<String, dynamic>> data) async {
+    debugPrint('📦 _processBookingsData received ${data.length} rows from Supabase');
     if (data.isEmpty) {
       _pendingOffers = [];
       _incomingBooking = null;
@@ -148,57 +185,66 @@ class BookingProvider extends ChangeNotifier {
         }
       }
       
-      return true; // Active driver receives incoming pending requests
+      return false; // Do not notify driver if targeted to another specific driver
     }).toList();
 
-    final activeList = data.where((b) {
-      final s = b['status']?.toString();
-      final d = b['additional_details'] is Map ? b['additional_details'] as Map : null;
-      final sub = d?['sub_status']?.toString();
-
-      // Exclude finished or cancelled bookings from active list
-      if (s == 'completed' || s == 'closed' || s == 'cancelled' || s == 'paid' ||
-          sub == 'completed' || sub == 'closed' || sub == 'cancelled' || sub == 'paid') {
-        return false;
-      }
-
-      return s == 'accepted' || 
-             s == 'ongoing' || 
-             sub == 'dp_paid' || 
-             sub == 'on_the_way' || 
-             sub == 'arrived' || 
-             sub == 'started' || 
-             sub == 'ongoing';
-    }).toList();
-
-    if (pendingList.isNotEmpty) {
-      List<BookingModel> offers = [];
-      for (final rawBooking in pendingList) {
-        final clientId = rawBooking['user_id'];
-        Map<String, dynamic>? clientData;
-        try {
-          final dbUser = await Supabase.instance.client
-              .from('users')
-              .select()
-              .eq('id', clientId)
-              .maybeSingle();
-          clientData = dbUser;
-        } catch (e) {
-          debugPrint('Error fetching client details: $e');
+    // Batch fetch client details for all bookings in data
+    final clientIds = data
+        .map((b) => b['user_id']?.toString())
+        .where((id) => id != null && id.isNotEmpty)
+        .cast<String>()
+        .toSet()
+        .toList();
+    Map<String, Map<String, dynamic>> userMap = {};
+    if (clientIds.isNotEmpty) {
+      try {
+        final usersData = await Supabase.instance.client
+            .from('users')
+            .select()
+            .inFilter('id', clientIds);
+        for (final u in usersData) {
+          if (u['id'] != null) {
+            userMap[u['id'].toString()] = Map<String, dynamic>.from(u as Map);
+          }
         }
-        offers.add(BookingModel.fromJson({
+      } catch (e) {
+        debugPrint('Error batch fetching client details: $e');
+      }
+    }
+
+    // Real-time calculation of pending escrow (DP safely held in platform)
+    double realtimePendingEscrow = 0.0;
+    for (final raw in data) {
+      final s = raw['status']?.toString();
+      final d = raw['additional_details'] is Map ? raw['additional_details'] as Map : null;
+      final sub = d?['sub_status']?.toString();
+      final isDpPaid = d?['dp_paid'] == true || sub == 'dp_paid';
+      final isReleased = d?['payout_status'] == 'released' || d?['driver_credited'] == true;
+      if (s != 'cancelled' && sub != 'cancelled' && isDpPaid && !isReleased) {
+        final dpVal = d?['dp'] ?? d?['dp_amount'] ?? raw['escrow_balance'] ?? ((raw['total_price'] ?? 0) * 0.5);
+        final dpNum = dpVal is num ? dpVal.toDouble() : (double.tryParse(dpVal?.toString() ?? '') ?? 0.0);
+        realtimePendingEscrow += dpNum;
+      }
+    }
+    _pendingEscrowBalance = realtimePendingEscrow;
+
+    // Process pending offers
+    if (pendingList.isNotEmpty) {
+      List<BookingModel> offers = pendingList.map((rawBooking) {
+        final clientId = rawBooking['user_id']?.toString();
+        final clientData = clientId != null ? userMap[clientId] : null;
+        return BookingModel.fromJson({
           ...rawBooking,
           'users': clientData,
-        }));
-      }
+        });
+      }).toList();
       _pendingOffers = offers;
-      
-      // Check for brand new incoming offers to ring notification sound and show banner
+
       for (final offer in offers) {
         final bId = offer.id.toString();
         if (!_seenBookingIds.contains(bId)) {
           _seenBookingIds.add(bId);
-          
+
           final clientName = offer.client?.fullName ?? 'Pelanggan';
           final notif = DriverNotificationModel(
             id: 'notif-$bId-${DateTime.now().millisecondsSinceEpoch}',
@@ -211,8 +257,6 @@ class BookingProvider extends ChangeNotifier {
           );
           _notifications.insert(0, notif);
           _activeBannerNotification = notif;
-          
-          // Play loud ringtone / notification sound
           NotificationSoundService().playOrderAlert();
         }
       }
@@ -221,7 +265,7 @@ class BookingProvider extends ChangeNotifier {
         final dId = offer.driverId?.toString();
         return dId != null && _associatedDriverIds.contains(dId);
       }).firstOrNull;
-      
+
       if (directTargetOffer != null) {
         if (_incomingBooking == null || _incomingBooking!.id.toString() != directTargetOffer.id.toString()) {
           _incomingBooking = directTargetOffer;
@@ -234,58 +278,198 @@ class BookingProvider extends ChangeNotifier {
       _incomingBooking = null;
     }
 
-    if (activeList.isNotEmpty) {
-      Map<String, dynamic> rawBooking = activeList.first;
-      if (_activeBooking != null) {
-        final match = activeList.firstWhere(
-          (b) => b['id'].toString() == _activeBooking!.id.toString(),
-          orElse: () => activeList.first,
-        );
-        rawBooking = Map<String, dynamic>.from(match);
-      } else {
-        rawBooking = Map<String, dynamic>.from(activeList.first);
-      }
+    // Categorize bookings: Ongoing trip vs Scheduled upcoming vs Completed vs Cancelled
+    final List<BookingModel> convertedUpcoming = [];
+    final List<BookingModel> convertedOngoing = [];
+    final List<BookingModel> convertedCompleted = [];
+    final List<BookingModel> convertedCancelled = [];
 
-      final dbStatus = rawBooking['status']?.toString();
-      final addDetails = rawBooking['additional_details'] is Map
+    for (final rawBooking in data) {
+      final s = rawBooking['status']?.toString();
+      final d = rawBooking['additional_details'] is Map
           ? rawBooking['additional_details'] as Map
           : (rawBooking['additionalDetails'] is Map ? rawBooking['additionalDetails'] as Map : null);
-      final subStatus = addDetails?['sub_status']?.toString();
-      final isDpPaid = addDetails?['dp_paid'] == true || subStatus == 'dp_paid' || rawBooking['dp_paid'] == true;
-      final isAdvanced = subStatus == 'on_the_way' || 
-                         subStatus == 'arrived' || 
-                         subStatus == 'started' || 
-                         subStatus == 'ongoing' || 
-                         subStatus == 'completed' || 
-                         subStatus == 'paid';
+      final sub = d?['sub_status']?.toString();
+      final isPelunasanPaid = sub == 'paid' || 
+                             s == 'paid' || 
+                             s == 'closed' || 
+                             sub == 'closed' || 
+                             d?['pelunasan_paid'] == true || 
+                             d?['final_paid'] == true || 
+                             d?['payment_status'] == 'LUNAS';
 
-      String effectiveStatus = subStatus ?? dbStatus ?? 'pending';
-      if (isDpPaid && !isAdvanced) {
-        effectiveStatus = 'dp_paid';
-      }
-      rawBooking['status'] = effectiveStatus;
+      // If pending, check if it's targeted directly to this driver
+      final bDriverId = rawBooking['driver_id']?.toString();
+      final isDirectToMe = bDriverId != null && bDriverId.isNotEmpty &&
+          (_associatedDriverIds.contains(bDriverId) || 
+           _currentDriverId == bDriverId || 
+           _currentUserId == bDriverId);
 
-      final clientId = rawBooking['user_id'];
-      Map<String, dynamic>? clientData;
-      try {
-        if (clientId != null) {
-          final dbUser = await Supabase.instance.client
-              .from('users')
-              .select()
-              .eq('id', clientId)
-              .maybeSingle();
-          clientData = dbUser;
-        }
-      } catch (e) {
-        debugPrint('Error fetching active client details: $e');
-      }
-      _activeBooking = BookingModel.fromJson({
+      if (s == 'pending' && !isDirectToMe) continue; // Skip only unassigned broadcast offers from upcoming list
+
+      final clientId = rawBooking['user_id']?.toString();
+      final clientData = clientId != null ? userMap[clientId] : null;
+      final model = BookingModel.fromJson({
         ...rawBooking,
         'users': clientData,
       });
+
+      if (s == 'cancelled' || sub == 'cancelled') {
+        convertedCancelled.add(model);
+      } else if (isPelunasanPaid || s == 'completed') {
+        convertedCompleted.add(model);
+      } else if (model.isOngoingTrip) {
+        convertedOngoing.add(model);
+      } else {
+        convertedUpcoming.add(model);
+      }
+    }
+
+    convertedUpcoming.sort((a, b) => (a.bookingDate ?? a.createdAt).compareTo(b.bookingDate ?? b.createdAt));
+    convertedCompleted.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    convertedCancelled.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    _upcomingBookings = convertedUpcoming;
+    _completedBookings = convertedCompleted;
+    _cancelledBookings = convertedCancelled;
+
+    // Set ongoing trip (if physically on trip)
+    if (convertedOngoing.isNotEmpty) {
+      if (_ongoingTrip != null) {
+        _ongoingTrip = convertedOngoing.firstWhere(
+          (b) => b.id == _ongoingTrip!.id,
+          orElse: () => convertedOngoing.first,
+        );
+      } else {
+        _ongoingTrip = convertedOngoing.first;
+      }
     } else {
+      _ongoingTrip = null;
+    }
+
+    // Set active booking: ongoing trip has highest priority, then earliest upcoming
+    if (_ongoingTrip != null) {
+      _activeBooking = _ongoingTrip;
+    } else if (_upcomingBookings.isNotEmpty) {
+      _activeBooking = _upcomingBookings.first;
+    } else {
+      if (_activeBooking != null && (_activeBooking!.isCompleted || _activeBooking!.isPelunasanPaid)) {
+        _lastCompletedBooking = _activeBooking;
+      }
       _activeBooking = null;
     }
+
+    // DP Paid Notifications for upcoming bookings
+    for (final b in [..._upcomingBookings, if (_ongoingTrip != null) _ongoingTrip!]) {
+      final add = b.additionalDetails;
+      final isDpPaid = add?['dp_paid'] == true || add?['sub_status'] == 'dp_paid' || b.status == 'dp_paid';
+      if (isDpPaid && !_seenDpPaidBookingIds.contains(b.id)) {
+        _seenDpPaidBookingIds.add(b.id);
+        final clientName = b.client?.fullName ?? 'Pelanggan';
+        final notif = DriverNotificationModel(
+          id: 'notif-dp-${b.id}-${DateTime.now().millisecondsSinceEpoch}',
+          title: '💳 Pembayaran DP Berhasil!',
+          message: '$clientName telah membayar DP. Jadwal terkonfirmasi.',
+          timestamp: DateTime.now(),
+          type: NotificationType.dpPaid,
+          booking: b,
+          isRead: false,
+        );
+        _notifications.insert(0, notif);
+        _activeBannerNotification = notif;
+        NotificationSoundService().playOrderAlert();
+      }
+    }
+
+    // Process pending review bookings (settled/completed, waiting for driver review)
+    final pendingReviewList = convertedCompleted.where((b) {
+      final d = b.additionalDetails;
+      final isReviewed = d?['client_review'] != null || 
+                         d?['driver_rating_client'] != null || 
+                         d?['driver_reviewed'] == true ||
+                         b.status == 'closed' || 
+                         d?['sub_status'] == 'closed';
+      return !isReviewed;
+    }).toList();
+
+    if (pendingReviewList.isNotEmpty) {
+      _pendingReviewBooking = pendingReviewList.first;
+      _lastCompletedBooking = _pendingReviewBooking;
+      final bId = _pendingReviewBooking!.id;
+      if (!_seenPelunasanBookingIds.contains(bId)) {
+        _seenPelunasanBookingIds.add(bId);
+        final clientName = _pendingReviewBooking?.client?.fullName ?? 'Pelanggan';
+        final notif = DriverNotificationModel(
+          id: 'notif-pelunasan-$bId-${DateTime.now().millisecondsSinceEpoch}',
+          title: '🎉 Pelunasan Berhasil Diterima!',
+          message: '$clientName telah menyelesaikan pelunasan. Berikan rating & ulasan klien.',
+          timestamp: DateTime.now(),
+          type: NotificationType.pelunasanPaid,
+          booking: _pendingReviewBooking,
+          isRead: false,
+        );
+        _notifications.insert(0, notif);
+        _activeBannerNotification = notif;
+        NotificationSoundService().playOrderAlert();
+      }
+    } else {
+      _pendingReviewBooking = null;
+    }
+
+    // Process chat messages across all bookings for real-time notifications
+    for (final rawBooking in data) {
+      try {
+        final bId = rawBooking['id']?.toString() ?? '';
+        final addDetails = rawBooking['additional_details'] is Map
+            ? rawBooking['additional_details'] as Map
+            : (rawBooking['additionalDetails'] is Map ? rawBooking['additionalDetails'] as Map : null);
+        
+        final chatMsgs = addDetails?['chat_messages'] as List<dynamic>?;
+        if (chatMsgs != null && chatMsgs.isNotEmpty) {
+          for (final m in chatMsgs) {
+            if (m is Map) {
+              final sender = m['sender']?.toString() ?? m['sender_role']?.toString();
+              if (sender == 'user' || sender == 'client') {
+                final msgText = m['text']?.toString() ?? m['message']?.toString() ?? '';
+                final timeKey = m['timestamp']?.toString() ?? m['time']?.toString() ?? '';
+                final msgKey = "${bId}_${timeKey}_$msgText";
+
+                if (!_seenMessageKeys.contains(msgKey)) {
+                  _seenMessageKeys.add(msgKey);
+                  
+                  BookingModel? bModel;
+                  try {
+                    bModel = BookingModel.fromJson(rawBooking);
+                  } catch (_) {}
+
+                  final clientName = bModel?.client?.fullName ?? 'Pelanggan';
+                  final notif = DriverNotificationModel(
+                    id: 'notif-msg-$msgKey-${DateTime.now().millisecondsSinceEpoch}',
+                    title: '💬 Pesan Baru dari $clientName',
+                    message: msgText,
+                    timestamp: DateTime.now(),
+                    type: NotificationType.newMessage,
+                    booking: bModel,
+                    isRead: false,
+                  );
+                  
+                  _notifications.insert(0, notif);
+                  _activeBannerNotification = notif;
+                  if (!_isFirstBookingProcess) {
+                    NotificationSoundService().playOrderAlert();
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Error processing booking notification: $e');
+      }
+    }
+
+    _isFirstBookingProcess = false;
+    debugPrint('🔔 Total Notifications: ${_notifications.length}, Unread: $unreadNotificationsCount, Active Banner: ${_activeBannerNotification?.title}');
     notifyListeners();
   }
 
@@ -312,27 +496,85 @@ class BookingProvider extends ChangeNotifier {
       debugPrint('❌ Supabase stream connection failed: $e');
     }
 
-    // Polling fallback every 1 second for instant syncing
-    _pollingTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+    _chatMessagesSubscription?.cancel();
+    try {
+      _chatMessagesSubscription = Supabase.instance.client
+          .from('booking_messages')
+          .stream(primaryKey: ['id'])
+          .listen((List<Map<String, dynamic>> messages) {
+            _processChatMessages(messages);
+          }, onError: (err) {
+            debugPrint('❌ Supabase chat stream subscription error: $err');
+          });
+    } catch (e) {
+      debugPrint('❌ Supabase chat stream connection failed: $e');
+    }
+
+    // Polling fallback every 15 seconds (realtime stream is primary)
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
       try {
         final data = await Supabase.instance.client
             .from('bookings')
             .select()
             .order('created_at', ascending: false)
             .limit(20);
-        if (data is List) {
-          _processBookingsData(List<Map<String, dynamic>>.from(data));
-        }
+        _processBookingsData(List<Map<String, dynamic>>.from(data));
       } catch (e) {
         debugPrint("Error in driver polling: $e");
       }
     });
+
+    // Immediate initial fetch to ensure instant display
+    Supabase.instance.client
+        .from('bookings')
+        .select()
+        .order('created_at', ascending: false)
+        .limit(20)
+        .then((data) {
+          _processBookingsData(List<Map<String, dynamic>>.from(data));
+        }).catchError((e) {
+          debugPrint("Error in driver initial fetch: $e");
+        });
+  }
+
+  void _processChatMessages(List<Map<String, dynamic>> messages) {
+    for (final m in messages) {
+      final role = m['sender_role']?.toString();
+      final msgId = m['id']?.toString() ?? '';
+      final msgKey = "chat_$msgId";
+
+      if (role == 'client' && !_seenMessageKeys.contains(msgKey)) {
+        _seenMessageKeys.add(msgKey);
+        final bookingId = m['booking_id']?.toString() ?? '';
+        final msgText = m['message']?.toString() ?? '';
+
+        final matchingBooking = _bookings.where((b) => b.id == bookingId).firstOrNull;
+        if (matchingBooking != null) {
+          final clientName = matchingBooking.client?.fullName ?? 'Pelanggan';
+          final notif = DriverNotificationModel(
+            id: 'notif-msg-$msgKey-${DateTime.now().millisecondsSinceEpoch}',
+            title: '💬 Pesan Baru dari $clientName',
+            message: msgText,
+            timestamp: DateTime.now(),
+            type: NotificationType.newMessage,
+            booking: matchingBooking,
+            isRead: false,
+          );
+
+          _notifications.insert(0, notif);
+          _activeBannerNotification = notif;
+          NotificationSoundService().playOrderAlert();
+          notifyListeners();
+        }
+      }
+    }
   }
 
   // Cancel subscription
   void unsubscribeFromBookings() {
     debugPrint('📡 Unsubscribed from Supabase bookings.');
     _realtimeSubscription?.cancel();
+    _chatMessagesSubscription?.cancel();
     _pollingTimer?.cancel();
   }
 
@@ -416,10 +658,11 @@ class BookingProvider extends ChangeNotifier {
     _isLoading = false;
 
     BookingModel? matched = _findBookingById(bookingId);
+    BookingModel acceptedModel;
     if (matched != null) {
-      _activeBooking = matched.copyWith(status: 'accepted');
+      acceptedModel = matched.copyWith(status: 'accepted');
     } else {
-      _activeBooking = BookingModel(
+      acceptedModel = BookingModel(
         id: bookingId,
         userId: 'client-user',
         status: 'accepted',
@@ -429,6 +672,11 @@ class BookingProvider extends ChangeNotifier {
         totalPrice: 150000.0,
         createdAt: DateTime.now(),
       );
+    }
+    _activeBooking = acceptedModel;
+    _pendingOffers.removeWhere((b) => b.id.toString() == bookingId.toString());
+    if (!_upcomingBookings.any((b) => b.id.toString() == bookingId.toString())) {
+      _upcomingBookings.insert(0, acceptedModel);
     }
     _incomingBooking = null;
 
@@ -477,21 +725,12 @@ class BookingProvider extends ChangeNotifier {
 
     BookingModel? matched = _findBookingById(bookingId);
     if (matched != null) {
-      _activeBooking = matched.copyWith(
-        status: 'accepted',
-        totalPrice: finalPrice,
-      );
-    } else {
-      _activeBooking = BookingModel(
-        id: bookingId,
-        userId: 'client-user',
-        status: 'accepted',
-        pickupLocation: 'Lokasi Penjemputan',
-        dropoffLocation: 'Tujuan',
-        duration: 3,
-        totalPrice: finalPrice,
-        createdAt: DateTime.now(),
-      );
+      final updated = matched.copyWith(status: 'accepted', totalPrice: finalPrice);
+      _activeBooking = updated;
+      _pendingOffers.removeWhere((b) => b.id.toString() == bookingId.toString());
+      if (!_upcomingBookings.any((b) => b.id.toString() == bookingId.toString())) {
+        _upcomingBookings.insert(0, updated);
+      }
     }
     _incomingBooking = null;
 
@@ -585,8 +824,9 @@ class BookingProvider extends ChangeNotifier {
       status: status,
       additionalDetails: updatedDetails,
     );
-    if (status == 'completed' || status == 'closed' || status == 'cancelled' || status == 'paid') {
-      _activeBooking = null; // Clear active since session is closed
+    if (status == 'closed' || status == 'cancelled' || status == 'paid' || updatedDetails['pelunasan_paid'] == true || updatedDetails['payment_status'] == 'LUNAS') {
+      _lastCompletedBooking = _activeBooking;
+      _activeBooking = null; // Clear active since session is closed or settled
     }
     notifyListeners();
     return true;
@@ -597,11 +837,81 @@ class BookingProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
+    try {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      final userId = authUser?.id ?? _currentUserId;
+
+      if (userId != null && userId.isNotEmpty) {
+        String? targetDriverId = _currentDriverId;
+        if (targetDriverId == null || targetDriverId == 'active-driver') {
+          final driverRow = await Supabase.instance.client
+              .from('drivers')
+              .select('id')
+              .or('id.eq.$userId,user_id.eq.$userId')
+              .maybeSingle();
+          if (driverRow != null && driverRow['id'] != null) {
+            targetDriverId = driverRow['id'].toString();
+          }
+        }
+
+        var query = Supabase.instance.client.from('bookings').select('*');
+        if (targetDriverId != null && targetDriverId.isNotEmpty && targetDriverId != 'active-driver') {
+          query = query.or('driver_id.eq.$targetDriverId,user_id.eq.$userId');
+        }
+
+        final List<dynamic> rows = await query.order('created_at', ascending: false);
+
+        if (rows.isNotEmpty) {
+          final completed = rows.where((b) {
+            final status = b['status']?.toString();
+            final addDetails = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+            final subStatus = addDetails?['sub_status']?.toString();
+            return status == 'completed' || status == 'paid' || subStatus == 'completed' || subStatus == 'paid';
+          }).toList();
+
+          double sum = 0.0;
+          for (final b in completed) {
+            final priceVal = b['total_price'] ?? 0;
+            sum += priceVal is num ? priceVal.toDouble() : (double.tryParse(priceVal.toString()) ?? 0.0);
+          }
+
+          // Calculate pending escrow from active/ongoing bookings (DP held)
+          double pendingEscrowSum = 0.0;
+          final activeRows = rows.where((b) {
+            final status = b['status']?.toString();
+            final addDetails = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+            final subStatus = addDetails?['sub_status']?.toString();
+            final isDpPaid = addDetails?['dp_paid'] == true || subStatus == 'dp_paid';
+            final isReleased = addDetails?['payout_status'] == 'released' || addDetails?['driver_credited'] == true;
+            return status != 'completed' && status != 'cancelled' && isDpPaid && !isReleased;
+          }).toList();
+
+          for (final b in activeRows) {
+            final addDetails = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+            final dpVal = addDetails?['dp'] ?? addDetails?['dp_amount'] ?? b['escrow_balance'] ?? ((b['total_price'] ?? 0) * 0.5);
+            final dpNum = dpVal is num ? dpVal.toDouble() : (double.tryParse(dpVal?.toString() ?? '') ?? 0.0);
+            pendingEscrowSum += dpNum;
+          }
+
+          _totalEarnings = sum;
+          _totalRides = completed.length;
+          _pendingEscrowBalance = pendingEscrowSum;
+          _earningsBookings = completed;
+          _isLoading = false;
+          notifyListeners();
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint("Supabase loadEarnings error: $e");
+    }
+
     final result = await _bookingService.getDriverEarnings(period);
     if (result['success'] == true) {
-      _totalEarnings = result['totalEarnings'];
-      _totalRides = result['totalRides'];
-      _earningsBookings = result['bookings'];
+      _totalEarnings = (result['totalEarnings'] ?? 0.0).toDouble();
+      _totalRides = (result['totalRides'] ?? 0).toInt();
+      _pendingEscrowBalance = (result['pendingEscrow'] ?? 0.0).toDouble();
+      _earningsBookings = result['bookings'] ?? [];
     } else {
       _errorMessage = result['message'];
     }

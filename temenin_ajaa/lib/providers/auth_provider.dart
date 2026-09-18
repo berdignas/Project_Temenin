@@ -27,17 +27,19 @@ bool get isRegularUser => _userRole == 'user';
   bool get isLoggedIn => _isAuthenticated;  
 
   Future<bool> register({
-    required String email,
+    String? email,
     required String password,
     required String fullName,
     required String phone,
+    String? gender,
+    File? avatarFile,
   }) async {
     _isLoading = true;
     _errorMessage = null;
     notifyListeners();
 
     try {
-      if (!email.contains('@') || !email.contains('.')) {
+      if (email != null && email.trim().isNotEmpty && (!email.contains('@') || !email.contains('.'))) {
         _errorMessage = 'Format email tidak valid';
         _isLoading = false;
         notifyListeners();
@@ -49,11 +51,14 @@ bool get isRegularUser => _userRole == 'user';
         password: password,
         fullName: fullName,
         phone: phone,
+        gender: gender,
+        avatarFile: avatarFile,
       );
 
       if (result['success'] == true) {
         _user = result['user'];
         _isAuthenticated = true;
+        _userRole = _user?.role ?? 'user';
         
         await _authService.updateLocalUser(_user!);
         
@@ -78,40 +83,17 @@ bool get isRegularUser => _userRole == 'user';
     required String phone,
     required String otp,
     required String fullName,
+    String? password,
+    String? gender,
     File? avatarFile,
   }) async {
-    _isLoading = true;
-    _errorMessage = null;
-    notifyListeners();
-
-    try {
-      final result = await _authService.registerWithPhone(
-        phone: phone,
-        otp: otp,
-        fullName: fullName,
-        avatarFile: avatarFile,
-      );
-
-      if (result['success'] == true) {
-        _user = result['user'];
-        _isAuthenticated = true;
-        _userRole = _user?.role ?? 'user';
-        await _authService.updateLocalUser(_user!);
-        _isLoading = false;
-        notifyListeners();
-        return true;
-      } else {
-        _errorMessage = result['message'] ?? 'Registrasi gagal';
-        _isLoading = false;
-        notifyListeners();
-        return false;
-      }
-    } catch (e) {
-      _errorMessage = e.toString();
-      _isLoading = false;
-      notifyListeners();
-      return false;
-    }
+    return register(
+      fullName: fullName,
+      phone: phone,
+      password: (password != null && password.isNotEmpty) ? password : otp,
+      gender: gender,
+      avatarFile: avatarFile,
+    );
   }
 
   Future<Map<String, dynamic>> sendOtp(String phone) async {

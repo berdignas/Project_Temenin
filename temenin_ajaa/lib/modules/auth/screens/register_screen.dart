@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import '../../../providers/auth_provider.dart';
 import '../../clients/screens/home_loggedin_screen.dart';
-import 'setup_account_screen.dart';
+import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -24,12 +23,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _phoneController = TextEditingController(text: "81298765432");
   final _otpController = TextEditingController();
   final _fullNameController = TextEditingController(text: "Faizun A.");
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
   final _nickNameController = TextEditingController(text: "Faizun");
   final _dobController = TextEditingController(text: "1998-05-14");
   
   int _currentStep = 1; // Step 1: HP & OTP, Step 2: Lengkapi Profil
   bool _isLoading = false;
   bool _otpSent = false;
+  bool _obscurePassword = true;
+  bool _obscureConfirmPassword = true;
   String _generatedOtp = '';
   String? _errorMessage;
   
@@ -62,6 +66,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _phoneController.dispose();
     _otpController.dispose();
     _fullNameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
     _nickNameController.dispose();
     _dobController.dispose();
     super.dispose();
@@ -227,50 +234,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (result['success'] == true) {
       final bool isRegistered = result['isRegistered'] ?? false;
       if (isRegistered) {
-        // Phone number is already registered, automatically log them in
-        setState(() {
-          _isLoading = true;
-        });
-        final loginResult = await authProvider.loginWithPhone(phone, otp);
-
-        if (!mounted) return;
-
-        setState(() {
-          _isLoading = false;
-        });
-        if (loginResult) {
-          if (mounted) {
-            final prefs = await SharedPreferences.getInstance();
-            await prefs.setString('userRole', 'user');
-
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Login Berhasil!'),
-                backgroundColor: Colors.green,
-              ),
-            );
-            final user = authProvider.user;
-            if (user != null && (user.email == null || user.email!.trim().isEmpty || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (context) => const SetupAccountScreen()),
-                (route) => false,
-              );
-            } else {
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (context) => const HomeLoggedInScreen()),
-                (route) => false,
-              );
-            }
-          }
-        } else {
-          setState(() {
-            _errorMessage = 'Gagal masuk setelah verifikasi OTP.';
-          });
+        // Nomor HP sudah terdaftar. Login hanya menggunakan kata sandi, tidak menggunakan OTP.
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Nomor HP sudah terdaftar. Silakan masuk menggunakan kata sandi Anda.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
+          );
         }
       } else {
-        // Go to complete profile form
+        // Belum terdaftar -> lanjut ke langkah pengisian profil & pembuatan kata sandi
         setState(() {
           _currentStep = 2;
         });
@@ -300,10 +279,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
         phone = phone.substring(2);
       }
 
-      final success = await authProvider.registerWithPhone(
-        phone: phone,
-        otp: _otpController.text.trim(),
+      final email = _emailController.text.trim();
+      final password = _passwordController.text;
+
+      final success = await authProvider.register(
+        email: email.isNotEmpty ? email : null,
+        password: password,
         fullName: _fullNameController.text.trim(),
+        phone: phone,
+        gender: _selectedGender,
         avatarFile: _profileImage,
       );
 
@@ -318,20 +302,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          final user = authProvider.user;
-          if (user != null && (user.email == null || user.email!.trim().isEmpty || user.email!.endsWith('@temenin.aja') || user.isVerified == false)) {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (context) => const SetupAccountScreen()),
-              (route) => false,
-            );
-          } else {
-            Navigator.pushAndRemoveUntil(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeLoggedInScreen()),
-              (route) => false,
-            );
-          }
+          
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => const HomeLoggedInScreen()),
+            (route) => false,
+          );
         }
       } else {
         setState(() {
@@ -728,6 +704,111 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
         const SizedBox(height: 20),
 
+        // Email (Opsional)
+        Text(
+          'Email (Opsional)',
+          style: GoogleFonts.inter(color: Colors.grey.shade300, fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: const Color(0xFF16181D),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+          ),
+          child: TextFormField(
+            controller: _emailController,
+            keyboardType: TextInputType.emailAddress,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'email@domain.com (opsional)',
+              hintStyle: TextStyle(color: Colors.grey.shade600),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Kata Sandi
+        Text(
+          'Kata Sandi',
+          style: GoogleFonts.inter(color: Colors.grey.shade300, fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: const Color(0xFF16181D),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+          ),
+          child: TextFormField(
+            controller: _passwordController,
+            obscureText: _obscurePassword,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Minimal 6 karakter',
+              hintStyle: TextStyle(color: Colors.grey.shade600),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                  color: Colors.grey.shade500,
+                  size: 20,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _obscurePassword = !_obscurePassword;
+                  });
+                },
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Konfirmasi Kata Sandi
+        Text(
+          'Konfirmasi Kata Sandi',
+          style: GoogleFonts.inter(color: Colors.grey.shade300, fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          height: 52,
+          decoration: BoxDecoration(
+            color: const Color(0xFF16181D),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+          ),
+          child: TextFormField(
+            controller: _confirmPasswordController,
+            obscureText: _obscureConfirmPassword,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Ulangi kata sandi Anda',
+              hintStyle: TextStyle(color: Colors.grey.shade600),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
+                  color: Colors.grey.shade500,
+                  size: 20,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _obscureConfirmPassword = !_obscureConfirmPassword;
+                  });
+                },
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
         // Jenis Kelamin
         Text(
           'Jenis Kelamin',
@@ -863,6 +944,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     } else {
       if (_fullNameController.text.trim().isEmpty) {
         setState(() => _errorMessage = 'Harap isi nama lengkap Anda.');
+        return;
+      }
+      if (_passwordController.text.length < 6) {
+        setState(() => _errorMessage = 'Kata sandi minimal 6 karakter.');
+        return;
+      }
+      if (_passwordController.text != _confirmPasswordController.text) {
+        setState(() => _errorMessage = 'Konfirmasi kata sandi tidak cocok.');
         return;
       }
       _submitRegistration();

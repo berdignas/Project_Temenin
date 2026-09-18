@@ -14,6 +14,13 @@ const {
   deleteBooking,
   updateBookingStatus,
   topUpUserBalance,
+  getTransactions,
+  approveTransaction,
+  settlePelunasanSplit,
+  disbursePayout,
+  rejectTransaction,
+  executeDpForfeit,
+  deleteTransaction,
   getCommunityPosts,
   deleteCommunityPost,
   getEvents,
@@ -21,6 +28,7 @@ const {
   updateEvent,
   deleteEvent
 } = require('../controllers/adminController');
+const { getSettings, updateSettings } = require('../controllers/settingsController');
 const { protect, requireRole } = require('../middleware/authMiddleware');
 
 // Protect all admin routes
@@ -47,8 +55,15 @@ router.put('/bookings/:id', updateBooking);
 router.delete('/bookings/:id', deleteBooking);
 router.put('/bookings/:id/status', updateBookingStatus);
 
-// Finance & Top-Up
+// Finance & Transaction Management CMS
 router.post('/topup', topUpUserBalance);
+router.get('/finance/transactions', getTransactions);
+router.post('/finance/transactions/:id/approve', approveTransaction);
+router.post('/finance/transactions/:id/settle', settlePelunasanSplit);
+router.post('/finance/transactions/:id/disburse', disbursePayout);
+router.post('/finance/transactions/:id/reject', rejectTransaction);
+router.post('/finance/transactions/:id/forfeit', executeDpForfeit);
+router.delete('/finance/transactions/:id', deleteTransaction);
 
 // Community Content Moderation
 router.get('/community/posts', getCommunityPosts);
@@ -59,5 +74,9 @@ router.get('/events', getEvents);
 router.post('/events', createEvent);
 router.put('/events/:id', updateEvent);
 router.delete('/events/:id', deleteEvent);
+
+// Platform System & Pricing Settings
+router.get('/settings', getSettings);
+router.put('/settings', updateSettings);
 
 module.exports = router;

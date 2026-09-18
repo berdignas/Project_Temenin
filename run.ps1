@@ -1,3 +1,4 @@
+$env:PATH = "C:\flutter\bin;" + $env:PATH
 $appChoice = Read-Host "Pilih Aplikasi yang ingin dijalankan:`n[1] Temenin Ajaa (Client)`n[2] Temenin Ajaa Driver`nPilihan Anda (1/2)"
 
 if ($appChoice -eq "1") {

@@ -63,6 +63,34 @@ class _DriverChatListScreenState extends State<DriverChatListScreen> {
 
       final List<_ChatRoomItem> items = [];
       if (data is List && data.isNotEmpty) {
+        final List<String> bookingIds = data
+            .map((b) => b['id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toList();
+
+        final Map<String, Map<String, dynamic>> latestMessagesMap = {};
+        if (bookingIds.isNotEmpty) {
+          try {
+            final msgsData = await Supabase.instance.client
+                .from('booking_messages')
+                .select('booking_id, message, created_at')
+                .inFilter('booking_id', bookingIds)
+                .order('created_at', ascending: true);
+
+            if (msgsData is List) {
+              for (final m in msgsData) {
+                final bId = m['booking_id']?.toString();
+                if (bId != null) {
+                  latestMessagesMap[bId] = m;
+                }
+              }
+            }
+          } catch (e) {
+            debugPrint("Notice: could not load recent booking_messages: $e");
+          }
+        }
+
         for (final b in data) {
           final bDriverId = b['driver_id']?.toString();
           // Filter if matching this driver or open
@@ -97,8 +125,19 @@ class _DriverChatListScreenState extends State<DriverChatListScreen> {
             }
           }
 
-          final lastText = msgs.isNotEmpty ? msgs.last['text']?.toString() ?? 'Mulai chat...' : 'Order baru aktif';
-          final lastTime = msgs.isNotEmpty ? msgs.last['time']?.toString() ?? 'Baru saja' : 'Baru saja';
+          final latestMsgRow = latestMessagesMap[b['id']?.toString()];
+          String lastText = 'Order baru aktif';
+          String lastTime = 'Baru saja';
+          if (latestMsgRow != null) {
+            lastText = latestMsgRow['message']?.toString() ?? 'Pesan baru';
+            if (latestMsgRow['created_at'] != null) {
+              final dt = DateTime.tryParse(latestMsgRow['created_at'].toString())?.toLocal() ?? DateTime.now();
+              lastTime = "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+            }
+          } else if (msgs.isNotEmpty) {
+            lastText = msgs.last['text']?.toString() ?? 'Mulai chat...';
+            lastTime = msgs.last['time']?.toString() ?? 'Baru saja';
+          }
 
           items.add(_ChatRoomItem(
             bookingId: b['id'].toString(),

@@ -1,10 +1,12 @@
 // lib/modules/booking/screens/antar_jemput_booking_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
-import 'package:temenin_ajaa/providers/driver_provider.dart';
 import 'booking_confirmation_screen.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
+import 'package:temenin_ajaa/core/services/distance_service.dart';
+import 'package:temenin_ajaa/core/services/location_service.dart';
+import 'package:temenin_ajaa/core/services/pricing_service.dart';
+import '../widgets/multi_service_section.dart';
 
 class AntarJemputBookingScreen extends StatefulWidget {
   final Map<String, dynamic>? selectedPartner;
@@ -28,15 +30,21 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
   late final TextEditingController _destinationController;
   final _dateController = TextEditingController();
   final _timeController = TextEditingController();
+  final _returnTimeController = TextEditingController();
   final _notesController = TextEditingController();
   
-  // Multi-Layanan State
-  bool _addAdditionalService = false;
-  String _additionalServiceType = 'hangout'; // or 'freedom'
-  String _addHangoutActivity = 'Ngopi';
-  final _addHangoutDurationController = TextEditingController(text: '3');
-  final _addFreedomDescriptionController = TextEditingController();
-  final _addFreedomLocationController = TextEditingController();
+  // Real Maps & Route Coordinates State
+  double _pickupLat = -6.2099; // Stasiun Manggarai default
+  double _pickupLng = 106.8502;
+  double _destLat = -6.1952; // Grand Indonesia default
+  double _destLng = 106.8208;
+  double _actualDistanceKm = 7.4;
+  int _estimatedDurationMinutes = 18;
+  bool _isCalculatingDistance = false;
+  String _routeSource = 'OpenStreetMap';
+
+  // Dynamic Multi-Layanan List
+  final List<AdditionalServiceItem> _additionalServices = [];
 
   // Add-ons State
   bool _pulangPergi = false;
@@ -46,30 +54,32 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
   bool _isWeekendApplied = false;
 
   dynamic _selectedDriverId = '';
-  String _selectedDriverName = '';
+  String _selectedDriverName = 'Mitra Radar Temenin';
   String _selectedDriverImage = '';
-  double _selectedDriverRating = 0.0;
-  int _selectedDriverPrice = 0; // price per km
-  String _selectedDriverVehicle = '';
-  int _selectedDriverTrips = 0;
+  double _selectedDriverRating = 4.9;
+  int _selectedDriverPrice = 5000; // price per km
+  String _selectedDriverVehicle = 'Motor Mitra Terverifikasi';
+  int _selectedDriverTrips = 120;
   String _selectedDriverClass = 'Gold';
   
   @override
   void initState() {
     super.initState();
-    _destinationController = TextEditingController(text: widget.initialDestination ?? '');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<DriverProvider>(context, listen: false).fetchDrivers();
-    });
+    _pickupController.text = "";
+    _destinationController = TextEditingController(
+      text: widget.initialDestination?.isNotEmpty == true 
+          ? widget.initialDestination! 
+          : "",
+    );
 
     if (widget.selectedPartner != null) {
       _selectedDriverId = widget.selectedPartner!['id'] ?? '';
-      _selectedDriverName = widget.selectedPartner!['name'] ?? '';
-      _selectedDriverImage = widget.selectedPartner!['image'] ?? '';
+      _selectedDriverName = widget.selectedPartner!['name'] ?? 'Driver Partner';
+      _selectedDriverImage = widget.selectedPartner!['image'] ?? widget.selectedPartner!['avatar'] ?? '';
       _selectedDriverRating = widget.selectedPartner!['rating'] is String 
           ? double.parse(widget.selectedPartner!['rating']) 
-          : (widget.selectedPartner!['rating']?.toDouble() ?? 0.0);
-      _selectedDriverVehicle = widget.selectedPartner!['vehicle'] ?? '';
+          : (widget.selectedPartner!['rating']?.toDouble() ?? 4.9);
+      _selectedDriverVehicle = widget.selectedPartner!['vehicle'] ?? 'Kendaraan Driver';
       _selectedDriverPrice = widget.selectedPartner!['price'] is int 
           ? widget.selectedPartner!['price'] 
           : 5000;
@@ -78,6 +88,91 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
           : 120;
       _selectedDriverClass = widget.selectedPartner!['type'] ?? 'Gold';
     }
+
+    final now = DateTime.now();
+    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+    if (widget.selectedPartner != null && widget.selectedPartner!['selectedDate'] != null) {
+      _dateController.text = widget.selectedPartner!['selectedDate'].toString();
+    } else {
+      _dateController.text = "${now.day} ${months[now.month - 1]} ${now.year}";
+    }
+
+    if (widget.selectedPartner != null && widget.selectedPartner!['selectedTime'] != null) {
+      _timeController.text = widget.selectedPartner!['selectedTime'].toString();
+    } else {
+      _timeController.text = "Pesan Sekarang (Langsung OTW)";
+    }
+
+    _checkWeekend(now);
+    _loadOfficialPricing();
+    _calculateRealRouteDistance();
+
+    // Auto-detect GPS perangkat real untuk titik penjemputan
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final pos = await LocationService.getCurrentLocation();
+      if (pos != null && mounted) {
+        setState(() {
+          _pickupLat = pos.latitude;
+          _pickupLng = pos.longitude;
+        });
+        if (_pickupController.text.isEmpty) {
+          final geo = await DistanceService.reverseGeocode(pos.latitude, pos.longitude);
+          if (mounted && _pickupController.text.isEmpty) {
+            setState(() {
+              _pickupController.text = geo['fullAddress'] ?? geo['title'] ?? '';
+            });
+          }
+        }
+        _calculateRealRouteDistance();
+      }
+    });
+  }
+
+  Future<void> _calculateRealRouteDistance() async {
+    if (!mounted) return;
+    setState(() => _isCalculatingDistance = true);
+
+    final result = await DistanceService.calculateRouteDistance(
+      startLat: _pickupLat,
+      startLng: _pickupLng,
+      destLat: _destLat,
+      destLng: _destLng,
+    );
+
+    if (mounted) {
+      setState(() {
+        _actualDistanceKm = (result['distanceKm'] as num?)?.toDouble() ?? 7.4;
+        _estimatedDurationMinutes = (result['durationMinutes'] as num?)?.toInt() ?? 18;
+        _routeSource = result['source']?.toString() ?? 'OpenStreetMap';
+        _isCalculatingDistance = false;
+      });
+    }
+  }
+
+  Future<void> _loadOfficialPricing() async {
+    await PricingService().fetchPricingConfig();
+    if (mounted) {
+      setState(() {
+        final isSporty = widget.serviceType == 'sporty' || widget.serviceType == 'sporty_ride';
+        _selectedDriverPrice = isSporty 
+            ? PricingService().pricePerKmSporty 
+            : PricingService().pricePerKm;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _pickupController.dispose();
+    _destinationController.dispose();
+    _dateController.dispose();
+    _timeController.dispose();
+    _returnTimeController.dispose();
+    _notesController.dispose();
+    for (var s in _additionalServices) {
+      s.dispose();
+    }
+    super.dispose();
   }
 
   void _checkWeekend(DateTime date) {
@@ -87,32 +182,32 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
   }
 
   Map<String, dynamic> _calculatePrice() {
-    const double distance = 15.0; // Simulated trip distance of 15 km
+    final double distance = _actualDistanceKm > 0 ? _actualDistanceKm : 5.0;
     
     // Service 1: Antar Jemput. Pulang Pergi doubles the distance/trip fee
     double baseService1Price = (distance * _selectedDriverPrice);
     if (_pulangPergi) {
       baseService1Price *= 2.0;
     }
+    // Batas minimum tarif perjalanan dari admin
+    final minRide = PricingService().minRidePrice.toDouble();
+    if (baseService1Price < minRide) {
+      baseService1Price = minRide;
+    }
     int service1Fee = baseService1Price.toInt();
 
-    // Service 2: If Multi-Layanan is checked
-    int service2Fee = 0;
-    if (_addAdditionalService) {
-      if (_additionalServiceType == 'hangout') {
-        int duration = int.tryParse(_addHangoutDurationController.text) ?? 3;
-        service2Fee = duration * 50000;
-      } else {
-        service2Fee = 100000; // Flat fee for basic freedom request
-      }
-    }
+    // Multi-Layanan Dynamic Fee Sum
+    int additionalServicesFee = _additionalServices.fold<int>(
+      0, 
+      (sum, item) => sum + item.calculateFee(),
+    );
 
     // Add-ons
     int carAddon = _useCar ? 50000 : 0;
     int helmetAddon = _rentHelmet ? 10000 : 0;
     int areaAddon = _differentArea ? 20000 : 0;
 
-    int subtotal = service1Fee + service2Fee + carAddon + helmetAddon + areaAddon;
+    int subtotal = service1Fee + additionalServicesFee + carAddon + helmetAddon + areaAddon;
     
     // Weekend Surcharge +25%
     int weekendFee = _isWeekendApplied ? (subtotal * 0.25).toInt() : 0;
@@ -123,37 +218,53 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
 
     return {
       'service1Fee': service1Fee,
-      'service2Fee': service2Fee,
+      'additionalServicesFee': additionalServicesFee,
       'weekendFee': weekendFee,
       'totalEstimasi': totalEstimasi,
       'dp': dp,
       'remaining': remainingPayment,
+      'distanceKm': distance,
+      'durationMinutes': _estimatedDurationMinutes,
     };
+  }
+
+  void _handleBack(BuildContext context) {
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    } else {
+      Navigator.pushNamedAndRemoveUntil(context, '/client-main', (route) => false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final driverProvider = Provider.of<DriverProvider>(context);
-    final drivers = driverProvider.drivers;
     final prices = _calculatePrice();
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: Text(
-          "Form Antar Jemput",
-          style: GoogleFonts.inter(
-            color: AppTheme.textHighContrast,
-            fontWeight: FontWeight.bold,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleBack(context);
+      },
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: Text(
+            (widget.serviceType == 'sporty' || widget.serviceType == 'sporty_ride')
+                ? "Antar Jemput Sporty (Motor Sport)"
+                : "Form Antar Jemput Aman",
+            style: GoogleFonts.inter(
+              color: AppTheme.textHighContrast,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.textHighContrast),
+            onPressed: () => _handleBack(context),
           ),
         ),
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: AppTheme.textHighContrast),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
       body: SafeArea(
         child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
@@ -163,58 +274,121 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSectionTitle("Lokasi Penjemputan"),
-                const SizedBox(height: 10),
-                _buildTextField(
+                if (widget.serviceType == 'sporty' || widget.serviceType == 'sporty_ride') ...[
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [const Color(0xFF06B6D4).withOpacity(0.15), const Color(0xFF3B82F6).withOpacity(0.15)],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF06B6D4).withOpacity(0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Text("🏍️", style: TextStyle(fontSize: 24)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Sensasi Riding Motor Sport Eksklusif",
+                                style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "Antar/jemput dengan armada motor sport (ZX25R, CBR, Ninja, R-Series) + helm bersih.",
+                                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                // HEADER: DRIVER PROFILE OR RADAR MATCHING (NO "PILIH DRIVER" LIST)
+                widget.selectedPartner != null
+                    ? _buildSelectedDriverHeader()
+                    : _buildRadarHeaderBadge(),
+                const SizedBox(height: 20),
+
+                _buildLocationSection(
+                  sectionTitle: "Lokasi Penjemputan",
+                  mapBadgeTitle: "TITIK JEMPUT DI GOOGLE MAPS",
                   controller: _pickupController,
-                  hint: "Masukkan lokasi penjemputan",
+                  hintText: "Contoh: Apartemen / Rumah / Stasiun...",
                   icon: Icons.location_on_rounded,
+                  lat: _pickupLat,
+                  lng: _pickupLng,
+                  onSelected: (address, lat, lng) {
+                    setState(() {
+                      _pickupController.text = address;
+                      _pickupLat = lat;
+                      _pickupLng = lng;
+                    });
+                    _calculateRealRouteDistance();
+                  },
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
                 
-                _buildSectionTitle("Lokasi Tujuan"),
-                const SizedBox(height: 10),
-                _buildTextField(
+                _buildLocationSection(
+                  sectionTitle: "Lokasi Tujuan",
+                  mapBadgeTitle: "TITIK TUJUAN DI GOOGLE MAPS",
                   controller: _destinationController,
-                  hint: "Masukkan lokasi tujuan",
+                  hintText: "Contoh: Warung Tekko sebelah barat, Grand Indonesia, dll.",
                   icon: Icons.flag_rounded,
+                  lat: _destLat,
+                  lng: _destLng,
+                  onSelected: (address, lat, lng) {
+                    setState(() {
+                      _destinationController.text = address;
+                      _destLat = lat;
+                      _destLng = lng;
+                    });
+                    _calculateRealRouteDistance();
+                  },
                 ),
+                const SizedBox(height: 16),
+
+                // ROUTE LIVE DISTANCE BADGE (OSRM REAL-TIME)
+                _buildRouteLiveBadge(),
                 const SizedBox(height: 20),
                 
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildSectionTitle("Tanggal"),
-                          const SizedBox(height: 10),
-                          _buildDateField(),
-                        ],
+                // WAKTU PENJEMPUTAN
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.access_time_rounded, color: AppTheme.primaryPink, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          "Waktu Penjemputan: ${_dateController.text}, ${_timeController.text}",
+                          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, fontWeight: FontWeight.bold),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 15),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildSectionTitle("Waktu"),
-                          const SizedBox(height: 10),
-                          _buildTimeField(),
-                        ],
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 25),
                 
-                _buildSectionTitle("Pilih Driver Anda"),
-                const SizedBox(height: 10),
-                _buildDriverSelector(drivers),
-                const SizedBox(height: 25),
-                
-                // Multi-Layanan Section
-                _buildMultiServiceSection(),
+                // DYNAMIC MULTI-LAYANAN (KOTAK-KOTAK LAYANAN TAMBAHAN)
+                MultiServiceSection(
+                  services: _additionalServices,
+                  onServicesChanged: () => setState(() {}),
+                  currentPrimaryService: 'antar_jemput',
+                  defaultPickup: _pickupController.text,
+                  defaultDestination: _destinationController.text,
+                ),
                 const SizedBox(height: 25),
                 
                 _buildSectionTitle("Add-ons & Biaya Tambahan"),
@@ -228,10 +402,12 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
                   controller: _notesController,
                   hint: "Contoh: Bawa jas hujan, pakai helm pink, dll.",
                   icon: Icons.note_add_rounded,
-                  maxLines: 3,
+                  maxLines: 2,
+                  isRequired: false,
                 ),
                 const SizedBox(height: 30),
                 
+                // ESTIMASI BIAYA & SUMMARY
                 _buildPricingCard(prices),
                 const SizedBox(height: 30),
                 
@@ -241,6 +417,384 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
             ),
           ),
         ),
+      ),
+    ),
+  );
+}
+
+  Widget _buildSelectedDriverHeader() {
+    final rawImage = _selectedDriverImage;
+    final image = (rawImage.isNotEmpty)
+        ? rawImage
+        : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(_selectedDriverName)}&background=D64573&color=fff&bold=true';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 26,
+            backgroundColor: AppTheme.primaryPink.withOpacity(0.2),
+            backgroundImage: NetworkImage(image),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryPink,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        "MITRA DRIVER TERPILIH",
+                        style: GoogleFonts.inter(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      "⭐ ${_selectedDriverRating.toStringAsFixed(1)}",
+                      style: GoogleFonts.inter(color: const Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _selectedDriverName,
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.textHighContrast,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "Kendaraan: $_selectedDriverVehicle",
+                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRadarHeaderBadge() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.fuchsiaLight,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.radar_rounded, color: AppTheme.primaryPink, size: 24),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        "Radar Auto-Match Mitra",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: AppTheme.textHighContrast,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.fuchsiaLight,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                      ),
+                      child: Text(
+                        "Otomatis",
+                        style: GoogleFonts.inter(
+                          color: AppTheme.primaryPink,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "Mitra driver terdekat yang stand by akan dipasangkan otomatis.",
+                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationSection({
+    required String sectionTitle,
+    required String mapBadgeTitle,
+    required TextEditingController controller,
+    required String hintText,
+    required IconData icon,
+    required double lat,
+    required double lng,
+    required Function(String address, double lat, double lng) onSelected,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildSectionTitle(sectionTitle),
+        const SizedBox(height: 8),
+
+        // 📍 1. KOTAK VISUAL MAPS / SHARELOCK (Bisa Ditekan untuk Buka Peta)
+        GestureDetector(
+          onTap: () {
+            DistanceService.showLocationPickerModal(
+              context,
+              title: "Pilih $sectionTitle",
+              initialValue: controller.text,
+              initialLat: lat,
+              initialLng: lng,
+              onSelected: onSelected,
+            );
+          },
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  AppTheme.primaryPink.withValues(alpha: 0.15),
+                  AppTheme.surface,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppTheme.primaryPink.withValues(alpha: 0.5), width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryPink.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryPink,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(color: AppTheme.primaryPink.withValues(alpha: 0.4), blurRadius: 6),
+                    ],
+                  ),
+                  child: const Icon(Icons.share_location_rounded, color: Colors.white, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            mapBadgeTitle,
+                            style: GoogleFonts.inter(
+                              color: AppTheme.primaryPink,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryPink.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              "Tap Peta ➔",
+                              style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 8.5, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        controller.text.isNotEmpty 
+                            ? controller.text 
+                            : "Tap untuk membuka Google Maps & pilih lokasi",
+                        style: GoogleFonts.inter(
+                          color: controller.text.isNotEmpty ? AppTheme.textHighContrast : AppTheme.textMuted,
+                          fontSize: 12,
+                          fontWeight: controller.text.isNotEmpty ? FontWeight.w600 : FontWeight.normal,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.primaryPink, size: 14),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+
+        // 📝 2. KOLOM DETAIL ALAMAT (Otomatis Terisi dari Peta & Bisa Diedit Manual)
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.cardDeep,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "DETAIL / CATATAN ALAMAT",
+                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 9.5, fontWeight: FontWeight.w800),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(icon, color: AppTheme.primaryPink, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextFormField(
+                      controller: controller,
+                      onChanged: (val) {
+                        setState(() {});
+                      },
+                      style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        hintText: hintText,
+                        hintStyle: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Alamat $sectionTitle harus diisi';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRouteLiveBadge() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.cardDeep,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppTheme.primaryPink.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: _isCalculatingDistance
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryPink),
+                  )
+                : const Icon(Icons.alt_route_rounded, color: AppTheme.primaryPink, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      _isCalculatingDistance
+                          ? "Menghitung rute rute..."
+                          : "Jarak Rute: ${_actualDistanceKm.toStringAsFixed(1)} KM",
+                      style: GoogleFonts.inter(
+                        color: AppTheme.textHighContrast,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        _routeSource,
+                        style: GoogleFonts.inter(
+                          color: const Color(0xFF10B981),
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "Estimasi waktu tempuh: ±$_estimatedDurationMinutes menit (Rute Jalan Raya)",
+                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -262,6 +816,7 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
     required IconData icon,
     int maxLines = 1,
     TextInputType keyboardType = TextInputType.text,
+    bool isRequired = true,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -281,334 +836,14 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         ),
-        validator: (value) {
-          if (value == null || value.isEmpty) {
-            return 'Field ini harus diisi';
-          }
-          return null;
-        },
-      ),
-    );
-  }
-
-  Widget _buildDateField() {
-    return GestureDetector(
-      onTap: () async {
-        final date = await showDatePicker(
-          context: context,
-          initialDate: DateTime.now(),
-          firstDate: DateTime.now(),
-          lastDate: DateTime.now().add(const Duration(days: 30)),
-        );
-        if (date != null) {
-          _checkWeekend(date);
-          setState(() {
-            _dateController.text = "${date.day}/${date.month}/${date.year}";
-          });
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.calendar_today_rounded, color: AppTheme.primaryPink, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _dateController.text.isEmpty ? "Pilih Tanggal" : _dateController.text,
-                style: GoogleFonts.inter(
-                  color: _dateController.text.isEmpty ? AppTheme.textMuted : AppTheme.textHighContrast,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTimeField() {
-    return GestureDetector(
-      onTap: () async {
-        final time = await showTimePicker(
-          context: context,
-          initialTime: TimeOfDay.now(),
-        );
-        if (time != null) {
-          setState(() {
-            _timeController.text = "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}";
-          });
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.access_time_rounded, color: AppTheme.primaryPink, size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                _timeController.text.isEmpty ? "Pilih Jam" : _timeController.text,
-                style: GoogleFonts.inter(
-                  color: _timeController.text.isEmpty ? AppTheme.textMuted : AppTheme.textHighContrast,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDriverSelector(List<Map<String, dynamic>> drivers) {
-    if (drivers.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.border),
-        ),
-        child: Center(
-          child: Text(
-            "Sedang memuat data partner driver...",
-            style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13),
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(
-        children: drivers.map((driver) {
-          int rateKm = driver['price'] is int ? driver['price'] : 5000;
-          if (_useCar) rateKm = (rateKm * 1.5).toInt();
-          final int finalRateKm = rateKm;
-
-          return RadioListTile<dynamic>(
-            value: driver['id'],
-            groupValue: _selectedDriverId,
-            onChanged: (value) {
-              setState(() {
-                _selectedDriverId = value!;
-                final selectedDriver = drivers.firstWhere((d) => d['id'] == _selectedDriverId);
-                _selectedDriverName = selectedDriver['name'];
-                _selectedDriverImage = selectedDriver['image'] ?? '';
-                _selectedDriverRating = double.tryParse(selectedDriver['rating']?.toString() ?? '0.0') ?? 4.5;
-                _selectedDriverPrice = finalRateKm;
-                _selectedDriverVehicle = selectedDriver['vehicle'] ?? 'Motor';
-                _selectedDriverTrips = (selectedDriver['kpi'] ?? 60) * 2;
-                _selectedDriverClass = selectedDriver['type'] ?? 'Gold';
-              });
-            },
-            activeColor: AppTheme.primaryPink,
-            title: Row(
-              children: [
-                Text(
-                  driver['name'],
-                  style: GoogleFonts.inter(
-                    color: AppTheme.textHighContrast,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: AppTheme.fuchsiaLight,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    driver['type'] ?? 'Gold',
-                    style: const TextStyle(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            subtitle: Text(
-              "${driver['vehicle']} • ⭐ ${driver['rating']} • ${driver['gender']}",
-              style: GoogleFonts.inter(
-                color: AppTheme.textMuted,
-                fontSize: 12,
-              ),
-            ),
-            secondary: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  "Rp $finalRateKm",
-                  style: GoogleFonts.inter(
-                    color: AppTheme.primaryPink,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                Text(
-                  "/km",
-                  style: GoogleFonts.inter(
-                    color: AppTheme.textMuted,
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _buildMultiServiceSection() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppTheme.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => setState(() => _addAdditionalService = !_addAdditionalService),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Multi-Layanan (Tambah Layanan)",
-                        style: GoogleFonts.inter(
-                          color: AppTheme.textHighContrast,
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        "Pesan hangout/freedom dengan driver yang sama",
-                        style: GoogleFonts.inter(
-                          color: AppTheme.textMuted,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Switch(
-                  value: _addAdditionalService,
-                  onChanged: (value) => setState(() => _addAdditionalService = value),
-                  activeColor: AppTheme.primaryPink,
-                ),
-              ],
-            ),
-          ),
-          if (_addAdditionalService) ...[
-            const Divider(color: AppTheme.border, height: 25),
-            Row(
-              children: [
-                Expanded(
-                  child: ChoiceChip(
-                    label: const Center(child: Text("Hangout Partner")),
-                    selected: _additionalServiceType == 'hangout',
-                    onSelected: (selected) {
-                      if (selected) setState(() => _additionalServiceType = 'hangout');
-                    },
-                    selectedColor: AppTheme.primaryPink,
-                    labelStyle: TextStyle(
-                      color: _additionalServiceType == 'hangout' ? Colors.white : AppTheme.textHighContrast,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ChoiceChip(
-                    label: const Center(child: Text("Freedom Request")),
-                    selected: _additionalServiceType == 'freedom',
-                    onSelected: (selected) {
-                      if (selected) setState(() => _additionalServiceType = 'freedom');
-                    },
-                    selectedColor: AppTheme.primaryPink,
-                    labelStyle: TextStyle(
-                      color: _additionalServiceType == 'freedom' ? Colors.white : AppTheme.textHighContrast,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 15),
-            if (_additionalServiceType == 'hangout') ...[
-              DropdownButtonFormField<String>(
-                value: _addHangoutActivity,
-                dropdownColor: AppTheme.surface,
-                style: GoogleFonts.inter(color: AppTheme.textHighContrast),
-                decoration: InputDecoration(
-                  prefixIcon: const Icon(Icons.people_alt_rounded, color: AppTheme.primaryPink),
-                  labelText: "Pilih Aktivitas Hangout",
-                  labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(color: AppTheme.border),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(color: AppTheme.border),
-                  ),
-                ),
-                items: ['Ngopi', 'Makan', 'Jalan-jalan', 'Shopping', 'Nonton']
-                    .map((act) => DropdownMenuItem(value: act, child: Text(act)))
-                    .toList(),
-                onChanged: (val) => setState(() => _addHangoutActivity = val!),
-              ),
-              const SizedBox(height: 12),
-              _buildTextField(
-                controller: _addHangoutDurationController,
-                hint: "Durasi Hangout (Jam: 3, 6, atau 9)",
-                icon: Icons.timer_rounded,
-                keyboardType: TextInputType.number,
-              ),
-            ] else ...[
-              _buildTextField(
-                controller: _addFreedomDescriptionController,
-                hint: "Deskripsi request terbuka (misal: tolong antre, dll)",
-                icon: Icons.edit_note_rounded,
-              ),
-              const SizedBox(height: 12),
-              _buildTextField(
-                controller: _addFreedomLocationController,
-                hint: "Lokasi detail request pengerjaan",
-                icon: Icons.location_on_rounded,
-              ),
-            ]
-          ]
-        ],
+        validator: isRequired
+            ? (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Field ini harus diisi';
+                }
+                return null;
+              }
+            : null,
       ),
     );
   }
@@ -625,16 +860,62 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
         children: [
           CheckboxListTile(
             value: _pulangPergi,
-            onChanged: (val) => setState(() => _pulangPergi = val!),
+            onChanged: (val) => setState(() => _pulangPergi = val ?? false),
             activeColor: AppTheme.primaryPink,
             checkColor: Colors.white,
             title: Text("Perjalanan Pulang Pergi (PP)", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold)),
             subtitle: Text("Rute tempuh ganda otomatis (+100% biaya jemput)", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11)),
           ),
+          if (_pulangPergi) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12, top: 4),
+              child: GestureDetector(
+                onTap: () async {
+                  final time = await showTimePicker(
+                    context: context,
+                    initialTime: const TimeOfDay(hour: 17, minute: 0),
+                  );
+                  if (time != null) {
+                    setState(() {
+                      _returnTimeController.text = "${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')} WIB";
+                    });
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.background,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.primaryPink.withOpacity(0.5)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.schedule_rounded, color: AppTheme.primaryPink, size: 18),
+                      const SizedBox(width: 10),
+                      // PREVENT RIGHT OVERFLOW: Wrapped in Expanded
+                      Expanded(
+                        child: Text(
+                          _returnTimeController.text.isEmpty
+                              ? "Pilih Estimasi Jam Kepulangan (Opsional)"
+                              : "Jam Pulang: ${_returnTimeController.text}",
+                          style: GoogleFonts.inter(
+                            color: _returnTimeController.text.isEmpty ? AppTheme.textMuted : AppTheme.textHighContrast,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
           const Divider(color: AppTheme.border, height: 10),
           CheckboxListTile(
             value: _useCar,
-            onChanged: (val) => setState(() => _useCar = val!),
+            onChanged: (val) => setState(() => _useCar = val ?? false),
             activeColor: AppTheme.primaryPink,
             checkColor: Colors.white,
             title: Text("Gunakan Mobil", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold)),
@@ -643,7 +924,7 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
           const Divider(color: AppTheme.border, height: 10),
           CheckboxListTile(
             value: _rentHelmet,
-            onChanged: (val) => setState(() => _rentHelmet = val!),
+            onChanged: (val) => setState(() => _rentHelmet = val ?? false),
             activeColor: AppTheme.primaryPink,
             checkColor: Colors.white,
             title: Text("Sewa Helm Ekstra", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold)),
@@ -652,7 +933,7 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
           const Divider(color: AppTheme.border, height: 10),
           CheckboxListTile(
             value: _differentArea,
-            onChanged: (val) => setState(() => _differentArea = val!),
+            onChanged: (val) => setState(() => _differentArea = val ?? false),
             activeColor: AppTheme.primaryPink,
             checkColor: Colors.white,
             title: Text("Beda Area Layanan", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold)),
@@ -691,13 +972,30 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
             ],
           ),
           const Divider(color: AppTheme.border, height: 20),
-          _priceRow("Antar Jemput (15 km)", fmt(prices['service1Fee'])),
-          if (_addAdditionalService)
-            _priceRow(
-              _additionalServiceType == 'hangout' ? "Multi-Layanan (Hangout)" : "Multi-Layanan (Freedom Request)",
-              fmt(prices['service2Fee']),
+          _priceRow("Antar Jemput (${_actualDistanceKm.toStringAsFixed(1)} km)", fmt(prices['service1Fee'])),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: Row(
+              children: [
+                const Icon(Icons.verified_rounded, color: AppTheme.primaryPink, size: 13),
+                const SizedBox(width: 5),
+                Text(
+                  "Tarif Resmi: ${fmt(_selectedDriverPrice)}/Km • Ditetapkan Admin (Harga Pas)",
+                  style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+              ],
             ),
-          if (_useCar) _priceRow("Add-on Mobil", fmt(50000)),
+          ),
+          
+          // Render each additional service item dynamically
+          ..._additionalServices.map((service) {
+            return _priceRow(
+              "Layanan Ekstra: ${service.displayName}",
+              fmt(service.calculateFee()),
+            );
+          }),
+
+          if (_useCar) _priceRow("Add-on Mobil Ber-AC", fmt(50000)),
           if (_rentHelmet) _priceRow("Sewa Helm Ekstra", fmt(10000)),
           if (_differentArea) _priceRow("Beda Area Layanan", fmt(20000)),
           if (_isWeekendApplied) _priceRow("Weekend Fee (25%)", fmt(prices['weekendFee'])),
@@ -717,13 +1015,26 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
               Text(fmt(prices['dp']), style: GoogleFonts.inter(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 18)),
             ],
           ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text("Sisa Pelunasan di Tujuan", style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-              Text(fmt(prices['remaining']), style: TextStyle(color: AppTheme.textMuted, fontSize: 12)),
-            ],
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.cardDeep,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.shield_outlined, color: AppTheme.textMuted, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "Harga pas diatur resmi oleh Admin. Transaksi bebas tawar-menawar (Non-Nego) demi kenyamanan bersama.",
+                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10.5),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -736,7 +1047,14 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12)),
+          Expanded(
+            child: Text(
+              label, 
+              style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
           Text(value, style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, fontWeight: FontWeight.w600)),
         ],
       ),
@@ -761,32 +1079,31 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
       child: ElevatedButton(
         onPressed: () {
           if (_formKey.currentState!.validate()) {
-            if (_selectedDriverId == '' || _selectedDriverId == 0) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Pilih driver terlebih dahulu")),
-              );
-              return;
-            }
-            if (_dateController.text.isEmpty || _timeController.text.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Pilih tanggal dan waktu terlebih dahulu")),
-              );
-              return;
-            }
-            
-            const distance = 15;
-            
+            final double distance = _actualDistanceKm > 0 ? _actualDistanceKm : 5.0;
+            final isPreselected = widget.selectedPartner != null;
+
             final bookingData = {
               'serviceType': 'antar_jemput',
-              'driverId': _selectedDriverId,
-              'driverName': _selectedDriverName,
-              'driverImage': _selectedDriverImage,
-              'driverRating': _selectedDriverRating.toString(),
-              'driverTrips': _selectedDriverTrips.toString(),
-              'vehicle': _selectedDriverVehicle,
-              'plateNumber': 'B 1234 ${_selectedDriverName.length >= 2 ? _selectedDriverName.substring(0, 2).toUpperCase() : "JKT"}',
+              'is_flexible': false,
+              'isFlexible': false,
+              'price_per_km': _selectedDriverPrice,
+              'isOpenOffer': !isPreselected,
+              'driverId': isPreselected ? _selectedDriverId : null,
+              'driverName': isPreselected ? _selectedDriverName : "Mitra Radar Otomatis",
+              'driverImage': isPreselected ? _selectedDriverImage : "",
+              'driverRating': isPreselected ? _selectedDriverRating.toString() : "5.0",
+              'driverTrips': isPreselected ? _selectedDriverTrips.toString() : "150",
+              'vehicle': isPreselected ? _selectedDriverVehicle : (_useCar ? "Mobil Mitra" : "Motor Mitra"),
+              'plateNumber': isPreselected 
+                  ? 'B 1234 ${_selectedDriverName.length >= 2 ? _selectedDriverName.substring(0, 2).toUpperCase() : "JKT"}'
+                  : 'B 9999 RDR',
               'pickup': _pickupController.text,
               'destination': _destinationController.text,
+              'pickup_latitude': _pickupLat,
+              'pickup_longitude': _pickupLng,
+              'dropoff_latitude': _destLat,
+              'dropoff_longitude': _destLng,
+              'actual_distance_km': distance,
               'date': _dateController.text,
               'time': _timeController.text,
               
@@ -796,16 +1113,12 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
               'totalPayment': prices['totalEstimasi'] + 10000,
               'dp': prices['dp'] + 5000, // DP includes 50% insurance
               'remainingPayment': prices['remaining'] + 5000,
-              'estimatedTime': (distance * 3).toString(),
+              'estimatedTime': _estimatedDurationMinutes.toString(),
               
-              // Multi service details
-              'hasAdditionalService': _addAdditionalService,
-              'additionalServiceType': _additionalServiceType,
-              'additionalServiceFee': prices['service2Fee'],
-              'additionalActivity': _addHangoutActivity,
-              'additionalDuration': _addHangoutDurationController.text,
-              'additionalDescription': _addFreedomDescriptionController.text,
-              'additionalLocation': _addFreedomLocationController.text,
+              // Dynamic Multi service details
+              'hasAdditionalService': _additionalServices.isNotEmpty,
+              'additionalServices': _additionalServices.map((s) => s.toMap()).toList(),
+              'additionalServiceFee': prices['additionalServicesFee'],
               
               // Addons
               'pulangPergi': _pulangPergi,
@@ -816,6 +1129,23 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
               'notes': _notesController.text,
               'driverClass': _selectedDriverClass,
             };
+
+            // Map individual service types for backward compatibility
+            for (var s in _additionalServices) {
+              if (s.serviceType == 'hangout') {
+                bookingData['hasHangout'] = true;
+                bookingData['serviceHangoutFee'] = s.calculateFee();
+                bookingData['additionalActivity'] = s.hangoutActivity;
+                bookingData['additionalDuration'] = s.hangoutDurationHours.toString();
+                bookingData['additionalHangoutLocation'] = s.hangoutLocationController.text;
+                bookingData['additionalHangoutNotes'] = s.hangoutNotesController.text;
+              } else if (s.serviceType == 'freedom') {
+                bookingData['hasFreedom'] = true;
+                bookingData['serviceFreedomFee'] = s.calculateFee();
+                bookingData['additionalDescription'] = s.freedomDescriptionController.text;
+                bookingData['additionalLocation'] = s.freedomLocationController.text;
+              }
+            }
             
             Navigator.push(
               context,
@@ -834,7 +1164,7 @@ class _AntarJemputBookingScreenState extends State<AntarJemputBookingScreen> {
           elevation: 0,
         ),
         child: Text(
-          "Booking Sekarang",
+          "Booking Sekarang ➔",
           style: GoogleFonts.inter(
             fontWeight: FontWeight.bold,
             color: Colors.white,

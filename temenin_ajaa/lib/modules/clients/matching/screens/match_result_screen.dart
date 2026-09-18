@@ -210,25 +210,102 @@ class MatchResultScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final driverProvider = context.watch<DriverProvider>();
     final realDrivers = driverProvider.drivers;
-    final Map<String, dynamic> matchedPartner = realDrivers.isNotEmpty
-        ? {
-            'id': realDrivers.first['id'],
-            'name': realDrivers.first['name'] ?? 'Driver Partner',
-            'avatar': realDrivers.first['image'] ?? 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=300&q=80',
-            'rating': double.tryParse(realDrivers.first['rating'].toString()) ?? 5.0,
-            'matchPercentage': 98,
-            'hobbies': ['Ngafe', 'Deep Talk', realDrivers.first['vehicle'] ?? 'Riding'],
-            'price': 'Rp ${realDrivers.first['price'] ?? 50000}',
-          }
-        : {
-            'id': 'mock-1',
-            'name': 'Kiara Putri',
-            'avatar': 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=300&q=80',
-            'rating': 4.9,
-            'matchPercentage': 98,
-            'hobbies': ['Ngafe', 'Deep Talk', 'Vespa Riding'],
-            'price': 'Rp 150.000',
-          };
+
+    if (realDrivers.isEmpty) {
+      return Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          backgroundColor: AppTheme.background,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.close_rounded, color: AppTheme.textHighContrast, size: 24),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text(
+            'HASIL MATCHING',
+            style: GoogleFonts.inter(
+              color: AppTheme.textHighContrast,
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              letterSpacing: 1.2,
+            ),
+          ),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: AppTheme.cardDeep,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppTheme.border),
+                  ),
+                  child: const Icon(Icons.person_search_rounded, size: 40, color: AppTheme.primaryPink),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  "Belum Ada Partner Tersedia",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.textHighContrast,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  "Tidak ditemukan mitra pengemudi yang sesuai di sekitar Anda saat ini. Silakan coba kembali beberapa saat lagi.",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    color: AppTheme.textMuted,
+                    fontSize: 13,
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 30),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryPink,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      "KEMBALI KE BERANDA",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final firstDriver = realDrivers.first;
+    final Map<String, dynamic> matchedPartner = {
+      'id': firstDriver['id'],
+      'name': firstDriver['name'] ?? 'Driver Partner',
+      'avatar': firstDriver['image'] ?? '',
+      'rating': double.tryParse(firstDriver['rating'].toString()) ?? 0.0,
+      'matchPercentage': 98,
+      'hobbies': ['Ngafe', 'Deep Talk', firstDriver['vehicle'] ?? 'Riding'],
+      'price': 'Rp ${firstDriver['price'] ?? 50000}',
+    };
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -320,10 +397,19 @@ class MatchResultScreen extends StatelessWidget {
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(75),
-                              child: Image.network(
-                                matchedPartner['avatar'].toString(),
-                                fit: BoxFit.cover,
-                              ),
+                              child: (matchedPartner['avatar'] != null && matchedPartner['avatar'].toString().isNotEmpty)
+                                  ? Image.network(
+                                      matchedPartner['avatar'].toString(),
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) => Container(
+                                        color: AppTheme.cardDeep,
+                                        child: const Icon(Icons.person, size: 60, color: AppTheme.textMuted),
+                                      ),
+                                    )
+                                  : Container(
+                                      color: AppTheme.cardDeep,
+                                      child: const Icon(Icons.person, size: 60, color: AppTheme.textMuted),
+                                    ),
                             ),
                           ),
                           Positioned(

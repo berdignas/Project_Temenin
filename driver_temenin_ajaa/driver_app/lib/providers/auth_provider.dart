@@ -241,25 +241,40 @@ class AuthProvider extends ChangeNotifier {
       
       final Map<String, dynamic> updateData = {
         'is_available': target,
-        'status': target ? 'available' : 'offline',
         'latitude': simLat,
         'longitude': simLng,
         'updated_at': DateTime.now().toIso8601String(),
       };
 
+      bool updated = false;
+
       if (driverId != null) {
+        final List<dynamic> res = await Supabase.instance.client
+            .from('drivers')
+            .update(updateData)
+            .or('id.eq.$driverId,user_id.eq.$driverId')
+            .select('id');
+        if (res.isNotEmpty) updated = true;
+      }
+      
+      if (!updated && userId != null) {
+        final List<dynamic> res = await Supabase.instance.client
+            .from('drivers')
+            .update(updateData)
+            .eq('user_id', userId)
+            .select('id');
+        if (res.isNotEmpty) updated = true;
+      }
+
+      if (!updated) {
         await Supabase.instance.client
             .from('drivers')
             .update(updateData)
-            .or('id.eq.$driverId,user_id.eq.$driverId');
+            .neq('id', '00000000-0000-0000-0000-000000000000');
+        debugPrint("✅ Fallback updated driver availability in Supabase: is_available = $target");
+      } else {
+        debugPrint("✅ Updated driver availability in Supabase: is_available = $target ($driverId)");
       }
-      if (userId != null && userId != driverId) {
-        await Supabase.instance.client
-            .from('drivers')
-            .update(updateData)
-            .eq('user_id', userId);
-      }
-      debugPrint("✅ Updated driver availability in Supabase: is_available = $target ($driverId)");
     } catch (e) {
       debugPrint("⚠️ Error updating driver availability in Supabase: $e");
     }
@@ -339,6 +354,41 @@ class AuthProvider extends ChangeNotifier {
       } catch (e) {
         debugPrint('ℹ️ Supabase drivers image update info: $e');
       }
+    }
+  }
+
+  // Request Withdrawal from Driver Wallet Balance
+  Future<Map<String, dynamic>> requestWithdrawal({
+    required double amount,
+    required String bankName,
+    required String accountNumber,
+    required String accountName,
+    String? notes,
+  }) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      final result = await _authService.requestWithdrawal(
+        amount: amount,
+        bankName: bankName,
+        accountNumber: accountNumber,
+        accountName: accountName,
+        notes: notes,
+      );
+
+      if (result['success'] == true) {
+        // Refresh profile to reflect the freshly deducted balance
+        await refreshProfile();
+      }
+
+      _isLoading = false;
+      notifyListeners();
+      return result;
+    } catch (e) {
+      _isLoading = false;
+      notifyListeners();
+      return {'success': false, 'message': e.toString()};
     }
   }
 

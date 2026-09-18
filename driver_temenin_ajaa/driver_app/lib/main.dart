@@ -14,9 +14,12 @@ void main() async {
   
   // Initialize Supabase (matching client configurations)
   try {
+    const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://wdjjaevfuxqrephhdacp.supabase.co');
+    const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+
     await Supabase.initialize(
-      url: const String.fromEnvironment('SUPABASE_URL', defaultValue: ''),
-      anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: ''),
+      url: supabaseUrl,
+      anonKey: supabaseAnonKey,
     );
     debugPrint('✅ Supabase initialized successfully on Driver App');
   } catch (e) {

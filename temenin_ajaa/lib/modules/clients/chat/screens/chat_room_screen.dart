@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
+import 'package:temenin_ajaa/providers/auth_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ChatRoomScreen extends StatefulWidget {
@@ -167,6 +169,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   Future<void> _fetchFallbackMessages() async {
     try {
+      final rows = await Supabase.instance.client
+          .from('booking_messages')
+          .select('*')
+          .eq('booking_id', widget.bookingId!)
+          .order('created_at', ascending: true);
+      if (rows.isNotEmpty && mounted) {
+        final formatted = (rows as List).map((m) => _formatMessage(Map<String, dynamic>.from(m as Map))).toList();
+        setState(() {
+          _messages = formatted;
+          _isConnecting = false;
+        });
+        _scrollToBottom();
+        return;
+      }
+    } catch (_) {}
+
+    // Legacy fallback for old bookings
+    try {
       final data = await Supabase.instance.client
           .from('bookings')
           .select('additional_details')
@@ -235,43 +255,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     });
     _scrollToBottom();
 
-    // 1. Send via Supabase booking_messages table
+    // Send via dedicated booking_messages table only
+    // (Never write to bookings.additional_details to avoid race conditions with financial status)
     try {
       final user = Supabase.instance.client.auth.currentUser;
+      final authProv = Provider.of<AuthProvider>(context, listen: false);
+      final senderId = user?.id ?? authProv.user?.id ?? _bookingData?['user_id'] ?? '00000000-0000-0000-0000-000000000000';
+
       await Supabase.instance.client.from('booking_messages').insert({
         'booking_id': widget.bookingId!,
-        'sender_id': user?.id ?? '00000000-0000-0000-0000-000000000000',
+        'sender_id': senderId,
         'sender_role': 'client',
         'message': text,
       });
     } catch (e) {
-      debugPrint('Notice on booking_messages insert: $e (syncing via booking details)');
-    }
-
-    // 2. Also sync to booking's additional_details for backward compatibility
-    try {
-      final freshRow = await Supabase.instance.client
-          .from('bookings')
-          .select('additional_details')
-          .eq('id', widget.bookingId!)
-          .maybeSingle();
-
-      final currentDetails = Map<String, dynamic>.from(freshRow?['additional_details'] ?? _bookingData?['additional_details'] ?? {});
-      final serverMsgs = (currentDetails['chat_messages'] as List<dynamic>?)
-          ?.map((m) => Map<String, dynamic>.from(m as Map))
-          .toList() ?? [];
-      
-      serverMsgs.add(newMsg);
-      currentDetails['chat_messages'] = serverMsgs;
-
-      await Supabase.instance.client
-          .from('bookings')
-          .update({
-            'additional_details': currentDetails,
-          })
-          .eq('id', widget.bookingId!);
-    } catch (e) {
-      debugPrint('Error syncing message: $e');
+      debugPrint('Notice on booking_messages insert: $e');
     }
   }
 

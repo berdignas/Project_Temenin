@@ -6,6 +6,8 @@ import '../../../core/theme/app_theme.dart';
 import '../../../data/models/booking_model.dart';
 import '../../../providers/booking_provider.dart';
 import 'active_booking_screen.dart';
+import 'driver_waiting_countdown_screen.dart';
+import 'driver_waiting_dp_screen.dart';
 
 class DriverNegotiationScreen extends StatefulWidget {
   final BookingModel bookingData;
@@ -215,7 +217,7 @@ class _DriverNegotiationScreenState extends State<DriverNegotiationScreen> {
     if (active != null && (active.id.toString() == widget.bookingData.id.toString() || _negotiationState == 'waiting_client')) {
       final sub = active.additionalDetails?['sub_status']?.toString();
       final status = active.status;
-      if (status == 'ongoing' || status == 'accepted' || status == 'dp_paid' || sub == 'dp_paid') {
+      if (status == 'dp_paid' || sub == 'dp_paid' || active.additionalDetails?['dp_paid'] == true) {
         if (_negotiationState != 'client_accepted') {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
@@ -487,7 +489,9 @@ class _DriverNegotiationScreenState extends State<DriverNegotiationScreen> {
                     Navigator.pop(context);
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (context) => const DriverActiveBookingScreen()),
+                      MaterialPageRoute(
+                        builder: (context) => DriverWaitingDpScreen(bookingData: widget.bookingData),
+                      ),
                     );
                   }
                 },
@@ -497,7 +501,7 @@ class _DriverNegotiationScreenState extends State<DriverNegotiationScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 child: Text(
-                  "MULAI RIDE & PENJEMPUTAN",
+                  "SETUJUI & TUNGGU DP",
                   style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),

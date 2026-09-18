@@ -1,0 +1,14 @@
+{
+  "price_per_km": 3000,
+  "price_per_km_sporty": 5000,
+  "min_ride_price": 15000,
+  "base_hourly_price": 25000,
+  "min_hourly_price": 25000,
+  "sleep_call_package_price": 45000,
+  "virtual_counseling_hourly_price": 15000,
+  "gaming_buddy_per_match_price": 10000,
+  "commission_rate": 10,
+  "allow_negotiation_flexible_only": true,
+  "updated_at": "2026-09-18T01:56:29.256Z",
+  "id": "pricing_config"
+}

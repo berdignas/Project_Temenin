@@ -10,9 +10,14 @@ const {
   updateBookingStatus,
   createBookingReview,
   getBookingReviews,
-  sendChatMessage
+  sendChatMessage,
+  getChatMessages
 } = require('../controllers/bookingController');
+const { getPublicPricingConfig } = require('../controllers/settingsController');
 const { protect } = require('../middleware/authMiddleware');
+
+// Public pricing configuration for Client and Driver apps
+router.get('/pricing-config', getPublicPricingConfig);
 
 router.use(protect);
 
@@ -40,6 +45,8 @@ router.route('/:bookingId/reviews')
   .get(getBookingReviews);
 
 // Chat messages
-router.post('/:bookingId/messages', sendChatMessage);
+router.route('/:bookingId/messages')
+  .post(sendChatMessage)
+  .get(getChatMessages);
 
 module.exports = router;

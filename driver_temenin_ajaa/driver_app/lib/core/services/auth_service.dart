@@ -12,21 +12,20 @@ class AuthService {
   static const String _userKey = 'driver_user_data';
 
   // Login
-  Future<Map<String, dynamic>> login(String email, String password) async {
-    final cleanEmail = email.trim().toLowerCase();
+  Future<Map<String, dynamic>> login(String identifier, String password) async {
+    final cleanIdentifier = identifier.trim();
+    final cleanEmail = cleanIdentifier.toLowerCase();
+    var cleanPhone = cleanIdentifier.replaceAll(RegExp(r'\D'), '');
+    if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
+    if (cleanPhone.startsWith('62')) cleanPhone = cleanPhone.substring(2);
 
-    // List of candidate URLs (configured Wi-Fi IP, Emulator 10.0.2.2, localhost port 3004 & 3002)
+    // List of candidate URLs (configured Wi-Fi IP, Emulator 10.0.2.2, localhost port 3002)
     final candidateUrls = [
       '${ApiConstants.baseUrl}${ApiConstants.login}',
-      'http://10.0.2.2:3004${ApiConstants.login}',
-      'http://127.0.0.1:3004${ApiConstants.login}',
-      'http://localhost:3004${ApiConstants.login}',
       'http://10.0.2.2:3002${ApiConstants.login}',
       'http://127.0.0.1:3002${ApiConstants.login}',
       'http://localhost:3002${ApiConstants.login}',
     ];
-
-    String lastErrorMessage = 'Gagal terhubung ke server backend';
 
     for (final rawUrl in candidateUrls) {
       try {
@@ -35,10 +34,12 @@ class AuthService {
           url,
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
+            'identifier': cleanIdentifier,
             'email': cleanEmail,
+            'phone': cleanIdentifier,
             'password': password,
           }),
-        ).timeout(const Duration(seconds: 3));
+        ).timeout(const Duration(seconds: 4));
 
         final data = jsonDecode(response.body);
 
@@ -47,6 +48,12 @@ class AuthService {
           final token = data['token'] ?? (data['data'] != null ? data['data']['token'] : 'driver-api-token');
           if (rawUser != null) {
             final userData = UserModel.fromJson(rawUser);
+            if (userData.role != 'driver') {
+              return {
+                'success': false,
+                'message': 'Akun ini terdaftar sebagai Klien, bukan sebagai Mitra Driver.',
+              };
+            }
             await _saveAuthSession(token, userData);
             return {
               'success': true,
@@ -60,86 +67,64 @@ class AuthService {
             'success': false,
             'message': data['message'] ?? 'Akun ini terdaftar sebagai Klien/Penumpang, bukan sebagai Mitra Driver.',
           };
-        }
-      } catch (e) {
-        lastErrorMessage = 'Koneksi ke backend gagal: $e';
-      }
-    }
-
-    // Direct Supabase Fallback if HTTP servers fail or time out
-    try {
-      final supabase = Supabase.instance.client;
-      final userRow = await supabase
-          .from('users')
-          .select('*')
-          .eq('email', cleanEmail)
-          .maybeSingle();
-
-      if (userRow != null) {
-        final driverRow = await supabase
-            .from('drivers')
-            .select('id')
-            .or('user_id.eq.${userRow['id']},id.eq.${userRow['id']}')
-            .maybeSingle();
-
-        final dbRole = userRow['role']?.toString();
-        final isDriver = dbRole == 'driver' || driverRow != null;
-
-        if (isDriver) {
-          final dbHash = userRow['password_hash']?.toString();
-          bool isMatch = false;
-          if (dbHash != null && dbHash.isNotEmpty) {
-            if (dbHash == password) {
-              isMatch = true;
-            } else {
-              isMatch = true; // Supabase Direct fallback
-            }
-          } else {
-            isMatch = true;
-          }
-
-          if (isMatch) {
-            // Ensure driver record exists
-            if (driverRow == null) {
-              try {
-                await supabase.from('drivers').upsert({
-                  'user_id': userRow['id'],
-                  'vehicle_type': 'Motor',
-                  'vehicle_name': 'Kendaraan Driver',
-                  'plate_number': 'B 1234 OK',
-                  'price_per_hour': 50000,
-                  'rating': 5.00,
-                  'total_rides': 0,
-                  'is_available': true,
-                  'status': 'approved',
-                });
-              } catch (_) {}
-            }
-
-            final userData = UserModel.fromJson({
-              ...userRow,
-              'role': 'driver',
-            });
-            final token = 'driver-token-${userRow['id']}';
-            await _saveAuthSession(token, userData);
-            return {
-              'success': true,
-              'user': userData,
-              'token': token,
-              'message': 'Login Mitra berhasil (Supabase Direct)',
-            };
-          }
         } else {
           return {
             'success': false,
-            'message': 'Akun ini terdaftar sebagai Klien/Penumpang, bukan sebagai Mitra Driver.',
+            'message': data['message'] ?? 'Email/Nomor HP atau kata sandi Anda salah.',
           };
         }
-      } else {
-        return {
-          'success': false,
-          'message': 'Alamat email tidak ditemukan. Pastikan email Anda sudah terdaftar.',
-        };
+      } catch (e) {
+        debugPrint('[DriverAuth] Backend connection failed: $e');
+      }
+    }
+
+    // Direct Supabase Fallback (Hanya jika jaringan backend terputus & WAJIB verifikasi sandi resmi)
+    try {
+      final supabase = Supabase.instance.client;
+      final emailCandidate = cleanEmail.contains('@') ? cleanEmail : '$cleanPhone@temenin.aja';
+
+      final authRes = await supabase.auth.signInWithPassword(
+        email: emailCandidate,
+        password: password,
+      );
+
+      if (authRes.user != null && authRes.session?.accessToken != null) {
+        final userRow = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', authRes.user!.id)
+            .maybeSingle();
+
+        if (userRow != null) {
+          final driverRow = await supabase
+              .from('drivers')
+              .select('id, status')
+              .eq('user_id', userRow['id'])
+              .maybeSingle();
+
+          final dbRole = userRow['role']?.toString();
+          final isDriver = dbRole == 'driver' || driverRow != null;
+
+          if (!isDriver) {
+            return {
+              'success': false,
+              'message': 'Akun ini terdaftar sebagai Klien/Penumpang, bukan sebagai Mitra Driver.',
+            };
+          }
+
+          final userData = UserModel.fromJson({
+            ...userRow,
+            'role': 'driver',
+          });
+          final token = authRes.session!.accessToken;
+          await _saveAuthSession(token, userData);
+          return {
+            'success': true,
+            'user': userData,
+            'token': token,
+            'message': 'Login Mitra berhasil',
+          };
+        }
       }
     } catch (sErr) {
       debugPrint('[DriverAuth] Direct Supabase login fallback error: $sErr');
@@ -147,7 +132,7 @@ class AuthService {
 
     return {
       'success': false,
-      'message': lastErrorMessage,
+      'message': 'Email/Nomor HP atau kata sandi Anda salah.',
     };
   }
 
@@ -218,26 +203,52 @@ class AuthService {
           };
         }
       } else {
+        // Backend mengembalikan error validasi (misal email sudah ada) - jangan fallback insert sembarangan
         return {
           'success': false,
           'message': data['message'] ?? 'Registrasi Mitra gagal',
         };
       }
     } catch (e) {
-      print('[DriverAuth] HTTP API driver register fallback: $e');
+      print('[DriverAuth] HTTP API driver register network error: $e');
     }
 
-    // Try direct insert fallback
+    // Direct Supabase Fallback HANYA jika server backend tidak dapat dihubungi
     try {
       final supabase = Supabase.instance.client;
+
+      // 1. Daftarkan secara aman ke Supabase Auth agar password ter-hash bcrypt resmi
+      String targetUserId = driverUser.id;
+      try {
+        final authRes = await supabase.auth.signUp(
+          email: cleanEmail,
+          password: password,
+        );
+        if (authRes.user != null) {
+          targetUserId = authRes.user!.id;
+        }
+      } catch (authErr) {
+        debugPrint('[DriverAuth] Supabase Auth signUp note: $authErr');
+      }
+
+      final resolvedDriverUser = UserModel(
+        id: targetUserId,
+        email: cleanEmail,
+        fullName: fullName.trim(),
+        phone: phone.trim(),
+        role: 'driver',
+        balance: 0,
+        points: 50,
+        isVerified: true,
+      );
       
-      // Insert user record
+      // 2. Insert user record - TIDAK LAGI menyimpan password mentah (plaintext) di kolom password_hash
       await supabase.from('users').upsert({
-        'id': driverUser.id,
-        'email': driverUser.email,
-        'password_hash': password,
-        'full_name': driverUser.fullName,
-        'phone': driverUser.phone,
+        'id': targetUserId,
+        'email': resolvedDriverUser.email,
+        'password_hash': null, // Password terenkripsi aman di Supabase Auth
+        'full_name': resolvedDriverUser.fullName,
+        'phone': resolvedDriverUser.phone,
         'gender': gender,
         'role': 'driver',
         'balance': 0,
@@ -245,9 +256,9 @@ class AuthService {
         'is_verified': true,
       });
 
-      // Insert driver profile
+      // 3. Insert driver profile
       await supabase.from('drivers').upsert({
-        'user_id': driverUser.id,
+        'user_id': targetUserId,
         'vehicle_type': vehicleType,
         'vehicle_name': vehicleName.trim(),
         'plate_number': plateNumber.trim(),
@@ -259,15 +270,15 @@ class AuthService {
         'vehicle_stnk': vehicleStnk,
       });
 
-      await _saveAuthSession('driver-token-$newUserId', driverUser);
+      await _saveAuthSession('driver-token-$targetUserId', resolvedDriverUser);
       return {
         'success': true,
-        'user': driverUser,
-        'token': 'driver-token-$newUserId',
-        'message': 'Registrasi Mitra Berhasil! (Direct)',
+        'user': resolvedDriverUser,
+        'token': 'driver-token-$targetUserId',
+        'message': 'Registrasi Mitra Berhasil!',
       };
     } catch (e) {
-      print('[DriverAuth] Supabase driver register fallback: $e');
+      print('[DriverAuth] Supabase driver register fallback error: $e');
       return {
         'success': false,
         'message': 'Registrasi gagal: $e',
@@ -277,53 +288,92 @@ class AuthService {
 
   // Fetch Driver Profile
   Future<Map<String, dynamic>> getProfile() async {
+    UserModel? updatedUser = await getUser();
+    Map<String, dynamic>? driverData;
+
     try {
       final token = await getToken();
-      if (token == null) {
-        return {'success': false, 'message': 'Belum login'};
-      }
+      if (token != null) {
+        final url = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.profile}');
+        final response = await http.get(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ).timeout(const Duration(seconds: 3));
 
-      final url = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.profile}');
-      final response = await http.get(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      ).timeout(const Duration(seconds: 3));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final user = await getUser();
-        return {
-          'success': true,
-          'user': user,
-          'driverData': data['data'] ?? data['driverData'],
-        };
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          final rawDriver = data['data'] ?? data['driverData'];
+          if (rawDriver is Map) {
+            driverData = Map<String, dynamic>.from(rawDriver);
+            if (driverData['users'] is Map) {
+              final userMap = Map<String, dynamic>.from(driverData['users']);
+              if (updatedUser != null) {
+                final rawBal = userMap['balance'];
+                final double parsedBal = (rawBal is num) ? rawBal.toDouble() : (double.tryParse(rawBal?.toString() ?? '') ?? 0.0);
+                updatedUser = updatedUser.copyWith(
+                  fullName: userMap['full_name']?.toString() ?? updatedUser.fullName,
+                  phone: userMap['phone']?.toString() ?? updatedUser.phone,
+                  email: userMap['email']?.toString() ?? updatedUser.email,
+                  balance: parsedBal,
+                  points: userMap['points'] != null ? (userMap['points'] as num).toInt() : updatedUser.points,
+                );
+                await updateLocalUser(updatedUser);
+              }
+            }
+          }
+          return {
+            'success': true,
+            'user': updatedUser,
+            'driverData': driverData,
+          };
+        }
       }
     } catch (e) {
       debugPrint('[DriverAuth] Backend getProfile error: $e');
     }
-    
-    // Fallback to Supabase direct fetch
+
+    // Direct Supabase Fallback (ensures 100% accurate real-time balance sync from DB)
     try {
-      final user = await getUser();
-      if (user != null) {
+      if (updatedUser != null) {
+        final freshUserRow = await Supabase.instance.client
+            .from('users')
+            .select('*')
+            .eq('id', updatedUser.id)
+            .maybeSingle();
+
+        if (freshUserRow != null) {
+          final rawBal = freshUserRow['balance'];
+          final double parsedBal = (rawBal is num) ? rawBal.toDouble() : (double.tryParse(rawBal?.toString() ?? '') ?? 0.0);
+          updatedUser = updatedUser.copyWith(
+            fullName: freshUserRow['full_name']?.toString() ?? updatedUser.fullName,
+            phone: freshUserRow['phone']?.toString() ?? updatedUser.phone,
+            email: freshUserRow['email']?.toString() ?? updatedUser.email,
+            balance: parsedBal,
+            points: freshUserRow['points'] != null ? (freshUserRow['points'] as num).toInt() : updatedUser.points,
+          );
+          await updateLocalUser(updatedUser);
+        }
+
         final res = await Supabase.instance.client
             .from('drivers')
             .select()
-            .or('user_id.eq.${user.id},id.eq.${user.id}')
+            .or('user_id.eq.${updatedUser.id},id.eq.${updatedUser.id}')
             .maybeSingle();
+
         if (res != null) {
-          return {'success': true, 'user': user, 'driverData': res};
+          driverData = Map<String, dynamic>.from(res);
         }
+
+        return {'success': true, 'user': updatedUser, 'driverData': driverData};
       }
-      return {'success': true, 'user': user, 'driverData': null};
     } catch (sErr) {
       debugPrint('[DriverAuth] Supabase getProfile fallback error: $sErr');
-      final user = await getUser();
-      return {'success': true, 'user': user, 'driverData': null};
     }
+
+    return {'success': true, 'user': updatedUser, 'driverData': driverData};
   }
 
   // Update Status
@@ -356,6 +406,15 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, token);
     await prefs.setString(_userKey, jsonEncode(user.toJson()));
+
+    // 🔗 Sync token to Supabase GoTrue Auth Client
+    try {
+      if (!token.startsWith('driver-token-') && token != 'driver-api-token') {
+        await Supabase.instance.client.auth.setSession(token);
+      }
+    } catch (e) {
+      debugPrint('[DriverAuth] Supabase setSession notice: $e');
+    }
   }
 
   Future<void> updateLocalUser(UserModel user) async {
@@ -372,6 +431,17 @@ class AuthService {
     final prefs = await SharedPreferences.getInstance();
     final jsonStr = prefs.getString(_userKey);
     if (jsonStr != null) {
+      // 🔗 Restore Supabase GoTrue session if available
+      if (Supabase.instance.client.auth.currentSession == null) {
+        final token = prefs.getString(_tokenKey);
+        if (token != null && !token.startsWith('driver-token-') && token != 'driver-api-token') {
+          try {
+            await Supabase.instance.client.auth.setSession(token);
+          } catch (e) {
+            debugPrint('[DriverAuth] Supabase restore session notice: $e');
+          }
+        }
+      }
       return UserModel.fromJson(jsonDecode(jsonStr));
     }
     return null;
@@ -454,9 +524,206 @@ class AuthService {
     }
   }
 
+  Future<Map<String, dynamic>> requestWithdrawal({
+    required double amount,
+    required String bankName,
+    required String accountNumber,
+    required String accountName,
+    String? notes,
+  }) async {
+    try {
+      final token = await getToken();
+      final candidateUrls = [
+        '${ApiConstants.baseUrl}${ApiConstants.withdraw}',
+        'http://10.0.2.2:3002${ApiConstants.withdraw}',
+        'http://127.0.0.1:3002${ApiConstants.withdraw}',
+        'http://localhost:3002${ApiConstants.withdraw}',
+      ];
+
+      for (final rawUrl in candidateUrls) {
+        try {
+          final response = await http.post(
+            Uri.parse(rawUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null) 'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({
+              'amount': amount,
+              'bank_name': bankName,
+              'account_number': accountNumber,
+              'account_name': accountName,
+              'notes': notes ?? '',
+            }),
+          ).timeout(const Duration(seconds: 5));
+
+          final data = jsonDecode(response.body);
+          return data;
+        } catch (_) {
+          // try next candidate
+        }
+      }
+      return {'success': false, 'message': 'Gagal terhubung ke server backend'};
+    } catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  String _sanitizePhone(String phone) {
+    if (phone.isEmpty) return '';
+    String cleaned = phone.replaceAll(RegExp(r'\D'), '');
+    if (cleaned.startsWith('62')) {
+      cleaned = '0${cleaned.substring(2)}';
+    } else if (!cleaned.startsWith('0') && cleaned.length >= 8) {
+      cleaned = '0$cleaned';
+    }
+    return cleaned;
+  }
+
+  // Send OTP via Backend (Zenziva SMS / Voice Call OTP / WA)
+  Future<Map<String, dynamic>> sendOtp(String phone, {String? channel}) async {
+    final cleanPhone = _sanitizePhone(phone);
+    final candidateUrls = [
+      '${ApiConstants.baseUrl}/api/auth/send-otp',
+      'http://10.0.2.2:3002/api/auth/send-otp',
+      'http://127.0.0.1:3002/api/auth/send-otp',
+      'http://localhost:3002/api/auth/send-otp',
+    ];
+
+    for (final rawUrl in candidateUrls) {
+      try {
+        final url = Uri.parse(rawUrl);
+        final response = await http.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'phone': cleanPhone,
+            if (channel != null) 'channel': channel,
+          }),
+        ).timeout(const Duration(seconds: 10));
+
+        final data = jsonDecode(response.body);
+        if (response.statusCode == 200 && data['success'] == true) {
+          return {
+            'success': true,
+            'message': data['message'] ?? 'OTP berhasil dikirim',
+            'channel': data['channel'] ?? 'Zenziva Gateway',
+            'otp': data['otp'],
+          };
+        }
+      } catch (e) {
+        debugPrint('[DriverAuth] sendOtp candidate error: $e');
+      }
+    }
+
+    // Direct Supabase Fallback jika backend offline
+    try {
+      final supabase = Supabase.instance.client;
+      final randCode = (dart_math.Random().nextInt(900000) + 100000).toString();
+      final expiresAt = DateTime.now().add(const Duration(minutes: 5)).toIso8601String();
+
+      await supabase.from('otp_codes').insert([
+        {
+          'phone': cleanPhone,
+          'code': randCode,
+          'expires_at': expiresAt,
+          'is_used': false,
+        }
+      ]);
+
+      return {
+        'success': true,
+        'channel': 'Supabase Direct',
+        'message': 'Kode OTP dikirim (Supabase Sandbox: $randCode)',
+        'otp': randCode,
+      };
+    } catch (_) {}
+
+    return {
+      'success': true,
+      'channel': 'Offline Sandbox (123456)',
+      'message': 'Gunakan kode 123456 untuk verifikasi mode offline',
+      'otp': '123456',
+    };
+  }
+
+  // Verify OTP
+  Future<Map<String, dynamic>> verifyOtp(String phone, String otp) async {
+    final cleanPhone = _sanitizePhone(phone);
+    final candidateUrls = [
+      '${ApiConstants.baseUrl}/api/auth/verify-otp',
+      'http://10.0.2.2:3002/api/auth/verify-otp',
+      'http://127.0.0.1:3002/api/auth/verify-otp',
+      'http://localhost:3002/api/auth/verify-otp',
+    ];
+
+    for (final rawUrl in candidateUrls) {
+      try {
+        final url = Uri.parse(rawUrl);
+        final response = await http.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'phone': cleanPhone,
+            'otp': otp.trim(),
+          }),
+        ).timeout(const Duration(seconds: 10));
+
+        final data = jsonDecode(response.body);
+        if (response.statusCode == 200 && data['success'] == true) {
+          return {
+            'success': true,
+            'message': data['message'] ?? 'Verifikasi OTP berhasil',
+            'isRegistered': data['data'] != null ? data['data']['isRegistered'] : false,
+          };
+        } else if (response.statusCode == 400) {
+          return {
+            'success': false,
+            'message': data['message'] ?? 'Kode OTP salah atau kedaluwarsa',
+          };
+        }
+      } catch (e) {
+        debugPrint('[DriverAuth] verifyOtp candidate error: $e');
+      }
+    }
+
+    // Direct Supabase Fallback
+    try {
+      final supabase = Supabase.instance.client;
+      final record = await supabase
+          .from('otp_codes')
+          .select('*')
+          .eq('phone', cleanPhone)
+          .eq('code', otp.trim())
+          .eq('is_used', false)
+          .gte('expires_at', DateTime.now().toIso8601String())
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
+
+      if (record != null) {
+        await supabase.from('otp_codes').update({'is_used': true}).eq('id', record['id']);
+        return {'success': true, 'message': 'Verifikasi OTP berhasil'};
+      }
+    } catch (_) {}
+
+    // Sandbox 123456 bypass
+    if (otp.trim() == '123456') {
+      return {'success': true, 'message': 'Verifikasi OTP berhasil (Mode Sandbox)'};
+    }
+
+    return {
+      'success': false,
+      'message': 'Kode OTP salah atau telah kedaluwarsa.',
+    };
+  }
+
   Future<void> logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
     await prefs.remove(_userKey);
+    try {
+      await Supabase.instance.client.auth.signOut();
+    } catch (_) {}
   }
 }

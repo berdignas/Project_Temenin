@@ -1,100 +1,64 @@
-// lib/services/notification_service.dart
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/constants/api_constants.dart';
 import 'package:temenin_ajaa/modules/clients/pages/notifications_page.dart';
-
 
 String get BASE_URL => ApiConstants.baseUrl;
 
 class NotificationService {
+  /// Fetch real saved notifications for the user from Supabase DB or SharedPreferences
   Future<Map<String, dynamic>> getNotifications(String userId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      if (token == null) {
-        return {
-          'success': false,
-          'message': 'Not authenticated',
-        };
+      // 1. Fetch real notifications from Supabase DB
+      try {
+        final List<dynamic> rows = await Supabase.instance.client
+            .from('notifications')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', ascending: false);
+
+        if (rows.isNotEmpty) {
+          final List<NotificationModel> dbNotifications = rows.map((item) {
+            return NotificationModel(
+              id: item['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+              title: item['title'] ?? 'Notifikasi',
+              message: item['message'] ?? '',
+              type: item['type'] ?? 'info',
+              isRead: item['is_read'] ?? item['isRead'] ?? false,
+              createdAt: item['created_at'] != null 
+                  ? DateTime.parse(item['created_at'].toString()) 
+                  : DateTime.now(),
+            );
+          }).toList();
+
+          return {
+            'success': true,
+            'notifications': dbNotifications,
+          };
+        }
+      } catch (dbErr) {
+        debugPrint('⚠️ Supabase notifications fetch error, falling back to local storage: $dbErr');
       }
-      
-      // Sample notifications data
-      final List<NotificationModel> notifications = [
-        NotificationModel(
-          id: '1',
-          title: 'Booking Confirmed! 🚗',
-          message: 'Your booking with Driver Ahmad has been confirmed. Driver is on the way.',
-          type: 'booking',
-          isRead: false,
-          createdAt: DateTime.now().subtract(const Duration(minutes: 5)),
-        ),
-        NotificationModel(
-          id: '2',
-          title: 'Special Promo for You! 🎉',
-          message: 'Get 20% off on your next booking. Use code: RIDE20',
-          type: 'promo',
-          isRead: false,
-          createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-        ),
-        NotificationModel(
-          id: '3',
-          title: 'Payment Successful ✅',
-          message: 'Your payment of Rp 50.000 has been processed successfully.',
-          type: 'payment',
-          isRead: true,
-          createdAt: DateTime.now().subtract(const Duration(days: 1)),
-        ),
-        NotificationModel(
-          id: '4',
-          title: 'Points Earned! ⭐',
-          message: 'You earned 100 points from your recent booking. Total points: 1.250',
-          type: 'reward',
-          isRead: false,
-          createdAt: DateTime.now().subtract(const Duration(days: 2)),
-        ),
-        NotificationModel(
-          id: '5',
-          title: 'New Voucher Available 🎁',
-          message: 'Claim your free ride voucher worth Rp 20.000! Limited time only.',
-          type: 'promo',
-          isRead: false,
-          createdAt: DateTime.now().subtract(const Duration(days: 3)),
-        ),
-        NotificationModel(
-          id: '6',
-          title: 'Ride Completed 🏁',
-          message: 'Your trip to Bogor has been completed. Rate your driver now!',
-          type: 'booking',
-          isRead: true,
-          createdAt: DateTime.now().subtract(const Duration(days: 4)),
-        ),
-        NotificationModel(
-          id: '7',
-          title: 'Top Up Successful 💰',
-          message: 'Your balance has been topped up by Rp 100.000',
-          type: 'payment',
-          isRead: true,
-          createdAt: DateTime.now().subtract(const Duration(days: 5)),
-        ),
-        NotificationModel(
-          id: '8',
-          title: 'Welcome to Temenin Ajaa! 👋',
-          message: 'Thank you for joining us. Enjoy your first ride with 50% off!',
-          type: 'system',
-          isRead: false,
-          createdAt: DateTime.now().subtract(const Duration(days: 7)),
-        ),
-      ];
+
+      // 2. Fallback: SharedPreferences local storage
+      final prefs = await SharedPreferences.getInstance();
+      final key = 'client_notifications_$userId';
+      final jsonStr = prefs.getString(key);
+
+      List<NotificationModel> notifications = [];
+      if (jsonStr != null && jsonStr.isNotEmpty) {
+        final List<dynamic> decoded = jsonDecode(jsonStr);
+        notifications = decoded.map((item) => NotificationModel.fromJson(Map<String, dynamic>.from(item))).toList();
+      }
       
       return {
         'success': true,
         'notifications': notifications,
       };
     } catch (e) {
-      print('❌ Get notifications error: $e');
+      debugPrint('❌ Get notifications error: $e');
       return {
         'success': false,
         'message': e.toString(),
@@ -104,23 +68,19 @@ class NotificationService {
 
   Future<Map<String, dynamic>> markAsRead(String notificationId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      if (token == null) {
-        return {
-          'success': false,
-          'message': 'Not authenticated',
-        };
-      }
-      
-      // API call would go here
+      try {
+        await Supabase.instance.client
+            .from('notifications')
+            .update({'is_read': true})
+            .eq('id', notificationId);
+      } catch (_) {}
+
       return {
         'success': true,
         'message': 'Notification marked as read',
       };
     } catch (e) {
-      print('❌ Mark as read error: $e');
+      debugPrint('❌ Mark as read error: $e');
       return {
         'success': false,
         'message': e.toString(),
@@ -130,23 +90,22 @@ class NotificationService {
 
   Future<Map<String, dynamic>> markAllAsRead() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      if (token == null) {
-        return {
-          'success': false,
-          'message': 'Not authenticated',
-        };
-      }
-      
-      // API call would go here
+      try {
+        final userId = Supabase.instance.client.auth.currentUser?.id;
+        if (userId != null) {
+          await Supabase.instance.client
+              .from('notifications')
+              .update({'is_read': true})
+              .eq('user_id', userId);
+        }
+      } catch (_) {}
+
       return {
         'success': true,
         'message': 'All notifications marked as read',
       };
     } catch (e) {
-      print('❌ Mark all as read error: $e');
+      debugPrint('❌ Mark all as read error: $e');
       return {
         'success': false,
         'message': e.toString(),
@@ -156,23 +115,19 @@ class NotificationService {
 
   Future<Map<String, dynamic>> deleteNotification(String notificationId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-      
-      if (token == null) {
-        return {
-          'success': false,
-          'message': 'Not authenticated',
-        };
-      }
-      
-      // API call would go here
+      try {
+        await Supabase.instance.client
+            .from('notifications')
+            .delete()
+            .eq('id', notificationId);
+      } catch (_) {}
+
       return {
         'success': true,
         'message': 'Notification deleted',
       };
     } catch (e) {
-      print('❌ Delete notification error: $e');
+      debugPrint('❌ Delete notification error: $e');
       return {
         'success': false,
         'message': e.toString(),

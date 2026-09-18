@@ -20,7 +20,16 @@ class _PartnerListScreenState extends State<PartnerListScreen> {
 
   final List<String> _filters = ['All', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Diamond', 'VVIP'];
   final List<String> _genderFilters = ['Semua', 'Perempuan', 'Laki-laki'];
-  final List<String> _serviceFilters = ['Semua Layanan', 'Ride', 'Hangout', 'Counseling', 'Curhat', 'Detective', 'Hiking', 'Assistant'];
+  final List<String> _serviceFilters = [
+    'Semua Layanan',
+    'Sleep Call',
+    'Telepon Curhat',
+    'Gaming Buddy',
+    'Antar Jemput',
+    'Hangout',
+    'Sport Buddy',
+    'Freedom Request',
+  ];
 
   @override
   void initState() {
@@ -43,9 +52,26 @@ class _PartnerListScreenState extends State<PartnerListScreen> {
       
       bool matchesService = true;
       if (_activeServiceFilter != 'Semua Layanan') {
-        final activeServices = partner['activeServices'] as List<String>? ?? [];
-        final serviceKey = _activeServiceFilter.toLowerCase();
-        matchesService = activeServices.contains(serviceKey);
+        final activeServices = (partner['activeServices'] as List<dynamic>?)?.map((e) => e.toString().toLowerCase()).toList() ?? [];
+        final filterName = _activeServiceFilter.toLowerCase();
+        
+        if (filterName.contains('sleep')) {
+          matchesService = activeServices.isEmpty || activeServices.contains('sleep') || activeServices.contains('sleep_call');
+        } else if (filterName.contains('telepon') || filterName.contains('curhat')) {
+          matchesService = activeServices.isEmpty || activeServices.contains('telepon') || activeServices.contains('curhat') || activeServices.contains('counseling') || activeServices.contains('virtual');
+        } else if (filterName.contains('gaming') || filterName.contains('mabar')) {
+          matchesService = activeServices.isEmpty || activeServices.contains('gaming') || activeServices.contains('game') || activeServices.contains('mabar');
+        } else if (filterName.contains('antar') || filterName.contains('jemput') || filterName.contains('ride')) {
+          matchesService = activeServices.isEmpty || activeServices.contains('ride') || activeServices.contains('regular') || activeServices.contains('antar_jemput');
+        } else if (filterName.contains('hangout')) {
+          matchesService = activeServices.isEmpty || activeServices.contains('hangout');
+        } else if (filterName.contains('sport')) {
+          matchesService = activeServices.isEmpty || activeServices.contains('sporty') || activeServices.contains('hiking');
+        } else if (filterName.contains('freedom')) {
+          matchesService = activeServices.isEmpty || activeServices.contains('freedom');
+        } else {
+          matchesService = activeServices.isEmpty || activeServices.contains(filterName);
+        }
       }
       
       return matchesFilter && matchesGender && matchesService;

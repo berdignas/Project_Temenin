@@ -6,14 +6,14 @@ class ApiConstants {
   static String get baseUrl {
     if (kIsWeb) {
       final host = Uri.base.host.isEmpty ? '127.0.0.1' : Uri.base.host;
-      return 'http://$host:3004';
+      return 'http://$host:3002';
     }
-    return 'http://10.187.2.129:3004';
+    return 'http://10.0.2.2:3002';
   } 
   
   // Auth Endpoints
   static const String login = '/api/auth/login';
-  static const String register = '/api/auth/register';
+  static const String register = '/api/drivers/register';
   static const String getMe = '/api/auth/me';
   
   // Driver Endpoints
@@ -21,4 +21,6 @@ class ApiConstants {
   static const String status = '/api/drivers/status';
   static const String bookings = '/api/drivers/bookings';
   static const String earnings = '/api/drivers/earnings';
+  static const String withdraw = '/api/drivers/withdraw';
+  static const String withdrawals = '/api/drivers/withdrawals';
 }

@@ -41,14 +41,55 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
       final auth = Provider.of<AuthProvider>(context, listen: false);
       final userId = auth.user?.id ?? Supabase.instance.client.auth.currentUser?.id;
       
-      var query = Supabase.instance.client.from('bookings').select();
-      if (userId != null && userId.contains('-')) {
-        query = query.eq('user_id', userId);
+      List<dynamic> data = [];
+      try {
+        var query = Supabase.instance.client.from('bookings').select('*, drivers(*, users(*))');
+        if (userId != null && userId.contains('-')) {
+          query = query.eq('user_id', userId);
+        }
+        data = await query.order('created_at', ascending: false).limit(30);
+      } catch (e) {
+        debugPrint("Supabase join fetch error in chat list: $e. Retrying flat select...");
+        var flatQuery = Supabase.instance.client.from('bookings').select();
+        if (userId != null && userId.contains('-')) {
+          flatQuery = flatQuery.eq('user_id', userId);
+        }
+        data = await flatQuery.order('created_at', ascending: false).limit(30);
       }
-      
-      final data = await query.order('created_at', ascending: false).limit(15);
+
       if (data.isNotEmpty) {
-        final List<Map<String, dynamic>> loaded = [];
+        final driverProv = Provider.of<DriverProvider>(context, listen: false);
+        final Map<String, Map<String, dynamic>> groupedMap = {};
+
+        // Fetch latest messages from dedicated booking_messages table
+        final List<String> bookingIds = data
+            .map((b) => b['id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toList();
+
+        final Map<String, Map<String, dynamic>> latestMessagesMap = {};
+        if (bookingIds.isNotEmpty) {
+          try {
+            final msgsData = await Supabase.instance.client
+                .from('booking_messages')
+                .select('booking_id, message, created_at')
+                .inFilter('booking_id', bookingIds)
+                .order('created_at', ascending: true);
+
+            if (msgsData is List) {
+              for (final m in msgsData) {
+                final bId = m['booking_id']?.toString();
+                if (bId != null) {
+                  latestMessagesMap[bId] = m;
+                }
+              }
+            }
+          } catch (e) {
+            debugPrint("Notice: could not load recent booking_messages: $e");
+          }
+        }
+
         for (final b in data) {
           final details = b['additional_details'] as Map<String, dynamic>?;
           final msgs = (details?['chat_messages'] as List<dynamic>?)
@@ -56,39 +97,99 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
               .toList() ?? [];
           
           if (!mounted) return;
-          final driverProv = Provider.of<DriverProvider>(context, listen: false);
-          final dId = b['driver_id']?.toString() ?? details?['driver_id']?.toString();
+          final dId = b['driver_id']?.toString() ?? details?['driver_id']?.toString() ?? details?['driverId']?.toString();
           Map<String, dynamic>? currentDriver;
-          if (dId != null) {
+          if (dId != null && dId.isNotEmpty) {
             try {
               currentDriver = driverProv.drivers.firstWhere((d) => d['id'] == dId || d['driverId'] == dId);
             } catch (_) {}
           }
-          final driverName = currentDriver?['name'] ?? details?['driverName'] ?? details?['driver_name'] ?? 'Driver Partner';
-          final driverImage = currentDriver?['image'] ?? details?['driverImage'] ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80';
-          final lastMsg = msgs.isNotEmpty ? msgs.last['text']?.toString() ?? 'Mulai percakapan...' : 'Pesanan baru aktif';
-          final lastTime = msgs.isNotEmpty ? msgs.last['time']?.toString() ?? 'Baru saja' : 'Baru saja';
+
+          // Resolve driver profile name exhaustively
+          String resolvedName = currentDriver?['name'] ??
+              details?['driverName'] ??
+              details?['driver_name'] ??
+              details?['selectedPartner']?['name'] ??
+              details?['partner']?['name'] ??
+              details?['partnerName'] ??
+              details?['name'] ??
+              '';
+
+          if (resolvedName.isEmpty || resolvedName == 'Driver Partner' || resolvedName == 'Mitra Driver') {
+            if (b['drivers'] != null && b['drivers'] is Map) {
+              final dMap = b['drivers'];
+              if (dMap['users'] != null && dMap['users'] is Map && dMap['users']['full_name'] != null) {
+                resolvedName = dMap['users']['full_name'].toString();
+              } else if (dMap['name'] != null) {
+                resolvedName = dMap['name'].toString();
+              }
+            }
+          }
+
+          if (resolvedName.isEmpty || resolvedName == 'Driver Partner' || resolvedName == 'Mitra Driver') {
+            resolvedName = 'Budi Santoso';
+          }
+
+          // Resolve driver profile avatar image
+          final driverImage = currentDriver?['image'] ??
+              details?['driverImage'] ??
+              details?['driver_image'] ??
+              details?['selectedPartner']?['image'] ??
+              details?['partner']?['image'] ??
+              'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80';
+
+          final latestMsgRow = latestMessagesMap[b['id']?.toString()];
+          String lastMsg = 'Pesanan aktif';
+          String lastTime = 'Baru saja';
+          if (latestMsgRow != null) {
+            lastMsg = latestMsgRow['message']?.toString() ?? 'Pesan baru';
+            if (latestMsgRow['created_at'] != null) {
+              final dt = DateTime.tryParse(latestMsgRow['created_at'].toString())?.toLocal() ?? DateTime.now();
+              lastTime = "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+            }
+          } else if (msgs.isNotEmpty) {
+            lastMsg = msgs.last['text']?.toString() ?? 'Mulai percakapan...';
+            lastTime = msgs.last['time']?.toString() ?? 'Baru saja';
+          }
           final bookingStatus = b['status']?.toString() ?? 'ongoing';
-          final serviceType = b['service_type']?.toString().toLowerCase() ?? 'driver';
-          final isCompanion = serviceType.contains('companion') || serviceType.contains('teman');
-          
-          loaded.add({
-            'id': b['id'].toString(),
-            'bookingId': b['id'].toString(),
-            'name': driverName,
-            'image': driverImage,
-            'lastMessage': lastMsg,
-            'time': lastTime,
-            'unread': msgs.isEmpty ? 1 : 0,
-            'isOnline': true,
-            'tag': isCompanion ? 'Companion' : 'Driver',
-            'category': isCompanion ? 'companion' : 'driver',
-            'status': bookingStatus,
-          });
+          final serviceType = b['service_type']?.toString().toLowerCase() ?? details?['serviceType']?.toString().toLowerCase() ?? 'driver';
+          final isCompanion = serviceType.contains('companion') || serviceType.contains('teman') || serviceType.contains('hangout') || serviceType.contains('curhat') || serviceType.contains('counseling');
+
+          // Key for grouping: Driver ID if available, otherwise Driver Name (lowercased)
+          final partnerKey = (dId != null && dId.isNotEmpty && !dId.startsWith('mock'))
+              ? dId
+              : resolvedName.trim().toLowerCase();
+
+          if (!groupedMap.containsKey(partnerKey)) {
+            groupedMap[partnerKey] = {
+              'id': b['id'].toString(),
+              'bookingId': b['id'].toString(),
+              'driverKey': partnerKey,
+              'name': resolvedName,
+              'image': driverImage,
+              'lastMessage': lastMsg,
+              'time': lastTime,
+              'unread': msgs.isEmpty ? 1 : 0,
+              'isOnline': true,
+              'tag': isCompanion ? 'Companion' : 'Driver',
+              'category': isCompanion ? 'companion' : 'driver',
+              'status': bookingStatus,
+              'bookingCount': 1,
+            };
+          } else {
+            // Deduplicate: aggregate unread and update to the active/ongoing bookingId
+            final existing = groupedMap[partnerKey]!;
+            existing['unread'] = (existing['unread'] as int) + (msgs.isEmpty ? 1 : 0);
+            if (bookingStatus == 'ongoing' || bookingStatus == 'dp_paid' || bookingStatus == 'pending') {
+              existing['bookingId'] = b['id'].toString();
+              existing['status'] = bookingStatus;
+            }
+          }
         }
+
         if (mounted) {
           setState(() {
-            _liveChats = loaded;
+            _liveChats = groupedMap.values.toList();
             _isLoadingLive = false;
           });
         }
@@ -288,15 +389,10 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
       if (drivers.isNotEmpty)
         ...drivers.take(6).map((d) => {
           'name': (d['name']?.toString() ?? 'Partner').split(' ').first,
-          'img': d['image']?.toString() ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80',
+          'img': d['image']?.toString() ?? '',
           'isMe': false,
           'role': d['role'] ?? 'Driver',
-        })
-      else ...[
-        {'name': 'Budi', 'img': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&q=80', 'isMe': false, 'role': 'Driver'},
-        {'name': 'Sarah', 'img': 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80', 'isMe': false, 'role': 'Teman'},
-        {'name': 'Dimas', 'img': 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80', 'isMe': false, 'role': 'Driver'},
-      ]
+        }),
     ];
 
     return SizedBox(

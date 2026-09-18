@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_theme.dart';
@@ -13,14 +14,52 @@ class DriverLoginScreen extends StatefulWidget {
   State<DriverLoginScreen> createState() => _DriverLoginScreenState();
 }
 
-class _DriverLoginScreenState extends State<DriverLoginScreen> {
+class _DriverLoginScreenState extends State<DriverLoginScreen> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
 
+  late AnimationController _shakeController;
+  late Animation<double> _shakeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _shakeController = AnimationController(
+      duration: const Duration(milliseconds: 550),
+      vsync: this,
+    );
+
+    // Animasi getar halus berayun kiri-kanan dengan efek decay
+    _shakeAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0.0, end: -14.0).chain(CurveTween(curve: Curves.easeInOut)), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -14.0, end: 14.0).chain(CurveTween(curve: Curves.easeInOut)), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 14.0, end: -10.0).chain(CurveTween(curve: Curves.easeInOut)), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: -10.0, end: 10.0).chain(CurveTween(curve: Curves.easeInOut)), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 10.0, end: -5.0).chain(CurveTween(curve: Curves.easeInOut)), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: -5.0, end: 0.0).chain(CurveTween(curve: Curves.easeInOut)), weight: 1),
+    ]).animate(_shakeController);
+  }
+
+  void _triggerShake() {
+    HapticFeedback.heavyImpact();
+    _shakeController.forward(from: 0.0);
+  }
+
+  @override
+  void dispose() {
+    _shakeController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
   void _submit() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      _triggerShake();
+      return;
+    }
 
     // Dismiss keyboard
     FocusScope.of(context).unfocus();
@@ -58,7 +97,8 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
         MaterialPageRoute(builder: (context) => const DriverHomeScreen()),
       );
     } else if (mounted) {
-      final errorMsg = authProvider.errorMessage ?? 'Login gagal. Silakan periksa kembali email & password.';
+      _triggerShake();
+      final errorMsg = authProvider.errorMessage ?? 'Email/Nomor HP atau kata sandi Anda salah.';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Row(
@@ -102,9 +142,17 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Form(
-                key: _formKey,
-                child: Column(
+              child: AnimatedBuilder(
+                animation: _shakeAnimation,
+                builder: (context, child) {
+                  return Transform.translate(
+                    offset: Offset(_shakeAnimation.value, 0),
+                    child: child,
+                  );
+                },
+                child: Form(
+                  key: _formKey,
+                  child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -168,9 +216,9 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                     ),
                     const SizedBox(height: 32),
                     
-                     // Email Field
+                     // Identifier Field
                     Text(
-                      "ALAMAT EMAIL",
+                      "EMAIL ATAU NOMOR HP",
                       style: GoogleFonts.poppins(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
@@ -181,11 +229,11 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                     const SizedBox(height: 8),
                     _buildTextField(
                       controller: _emailController,
-                      hint: "driver@temeninajaa.com",
-                      icon: Icons.email_rounded,
+                      hint: "081234567890 / driver@domain.com",
+                      icon: Icons.person_outline_rounded,
                       validator: (value) {
-                        if (value == null || !value.contains('@')) {
-                          return 'Masukkan email yang valid';
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Email atau Nomor HP harus diisi';
                         }
                         return null;
                       },
@@ -303,6 +351,7 @@ class _DriverLoginScreenState extends State<DriverLoginScreen> {
                 ),
               ),
             ),
+          ),
           ),
         ),
       ),

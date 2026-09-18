@@ -19,7 +19,7 @@ class BottomNavBar extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 24), // Float above bottom edge
       decoration: BoxDecoration(
-        color: Colors.black,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
           color: AppTheme.border,
@@ -44,7 +44,7 @@ class BottomNavBar extends StatelessWidget {
           currentIndex: selectedIndex,
           onTap: onTap,
           type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.black,
+          backgroundColor: Colors.white,
           elevation: 0,
           selectedItemColor: AppTheme.primaryPink,
           unselectedItemColor: AppTheme.textMuted,
@@ -81,7 +81,7 @@ class BottomNavBar extends StatelessWidget {
         padding: EdgeInsets.symmetric(vertical: isActive ? 6 : 4, horizontal: 12),
         decoration: BoxDecoration(
           color: isActive 
-              ? AppTheme.primaryPink.withOpacity(0.12) 
+              ? AppTheme.primaryPink.withOpacity(0.10) 
               : Colors.transparent,
           borderRadius: BorderRadius.circular(16),
         ),

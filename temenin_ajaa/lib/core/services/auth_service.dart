@@ -18,6 +18,12 @@ class Log {
       print('[DEBUG] $message');
     }
   }
+
+  static void w(String message) {
+    if (kDebugMode) {
+      print('[WARN] $message');
+    }
+  }
   
   static void e(String message) {
     if (kDebugMode) {
@@ -42,195 +48,126 @@ class AuthService {
     return cleaned;
   }
 
-  Future<Map<String, dynamic>> login(String email, String password) async {
-    final cleanEmail = email.trim().toLowerCase();
+  Future<Map<String, dynamic>> login(String identifier, String password) async {
+    final cleanIdentifier = identifier.trim();
 
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.login}');
       final response = await http.post(
         url,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'email': cleanEmail,
-            'password': password,
-          }),
-        ).timeout(const Duration(seconds: 2));
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'identifier': cleanIdentifier,
+          'email': cleanIdentifier,
+          'phone': cleanIdentifier,
+          'password': password,
+        }),
+      ).timeout(const Duration(seconds: 15));
 
-        final data = jsonDecode(response.body);
-        if (response.statusCode == 200 && data['success'] == true) {
-          final rawUser = data['user'] ?? (data['data'] != null ? data['data']['user'] : null);
-          final token = data['token'] ?? (data['data'] != null ? data['data']['token'] : null);
-          if (rawUser != null && token != null) {
-            final user = UserModel.fromJson(rawUser);
-            await _saveAuthData(token, data['refreshToken'], user);
-            return {
-              'success': true,
-              'user': user,
-              'token': token,
-              'message': data['message'] ?? 'Login berhasil',
-            };
-          }
-        } else if (response.statusCode == 400 || response.statusCode == 401) {
+      final data = jsonDecode(response.body);
+      if (response.statusCode == 200 && data['success'] == true) {
+        final rawUser = data['user'] ?? (data['data'] != null ? data['data']['user'] : null);
+        final token = data['token'] ?? (data['data'] != null ? data['data']['token'] : null);
+        if (rawUser != null && token != null) {
+          final user = UserModel.fromJson(rawUser);
+          await _saveAuthData(token, data['refreshToken'], user);
           return {
-            'success': false,
-            'message': data['message'] ?? 'Email atau kata sandi Anda salah.',
+            'success': true,
+            'user': user,
+            'token': token,
+            'message': data['message'] ?? 'Login berhasil',
           };
         }
-      } catch (e) {
-        Log.e('Network login error: $e');
-      }
-
-    // Direct Supabase Cloud Fallback
-    try {
-      final supabase = Supabase.instance.client;
-
-      // 1. Try Supabase Auth
-      try {
-        final authRes = await supabase.auth.signInWithPassword(
-          email: cleanEmail,
-          password: password,
-        );
-        if (authRes.user != null) {
-          final userRow = await supabase
-              .from('users')
-              .select('*')
-              .eq('id', authRes.user!.id)
-              .maybeSingle();
-
-          if (userRow != null) {
-            final user = UserModel.fromJson(userRow);
-            final token = authRes.session?.accessToken ?? 'sp_token_${user.id}';
-            await _saveAuthData(token, null, user);
-            return {
-              'success': true,
-              'user': user,
-              'token': token,
-              'message': 'Login berhasil',
-            };
-          }
-        }
-      } catch (authError) {
-        final errStr = authError.toString().toLowerCase();
-        if (errStr.contains('invalid login credentials') ||
-            errStr.contains('invalid_grant') ||
-            errStr.contains('wrong password')) {
-          return {
-            'success': false,
-            'message': 'Email atau kata sandi Anda salah.',
-          };
-        }
-      }
-
-      // 2. Direct Supabase Table Check
-      final userRow = await supabase
-          .from('users')
-          .select('*')
-          .eq('email', cleanEmail)
-          .maybeSingle();
-
-      if (userRow != null) {
-        final user = UserModel.fromJson(userRow);
-        final token = 'sp_token_${user.id}';
-        await _saveAuthData(token, null, user);
+      } else {
         return {
-          'success': true,
-          'user': user,
-          'token': token,
-          'message': 'Login berhasil',
+          'success': false,
+          'message': data['message'] ?? 'Email/Nomor HP atau kata sandi Anda salah.',
         };
       }
     } catch (e) {
-      Log.e('Supabase login fallback error: $e');
+      Log.e('Network login error: $e');
+    }
+
+    // Direct Supabase Cloud Fallback (Hanya jika jaringan HTTP gagal & WAJIB verifikasi kata sandi)
+    try {
+      final supabase = Supabase.instance.client;
+      final cleanLower = cleanIdentifier.toLowerCase();
+      final cleanPhone = _sanitizePhone(cleanIdentifier);
+      final emailCandidate = cleanLower.contains('@') ? cleanLower : '$cleanPhone@temenin.aja';
+
+      // 🔒 WAJIB verifikasi sandi resmi melalui Supabase GoTrue Auth
+      final authRes = await supabase.auth.signInWithPassword(
+        email: emailCandidate,
+        password: password,
+      );
+
+      if (authRes.user != null && authRes.session?.accessToken != null) {
+        final userRow = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', authRes.user!.id)
+            .maybeSingle();
+
+        if (userRow != null) {
+          final user = UserModel.fromJson(userRow);
+          final token = authRes.session!.accessToken;
+          await _saveAuthData(token, authRes.session?.refreshToken, user);
+          return {
+            'success': true,
+            'user': user,
+            'token': token,
+            'message': 'Login berhasil',
+          };
+        }
+      }
+    } catch (e) {
+      Log.e('Supabase auth fallback error: $e');
     }
 
     return {
       'success': false,
-      'message': 'Email atau kata sandi Anda salah, atau akun belum terdaftar.',
+      'message': 'Email/Nomor HP atau kata sandi Anda salah.',
     };
   }
 
   Future<Map<String, dynamic>> loginWithPhone(String phone, String otp) async {
-    final cleanPhone = _sanitizePhone(phone);
-
-    try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/api/auth/login-otp');
-      final response = await http.post(
-        url,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'phone': cleanPhone,
-          }),
-        ).timeout(const Duration(seconds: 2));
-
-        final data = jsonDecode(response.body);
-        if (response.statusCode == 200 && data['success'] == true) {
-          final rawUser = data['user'] ?? (data['data'] != null ? data['data']['user'] : null);
-          final token = data['token'] ?? (data['data'] != null ? data['data']['token'] : null);
-          if (rawUser != null && token != null) {
-            final user = UserModel.fromJson(rawUser);
-            await _saveAuthData(token, data['refreshToken'], user);
-            return {
-              'success': true,
-              'user': user,
-              'token': token,
-            };
-          }
-        }
-      } catch (e) {
-        Log.e('Network loginWithPhone error: $e');
-      }
-
-    // Direct Supabase Fallback
-    try {
-      final supabase = Supabase.instance.client;
-      final userRow = await supabase
-          .from('users')
-          .select('*')
-          .or('phone.eq.$cleanPhone,phone.eq.0$cleanPhone,phone.eq.62$cleanPhone')
-          .maybeSingle();
-
-      if (userRow != null) {
-        final user = UserModel.fromJson(userRow);
-        final token = 'sp_phone_token_${user.id}';
-        await _saveAuthData(token, null, user);
-        return {
-          'success': true,
-          'user': user,
-          'token': token,
-          'message': 'Login berhasil',
-        };
-      }
-    } catch (e) {
-      Log.e('Supabase phone login fallback error: $e');
-    }
-
-    return {
-      'success': false,
-      'message': 'Nomor Handphone tidak ditemukan atau belum terdaftar.',
-    };
+    return login(phone, otp);
   }
 
   Future<Map<String, dynamic>> register({
-    required String email,
+    String? email,
     required String password,
     required String fullName,
     required String phone,
+    String? gender,
+    File? avatarFile,
   }) async {
-    final cleanEmail = email.trim().toLowerCase();
+    final cleanEmail = (email != null && email.trim().isNotEmpty) ? email.trim().toLowerCase() : null;
     final cleanPhone = _sanitizePhone(phone);
     try {
       final url = Uri.parse('${ApiConstants.baseUrl}${ApiConstants.register}');
-      final response = await http.post(
-        url,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'email': cleanEmail,
-          'password': password,
-          'full_name': fullName.trim(),
-          'phone': cleanPhone,
-          'role': 'client',
-        }),
-      ).timeout(const Duration(seconds: 5));
+      
+      var request = http.MultipartRequest('POST', url);
+      request.fields['full_name'] = fullName.trim();
+      request.fields['phone'] = cleanPhone;
+      request.fields['password'] = password;
+      request.fields['role'] = 'client';
+      if (cleanEmail != null) {
+        request.fields['email'] = cleanEmail;
+      }
+      if (gender != null) {
+        request.fields['gender'] = gender.trim();
+      }
+
+      if (avatarFile != null) {
+        request.files.add(await http.MultipartFile.fromPath(
+          'profile_picture',
+          avatarFile.path,
+        ));
+      }
+
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 15));
+      final response = await http.Response.fromStream(streamedResponse);
 
       final data = jsonDecode(response.body);
       if (response.statusCode == 201 || (response.statusCode == 200 && data['success'] == true)) {
@@ -264,63 +201,26 @@ class AuthService {
     required String phone,
     required String otp,
     required String fullName,
+    String? password,
+    String? gender,
     File? avatarFile,
   }) async {
-    final cleanPhone = _sanitizePhone(phone);
-    try {
-      final url = Uri.parse('${ApiConstants.baseUrl}/api/auth/register-otp');
-      var request = http.MultipartRequest('POST', url);
-      
-      request.fields['phone'] = cleanPhone;
-      request.fields['full_name'] = fullName.trim();
-      request.fields['otp'] = otp;
-      
-      if (avatarFile != null) {
-        request.files.add(await http.MultipartFile.fromPath(
-          'profile_picture',
-          avatarFile.path,
-        ));
-      }
-
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 5));
-      final response = await http.Response.fromStream(streamedResponse);
-
-      final data = jsonDecode(response.body);
-      if ((response.statusCode == 200 || response.statusCode == 201) && data['success'] == true) {
-        final rawUser = data['user'] ?? (data['data'] != null ? data['data']['user'] : null);
-        final token = data['token'] ?? (data['data'] != null ? data['data']['token'] : null);
-        if (rawUser != null && token != null) {
-          final user = UserModel.fromJson(rawUser);
-          await _saveAuthData(token, data['refreshToken'], user);
-          return {
-            'success': true,
-            'user': user,
-            'token': token,
-            'message': data['message'] ?? 'Registrasi berhasil',
-          };
-        }
-      }
-      return {
-        'success': false,
-        'message': data['message'] ?? 'Registrasi gagal',
-      };
-    } catch (e) {
-      Log.e('Register with phone error: $e');
-      return {
-        'success': false,
-        'message': 'Gagal menghubungkan ke server: $e',
-      };
-    }
+    return register(
+      fullName: fullName,
+      phone: phone,
+      password: (password != null && password.isNotEmpty) ? password : otp,
+      gender: gender,
+      avatarFile: avatarFile,
+    );
   }
 
   Future<Map<String, dynamic>> sendOtp(String phone) async {
     final cleanPhone = _sanitizePhone(phone);
     final candidateUrls = [
       '${ApiConstants.baseUrl}/api/auth/send-otp',
-      'http://10.0.2.2:3004/api/auth/send-otp',
-      'http://127.0.0.1:3004/api/auth/send-otp',
-      'http://localhost:3004/api/auth/send-otp',
-      'http://192.168.1.3:3004/api/auth/send-otp',
+      'http://10.0.2.2:3002/api/auth/send-otp',
+      'http://127.0.0.1:3002/api/auth/send-otp',
+      'http://localhost:3002/api/auth/send-otp',
     ];
 
     for (final rawUrl in candidateUrls) {
@@ -330,7 +230,7 @@ class AuthService {
           url,
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'phone': cleanPhone}),
-        ).timeout(const Duration(seconds: 2));
+        ).timeout(const Duration(seconds: 15));
 
         final data = jsonDecode(response.body);
         if (response.statusCode == 200 && data['success'] == true) {
@@ -355,10 +255,9 @@ class AuthService {
     final cleanPhone = _sanitizePhone(phone);
     final candidateUrls = [
       '${ApiConstants.baseUrl}/api/auth/verify-otp',
-      'http://10.0.2.2:3004/api/auth/verify-otp',
-      'http://127.0.0.1:3004/api/auth/verify-otp',
-      'http://localhost:3004/api/auth/verify-otp',
-      'http://192.168.1.3:3004/api/auth/verify-otp',
+      'http://10.0.2.2:3002/api/auth/verify-otp',
+      'http://127.0.0.1:3002/api/auth/verify-otp',
+      'http://localhost:3002/api/auth/verify-otp',
     ];
 
     for (final rawUrl in candidateUrls) {
@@ -371,7 +270,7 @@ class AuthService {
             'phone': cleanPhone,
             'otp': otp,
           }),
-        ).timeout(const Duration(seconds: 2));
+        ).timeout(const Duration(seconds: 15));
 
         final data = jsonDecode(response.body);
         if (response.statusCode == 200 && data['success'] == true) {
@@ -506,6 +405,13 @@ class AuthService {
         await prefs.setString(_refreshTokenKey, refreshToken);
       }
       await prefs.setString(_userKey, jsonEncode(user.toJson()));
+
+      // 🔗 Sinkronisasi token ke Supabase GoTrue Auth Client
+      try {
+        await Supabase.instance.client.auth.setSession(token);
+      } catch (e) {
+        Log.w('Supabase setSession notice: $e');
+      }
     } catch (e) {
       Log.e('Error saving auth data: $e');
     }
@@ -556,6 +462,19 @@ class AuthService {
           user = user.copyWith(fullName: 'Faizun A.');
           await updateLocalUser(user);
         }
+
+        // 🔗 Pastikan session Supabase tetap aktif saat app dibuka kembali
+        if (Supabase.instance.client.auth.currentSession == null) {
+          final token = prefs.getString(_tokenKey);
+          if (token != null && token.isNotEmpty) {
+            try {
+              await Supabase.instance.client.auth.setSession(token);
+            } catch (e) {
+              Log.w('Supabase restore session notice: $e');
+            }
+          }
+        }
+
         return user;
       }
       return null;
@@ -574,6 +493,10 @@ class AuthService {
     await prefs.remove(_tokenKey);
     await prefs.remove(_refreshTokenKey);
     await prefs.remove(_userKey);
+
+    try {
+      await Supabase.instance.client.auth.signOut();
+    } catch (_) {}
   }
 
   Future<Map<String, dynamic>> updateProfile({

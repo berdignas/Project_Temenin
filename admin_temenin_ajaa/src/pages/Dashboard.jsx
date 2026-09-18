@@ -79,6 +79,13 @@ export const Dashboard = () => {
         </div>
         <div className="flex items-center gap-3">
           <Link
+            to="/finance"
+            className="px-4 py-2.5 bg-rose-600/90 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-rose-600/20 flex items-center gap-2 transition-all"
+          >
+            <Wallet className="w-4 h-4" />
+            <span>Antrean Penarikan ({stats?.pendingWithdrawals || 0})</span>
+          </Link>
+          <Link
             to="/driver-approvals"
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition-all"
           >
@@ -229,18 +236,35 @@ export const Dashboard = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {stats.pendingDriverList.map((driver) => (
-              <div key={driver.id} className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl flex items-center justify-between gap-4 hover:border-slate-700 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
-                    {driver.users?.full_name?.charAt(0) || 'D'}
+            {stats.pendingDriverList.map((driver) => {
+              const deadline = new Date(driver.created_at || Date.now()).getTime() + (24 * 3600 * 1000);
+              const diffMs = deadline - Date.now();
+              const diffHours = diffMs / (1000 * 3600);
+              const isCritical = diffHours < 4 || diffMs <= 0;
+              const isWarning = diffHours >= 4 && diffHours < 12;
+
+              return (
+                <div key={driver.id} className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl flex items-center justify-between gap-4 hover:border-slate-700 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+                      {driver.users?.full_name?.charAt(0) || 'D'}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-bold text-sm text-white">{driver.users?.full_name}</h4>
+                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold border flex items-center gap-1 ${
+                          isCritical ? 'bg-rose-500/20 text-rose-400 border-rose-500/40 animate-pulse' :
+                          isWarning ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' :
+                          'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                        }`}>
+                          <Clock className="w-2.5 h-2.5" />
+                          <span>{diffMs <= 0 ? 'LEWAT 24H' : `${Math.floor(Math.max(0, diffHours))}j sisa`}</span>
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400">{driver.vehicle_type} • Plat: {driver.plate_number}</p>
+                      <span className="text-[10px] text-amber-400 font-medium">SIM: {driver.driver_license_number}</span>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-white">{driver.users?.full_name}</h4>
-                    <p className="text-xs text-slate-400">{driver.vehicle_type} • Plat: {driver.plate_number}</p>
-                    <span className="text-[10px] text-amber-400 font-medium">SIM: {driver.driver_license_number}</span>
-                  </div>
-                </div>
 
                 <div className="flex items-center gap-2">
                   <button
@@ -259,7 +283,8 @@ export const Dashboard = () => {
                   </button>
                 </div>
               </div>
-            ))}
+            );
+          })}
           </div>
         </div>
       )}

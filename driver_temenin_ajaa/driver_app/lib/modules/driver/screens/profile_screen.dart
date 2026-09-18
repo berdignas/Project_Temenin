@@ -18,6 +18,8 @@ import 'driver_matching_prefs_screen.dart';
 import 'driver_posts_screen.dart';
 import 'driver_story_viewer_screen.dart';
 import 'instagram_story_editor_screen.dart';
+import 'driver_addons_screen.dart';
+import '../../../core/utils/booking_date_helper.dart';
 
 class DriverProfileScreen extends StatefulWidget {
   const DriverProfileScreen({super.key});
@@ -29,6 +31,7 @@ class DriverProfileScreen extends StatefulWidget {
 class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   int _selectedScheduleDayIndex = 0;
+  RealtimeChannel? _bookingsSubscription;
 
   String _getDayName(int weekday) {
     const names = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
@@ -59,17 +62,204 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     _tabController = TabController(length: 4, vsync: this);
     _fetchDriverReviews();
     _fetchDriverBookings();
+    _setupBookingsSubscription();
+  }
+
+  void _setupBookingsSubscription() {
+    try {
+      _bookingsSubscription = Supabase.instance.client
+          .channel('driver_profile_realtime_bookings')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'bookings',
+            callback: (payload) {
+              debugPrint('ProfileScreen: Realtime booking update detected');
+              _fetchDriverBookings();
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('Error setting up bookings subscription: $e');
+    }
+  }
+
+  int _extractBookingDurationHours(Map<String, dynamic> b) {
+    final add = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+    final rawDur = b['duration'] ?? add?['duration'] ?? add?['duration_hours'] ?? add?['hangoutDurationHours'] ?? add?['totalHours'] ?? add?['hours'];
+    if (rawDur != null) {
+      final n = int.tryParse(rawDur.toString().replaceAll(RegExp(r'[^0-9]'), ''));
+      if (n != null && n > 0) {
+        if (n >= 30 && n % 30 == 0 && n > 24) {
+          return (n / 60).ceil();
+        }
+        return n;
+      }
+    }
+    return 2; // Default 2 jam
+  }
+
+  DateTime? _extractBookingDateTime(Map<String, dynamic> b) {
+    final dt = BookingDateHelper.extractScheduledDateTime(b);
+    if (dt != null) return dt;
+    final rawCreatedAt = b['created_at']?.toString();
+    if (rawCreatedAt != null && rawCreatedAt.isNotEmpty) {
+      return DateTime.tryParse(rawCreatedAt);
+    }
+    return null;
+  }
+
+  bool _isBookingActive(String status) {
+    final s = status.toLowerCase();
+    return s != 'cancelled' && s != 'rejected' && s != 'declined';
+  }
+
+  bool _isBookingWaitingOrActive(String status) {
+    final s = status.toLowerCase();
+    return s == 'waiting_dp' ||
+        s == 'dp_paid' ||
+        s == 'pending' ||
+        s == 'accepted' ||
+        s == 'waiting_client' ||
+        s == 'arrived' ||
+        s == 'in_trip' ||
+        s == 'ongoing' ||
+        s == 'confirmed' ||
+        s == 'waiting_final_payment';
+  }
+
+  List<Map<String, dynamic>> _getBookingsForDate(DateTime date) {
+    return _driverBookings.where((b) {
+      final status = (b['status'] ?? '').toString();
+      if (!_isBookingActive(status)) return false;
+
+      final dt = _extractBookingDateTime(b);
+      if (dt == null) return false;
+
+      return dt.year == date.year && dt.month == date.month && dt.day == date.day;
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> _computeHourlySlots(DateTime date, List<Map<String, dynamic>> dayBookings) {
+    final List<Map<String, dynamic>> slots = [];
+
+    // Operating hours: 08:00 to 22:00 (14 slots)
+    for (int h = 8; h < 22; h++) {
+      final slotStart = DateTime(date.year, date.month, date.day, h, 0);
+      final slotEnd = DateTime(date.year, date.month, date.day, h + 1, 0);
+      final slotLabel = "${h.toString().padLeft(2, '0')}:00 - ${(h + 1).toString().padLeft(2, '0')}:00";
+
+      Map<String, dynamic>? overlappingBooking;
+      DateTime? bStart;
+      DateTime? bEnd;
+      int bDur = 2;
+
+      for (final b in dayBookings) {
+        final start = _extractBookingDateTime(b);
+        if (start == null) continue;
+        final dur = _extractBookingDurationHours(b);
+        final end = start.add(Duration(hours: dur));
+
+        // Overlap: slotStart < end && slotEnd > start
+        if (slotStart.isBefore(end) && slotEnd.isAfter(start)) {
+          overlappingBooking = b;
+          bStart = start;
+          bEnd = end;
+          bDur = dur;
+          break;
+        }
+      }
+
+      if (overlappingBooking != null && bStart != null && bEnd != null) {
+        final add = overlappingBooking['additional_details'] is Map ? overlappingBooking['additional_details'] as Map : null;
+        final clientObj = overlappingBooking['users'] is Map ? overlappingBooking['users'] as Map : null;
+        final clientName = clientObj?['full_name']?.toString() ??
+            add?['client_name']?.toString() ??
+            add?['user_name']?.toString() ??
+            'Pelanggan';
+        final clientPhone = clientObj?['phone']?.toString() ??
+            add?['client_phone']?.toString() ??
+            '-';
+        final clientAvatar = clientObj?['avatar_url']?.toString() ??
+            add?['client_avatar']?.toString() ??
+            '';
+        final serviceName = overlappingBooking['service_type']?.toString() ??
+            add?['service_name']?.toString() ??
+            add?['service_type']?.toString() ??
+            'Layanan Teman';
+        final status = overlappingBooking['status']?.toString() ?? 'pending';
+        final timeRangeStr = "${bStart.hour.toString().padLeft(2, '0')}:${bStart.minute.toString().padLeft(2, '0')} - ${bEnd.hour.toString().padLeft(2, '0')}:${bEnd.minute.toString().padLeft(2, '0')} WIB";
+
+        slots.add({
+          'hour': h,
+          'label': slotLabel,
+          'isLocked': true,
+          'booking': overlappingBooking,
+          'clientName': clientName,
+          'clientPhone': clientPhone,
+          'clientAvatar': clientAvatar,
+          'serviceName': serviceName,
+          'timeRangeString': timeRangeStr,
+          'durationHours': bDur,
+          'status': status,
+        });
+      } else {
+        slots.add({
+          'hour': h,
+          'label': slotLabel,
+          'isLocked': false,
+          'booking': null,
+          'clientName': null,
+          'clientPhone': null,
+          'clientAvatar': null,
+          'serviceName': null,
+          'timeRangeString': null,
+          'durationHours': 0,
+          'status': 'available',
+        });
+      }
+    }
+
+    return slots;
   }
 
   Future<void> _fetchDriverBookings() async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        final List<dynamic> rows = await Supabase.instance.client
-            .from('bookings')
-            .select('*')
-            .or('driver_id.eq.${user.id},user_id.eq.${user.id}')
-            .order('created_at', ascending: false);
+        String? driverTableId;
+        try {
+          final driverData = await Supabase.instance.client
+              .from('drivers')
+              .select('id')
+              .eq('user_id', user.id)
+              .maybeSingle();
+          if (driverData != null && driverData['id'] != null) {
+            driverTableId = driverData['id'].toString();
+          }
+        } catch (e) {
+          debugPrint('Error getting driver table id: $e');
+        }
+
+        final orFilter = (driverTableId != null && driverTableId != user.id)
+            ? 'driver_id.eq.$driverTableId,driver_id.eq.${user.id},user_id.eq.${user.id}'
+            : 'driver_id.eq.${user.id},user_id.eq.${user.id}';
+
+        List<dynamic> rows = [];
+        try {
+          rows = await Supabase.instance.client
+              .from('bookings')
+              .select('*, users:user_id(full_name, avatar_url, phone)')
+              .or(orFilter)
+              .order('created_at', ascending: false);
+        } catch (e) {
+          debugPrint('Fallback select bookings: $e');
+          rows = await Supabase.instance.client
+              .from('bookings')
+              .select('*')
+              .or(orFilter)
+              .order('created_at', ascending: false);
+        }
 
         if (mounted) {
           setState(() {
@@ -86,24 +276,109 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        final List<dynamic> rows = await Supabase.instance.client
-            .from('reviews')
-            .select('*, users(full_name, avatar_url)')
-            .or('driver_id.eq.${user.id},user_id.eq.${user.id}')
-            .order('created_at', ascending: false);
+        String? driverTableId;
+        try {
+          final driverData = await Supabase.instance.client
+              .from('drivers')
+              .select('id')
+              .eq('user_id', user.id)
+              .maybeSingle();
+          if (driverData != null && driverData['id'] != null) {
+            driverTableId = driverData['id'].toString();
+          }
+        } catch (e) {
+          debugPrint('Error getting driver table id: $e');
+        }
 
-        if (rows.isNotEmpty) {
+        final List<Map<String, dynamic>> loadedReviews = [];
+        final Set<String> seenReviewIds = {};
+
+        // 1. Fetch from 'reviews' table
+        try {
+          final orFilter = driverTableId != null
+              ? 'driver_id.eq.$driverTableId,driver_id.eq.${user.id},user_id.eq.${user.id}'
+              : 'driver_id.eq.${user.id},user_id.eq.${user.id}';
+
+          final List<dynamic> rows = await Supabase.instance.client
+              .from('reviews')
+              .select('*, users(full_name, avatar_url)')
+              .or(orFilter)
+              .order('created_at', ascending: false);
+
+          for (final r in rows) {
+            final u = r['users'] ?? {};
+            final comment = r['comment']?.toString().trim() ?? '';
+            final bId = r['booking_id']?.toString() ?? r['id']?.toString() ?? '';
+            if (seenReviewIds.contains(bId)) continue;
+            seenReviewIds.add(bId);
+
+            final author = u['full_name']?.toString().trim();
+            loadedReviews.add({
+              'id': r['id']?.toString() ?? bId,
+              'booking_id': bId,
+              'author': (author != null && author.isNotEmpty) ? author : 'Pelanggan',
+              'avatar': u['avatar_url']?.toString() ?? '',
+              'rating': double.tryParse(r['rating']?.toString() ?? '5.0') ?? 5.0,
+              'text': comment,
+              'date': r['created_at']?.toString().split('T')[0] ?? '',
+            });
+          }
+        } catch (e) {
+          debugPrint('Error fetching reviews table: $e');
+        }
+
+        // 2. Also check completed bookings for reviews recorded in additional_details
+        try {
+          final bookingFilter = driverTableId != null
+              ? 'driver_id.eq.$driverTableId,driver_id.eq.${user.id}'
+              : 'driver_id.eq.${user.id}';
+
+          final List<dynamic> bRows = await Supabase.instance.client
+              .from('bookings')
+              .select('*')
+              .or(bookingFilter)
+              .order('created_at', ascending: false);
+
+          for (final b in bRows) {
+            final bId = b['id']?.toString() ?? '';
+            if (seenReviewIds.contains(bId)) continue;
+
+            final details = b['additional_details'] is Map
+                ? Map<String, dynamic>.from(b['additional_details'] as Map)
+                : <String, dynamic>{};
+
+            final hasReviewed = details['has_reviewed'] == true || details['rating'] != null;
+            final clientRating = details['rating'] != null ? details['rating'] : details['review']?['rating'];
+            final clientComment = details['comment']?.toString().trim() ?? details['review']?['comment']?.toString().trim() ?? '';
+
+            if (hasReviewed && clientRating != null) {
+              seenReviewIds.add(bId);
+              final clientName = details['client_name'] ?? details['userName'] ?? details['user_name'] ?? 'Pelanggan';
+              final clientAvatar = details['client_avatar'] ?? details['user_avatar'] ?? '';
+              final ratingVal = double.tryParse(clientRating.toString()) ?? 5.0;
+
+              // Check if driver gave notes to client in this booking
+              final driverCommentToClient = details['driver_comment_client'] ?? details['client_review']?['comment'];
+
+              loadedReviews.add({
+                'id': bId,
+                'booking_id': bId,
+                'author': clientName.toString().trim().isNotEmpty ? clientName.toString().trim() : 'Pelanggan',
+                'avatar': clientAvatar.toString(),
+                'rating': ratingVal,
+                'text': clientComment,
+                'driver_note_to_client': driverCommentToClient?.toString().trim(),
+                'date': b['created_at']?.toString().split('T')[0] ?? '',
+              });
+            }
+          }
+        } catch (e) {
+          debugPrint('Error fetching reviews from bookings table: $e');
+        }
+
+        if (mounted) {
           setState(() {
-            _driverReviews = rows.map((r) {
-              final u = r['users'] ?? {};
-              return {
-                'author': u['full_name'] ?? 'Pelanggan',
-                'avatar': u['avatar_url'] ?? '',
-                'rating': double.tryParse(r['rating']?.toString() ?? '5.0') ?? 5.0,
-                'text': r['comment'] ?? 'Sangat memuaskan!',
-                'date': r['created_at']?.toString().split('T')[0] ?? '',
-              };
-            }).toList();
+            _driverReviews = loadedReviews;
           });
         }
       }
@@ -114,6 +389,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
 
   @override
   void dispose() {
+    _bookingsSubscription?.unsubscribe();
     _tabController.dispose();
     super.dispose();
   }
@@ -129,8 +405,16 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
         ? user.avatarUrl!
         : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80';
 
-    final rating = (driver?['rating'] != null) ? (driver!['rating'] as num).toDouble() : 5.0;
     final totalRides = driver?['completed_trips'] ?? driver?['total_rides'] ?? 0;
+    final double rating;
+    if (_driverReviews.isNotEmpty) {
+      final sum = _driverReviews.map((r) => (r['rating'] as num).toDouble()).reduce((a, b) => a + b);
+      rating = sum / _driverReviews.length;
+    } else if (driver?['rating'] != null && totalRides > 0) {
+      rating = (driver!['rating'] as num).toDouble();
+    } else {
+      rating = 0.0;
+    }
     final driverClass = driver?['driver_class'] ?? 'VVIP Gold';
 
     // Parse registration metadata from vehicle_stnk JSON
@@ -2384,7 +2668,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
       if (metadata['active_services'] != null) {
         currentServices = List<String>.from(metadata['active_services']);
       } else {
-        currentServices = ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant'];
+        currentServices = ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant', 'gaming', 'sleep_call'];
       }
 
       if (enable) {
@@ -2695,6 +2979,15 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                   },
                 ),
                 _buildSettingsTile(
+                  icon: Icons.extension_rounded,
+                  title: "Kelola Add-ons & Fasilitas",
+                  subtitle: "Atur add-ons (Kamera Pro, AC, Outfit, Snack, dll) untuk form pemesanan klien",
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => const DriverAddonsScreen()));
+                  },
+                ),
+                _buildSettingsTile(
                   icon: Icons.photo_library_outlined,
                   title: "Kelola Feed & Postingan Aktivitas",
                   subtitle: "Buat atau hapus postingan galeri di profil driver",
@@ -2847,7 +3140,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     final calendarDays = List.generate(14, (i) => now.add(Duration(days: i)));
 
     final String vehicleStnk = driver?['vehicle_stnk'] ?? '';
-    List<String> activeServices = ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant'];
+    List<String> activeServices = ['ride', 'sporty', 'hangout', 'freedom', 'counseling', 'curhat', 'detective', 'hiking', 'assistant', 'gaming', 'sleep_call'];
     if (vehicleStnk.startsWith('{')) {
       try {
         final Map<String, dynamic> metadata = jsonDecode(vehicleStnk);
@@ -2878,6 +3171,20 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
         'title': '🍸 Hangout Companion',
         'subtitle': 'Menemani nongkrong & makan di cafe/restoran',
         'color': const Color(0xFFD97706),
+      },
+      {
+        'key': 'gaming',
+        'icon': Icons.sports_esports_rounded,
+        'title': '🎮 Gaming Buddy (Mabar)',
+        'subtitle': 'Teman mabar game online (MLBB, PUBG, Valorant, dll)',
+        'color': const Color(0xFF6366F1),
+      },
+      {
+        'key': 'sleep_call',
+        'icon': Icons.bedtime_rounded,
+        'title': '🌙 Sleep Call Companion',
+        'subtitle': 'Teman tidur malam hari & alarm bangun pagi',
+        'color': const Color(0xFF312E81),
       },
       {
         'key': 'freedom',
@@ -3009,7 +3316,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
 
           // Date Strip
           SizedBox(
-            height: 100,
+            height: 106,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               itemCount: calendarDays.length,
@@ -3018,30 +3325,26 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                 final isSelected = index == _selectedScheduleDayIndex;
 
                 // Calculate real bookings for this specific date
-                final dayBookings = _driverBookings.where((b) {
-                  final rawDateStr = b['scheduled_at'] ?? b['created_at'] ?? '';
-                  if (rawDateStr == null || rawDateStr.toString().isEmpty) return false;
-                  try {
-                    final d = DateTime.parse(rawDateStr.toString());
-                    return d.year == date.year && d.month == date.month && d.day == date.day && b['status'] != 'cancelled';
-                  } catch (_) {
-                    return false;
-                  }
-                }).toList();
-
+                final dayBookings = _getBookingsForDate(date);
+                final slots = _computeHourlySlots(date, dayBookings);
                 final count = dayBookings.length;
+                final hasActive = dayBookings.any((b) => _isBookingWaitingOrActive(b['status']?.toString() ?? ''));
+
                 Color badgeColor;
                 String statusLabel;
 
                 if (count == 0) {
                   badgeColor = const Color(0xFF10B981); // Green
                   statusLabel = "Kosong";
-                } else if (count <= 2) {
-                  badgeColor = const Color(0xFFF59E0B); // Orange
-                  statusLabel = "Sedikit";
-                } else {
+                } else if (hasActive) {
+                  badgeColor = const Color(0xFFF59E0B); // Orange / Amber
+                  statusLabel = "⚠️ Terisi ($count)";
+                } else if (count >= 3) {
                   badgeColor = const Color(0xFFEF4444); // Red
-                  statusLabel = "Sibuk";
+                  statusLabel = "Sibuk ($count)";
+                } else {
+                  badgeColor = const Color(0xFF3B82F6); // Blue
+                  statusLabel = "$count Selesai";
                 }
 
                 return GestureDetector(
@@ -3049,18 +3352,30 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                     setState(() {
                       _selectedScheduleDayIndex = index;
                     });
-                    _showDayScheduleBottomSheet(context, date, statusLabel, badgeColor, count, dayBookings);
+                    _showDayScheduleBottomSheet(
+                      context,
+                      date,
+                      statusLabel,
+                      badgeColor,
+                      count,
+                      dayBookings,
+                      slots,
+                    );
                   },
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    width: 72,
+                    width: 76,
                     margin: const EdgeInsets.only(right: 10),
                     padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                     decoration: BoxDecoration(
-                      color: isSelected ? AppTheme.primaryPink.withOpacity(0.15) : AppTheme.surface,
+                      color: isSelected
+                          ? AppTheme.primaryPink.withOpacity(0.15)
+                          : (hasActive ? badgeColor.withOpacity(0.08) : AppTheme.surface),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: isSelected ? AppTheme.primaryPink : AppTheme.border,
+                        color: isSelected
+                            ? AppTheme.primaryPink
+                            : (hasActive ? badgeColor.withOpacity(0.6) : AppTheme.border),
                         width: isSelected ? 2.0 : 1.0,
                       ),
                     ),
@@ -3087,7 +3402,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                         ),
                         const SizedBox(height: 4),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                           decoration: BoxDecoration(
                             color: badgeColor.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(8),
@@ -3097,9 +3412,11 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                             statusLabel,
                             style: GoogleFonts.inter(
                               color: badgeColor,
-                              fontSize: 9,
+                              fontSize: 8.5,
                               fontWeight: FontWeight.bold,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
@@ -3115,27 +3432,29 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
           Builder(
             builder: (context) {
               final selectedDate = calendarDays[_selectedScheduleDayIndex < calendarDays.length ? _selectedScheduleDayIndex : 0];
-              final dayBookings = _driverBookings.where((b) {
-                final rawDateStr = b['scheduled_at'] ?? b['created_at'] ?? '';
-                if (rawDateStr == null || rawDateStr.toString().isEmpty) return false;
-                try {
-                  final d = DateTime.parse(rawDateStr.toString());
-                  return d.year == selectedDate.year && d.month == selectedDate.month && d.day == selectedDate.day && b['status'] != 'cancelled';
-                } catch (_) {
-                  return false;
-                }
-              }).toList();
-
+              final dayBookings = _getBookingsForDate(selectedDate);
+              final slots = _computeHourlySlots(selectedDate, dayBookings);
+              final lockedHours = slots.where((s) => s['isLocked'] == true).length;
+              final freeHours = 14 - lockedHours;
               final count = dayBookings.length;
-              Color badgeColor = count == 0 ? const Color(0xFF10B981) : (count <= 2 ? const Color(0xFFF59E0B) : const Color(0xFFEF4444));
-              String statusLabel = count == 0 ? "Driver Kosong" : (count <= 2 ? "Masih Sedikit Pesanan" : "Sibuk / Full Booking");
+              final hasActive = dayBookings.any((b) => _isBookingWaitingOrActive(b['status']?.toString() ?? ''));
+
+              Color badgeColor = count == 0
+                  ? const Color(0xFF10B981)
+                  : (hasActive ? const Color(0xFFF59E0B) : (count >= 3 ? const Color(0xFFEF4444) : const Color(0xFF3B82F6)));
+              String statusLabel = count == 0
+                  ? "Driver Kosong (Bebas)"
+                  : (hasActive ? "⚠️ Ada Jadwal Terkunci ($count)" : "Jadwal Selesai ($count)");
 
               return Container(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.border),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: hasActive ? badgeColor.withOpacity(0.6) : AppTheme.border,
+                    width: hasActive ? 1.5 : 1.0,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3146,7 +3465,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                         Expanded(
                           child: Text(
                             "${_getDayName(selectedDate.weekday)}, ${selectedDate.day} ${_getFullMonthName(selectedDate.month)} ${selectedDate.year}",
-                            style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 13.5, fontWeight: FontWeight.bold),
+                            style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -3166,32 +3485,144 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                       ],
                     ),
                     const SizedBox(height: 12),
-                    Text(
-                      count == 0
-                          ? "Status: DRIVER KOSONG (0 Pesanan). Anda sepenuhnya bebas tugas pada tanggal ini."
-                          : "Terdapat $count kegiatan/pesanan terjadwal pada tanggal ini.",
-                      style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+                    if (hasActive) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF59E0B).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                "Terdapat $count pesanan terjadwal yang mengunci jam driver ($lockedHours Jam Terkunci). Jam di luar rentang pesanan tetap FREE & siap menerima pesanan.",
+                                style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11.5, height: 1.4),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ] else ...[
+                      Text(
+                        count == 0
+                            ? "Status: DRIVER KOSONG (0 Pesanan). Anda sepenuhnya bebas tugas pada tanggal ini dan siap menerima orderan kapan saja."
+                            : "Semua pesanan pada tanggal ini telah selesai diproses.",
+                        style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12, height: 1.4),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // Hours summary chips
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFEF4444).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.lock_rounded, color: Color(0xFFEF4444), size: 14),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    "$lockedHours Jam Kunci",
+                                    style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 14),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    "$freeHours Jam Free",
+                                    style: GoogleFonts.inter(color: const Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryPink.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.receipt_long_rounded, color: AppTheme.primaryPink, size: 14),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    "$count Order",
+                                    style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 16),
+
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
+                      child: ElevatedButton.icon(
                         onPressed: () {
                           _showDayScheduleBottomSheet(
                             context,
                             selectedDate,
-                            count == 0 ? "Kosong" : (count <= 2 ? "Sedikit" : "Sibuk"),
+                            statusLabel,
                             badgeColor,
                             count,
                             dayBookings,
+                            slots,
                           );
                         },
-                        icon: const Icon(Icons.format_list_bulleted_rounded, size: 16),
-                        label: const Text("LIHAT RINCIAN KEGIATAN"),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.primaryPink,
-                          side: const BorderSide(color: AppTheme.primaryPink),
+                        icon: const Icon(Icons.access_time_rounded, size: 16, color: Colors.white),
+                        label: Text(
+                          "LIHAT RINCIAN & JADWAL JAM",
+                          style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryPink,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          elevation: 0,
                         ),
                       ),
                     ),
@@ -3343,7 +3774,11 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     Color badgeColor,
     int count,
     List<Map<String, dynamic>> dayBookings,
+    List<Map<String, dynamic>> slots,
   ) {
+    final lockedHours = slots.where((s) => s['isLocked'] == true).length;
+    final freeHours = 14 - lockedHours;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.background,
@@ -3353,9 +3788,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
       isScrollControlled: true,
       builder: (ctx) {
         return Container(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(ctx).size.height * 0.75,
+            maxHeight: MediaQuery.of(ctx).size.height * 0.85,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -3363,11 +3798,11 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
             children: [
               Center(
                 child: Container(
-                  width: 40,
-                  height: 4,
+                  width: 44,
+                  height: 5,
                   decoration: BoxDecoration(
                     color: AppTheme.border,
-                    borderRadius: BorderRadius.circular(2),
+                    borderRadius: BorderRadius.circular(3),
                   ),
                 ),
               ),
@@ -3381,9 +3816,10 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          "Rincian Kegiatan Driver",
+                          "Rincian Jadwal & Ketersediaan Jam",
                           style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 16, fontWeight: FontWeight.bold),
                         ),
+                        const SizedBox(height: 2),
                         Text(
                           "${_getDayName(date.weekday)}, ${date.day} ${_getFullMonthName(date.month)} ${date.year}",
                           style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
@@ -3399,113 +3835,367 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                       border: Border.all(color: badgeColor),
                     ),
                     child: Text(
-                      count == 0 ? "DRIVER KOSONG" : (count <= 2 ? "SEDIKIT PESANAN" : "SIBUK / FULL"),
+                      count == 0 ? "DRIVER KOSONG" : (lockedHours > 0 ? "TERKUNCI ($lockedHours JAM)" : "SELESAI"),
                       style: GoogleFonts.inter(color: badgeColor, fontSize: 10.5, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
-              if (count == 0)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.border),
-                  ),
+              // Summary Stats Bar
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.border),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Column(
+                      children: [
+                        Text("$count", style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 2),
+                        Text("Total Order", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11)),
+                      ],
+                    ),
+                    Container(height: 24, width: 1, color: AppTheme.border),
+                    Column(
+                      children: [
+                        Text("$lockedHours Jam", style: GoogleFonts.plusJakartaSans(color: const Color(0xFFEF4444), fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 2),
+                        Text("Terkunci", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11)),
+                      ],
+                    ),
+                    Container(height: 24, width: 1, color: AppTheme.border),
+                    Column(
+                      children: [
+                        Text("$freeHours Jam", style: GoogleFonts.plusJakartaSans(color: const Color(0xFF10B981), fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 2),
+                        Text("Free / Luang", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              Flexible(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.event_available_rounded, color: const Color(0xFF10B981), size: 48),
-                      const SizedBox(height: 12),
-                      Text(
-                        "Driver Kosong (Bebas Tugas)",
-                        style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
+                      // SECTION 1: TIMELINE JAM PER JAM
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Status Jam Layanan (08:00 - 22:00 WIB)",
+                            style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            "Rentang 1 Jam",
+                            style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        "Tidak ada jadwal pesanan pada tanggal ini. Anda siap menerima pesanan masuk kapan saja.",
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: dayBookings.length,
-                    itemBuilder: (context, idx) {
-                      final item = dayBookings[idx];
-                      final status = item['status'] ?? 'pending';
-                      final price = item['total_price'] ?? 0;
-                      final pickup = item['pickup_address'] ?? 'Lokasi Penjemputan';
+                      const SizedBox(height: 10),
 
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: AppTheme.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: AppTheme.border),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      // Grid / List of hourly slots
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: slots.length,
+                        itemBuilder: (context, sIdx) {
+                          final slot = slots[sIdx];
+                          final isLocked = slot['isLocked'] == true;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: isLocked
+                                  ? const Color(0xFFEF4444).withOpacity(0.08)
+                                  : AppTheme.surface,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isLocked
+                                    ? const Color(0xFFEF4444).withOpacity(0.4)
+                                    : AppTheme.border,
+                              ),
+                            ),
+                            child: Row(
                               children: [
-                                Text(
-                                  "Pesanan #${item['id'].toString().substring(0, item['id'].toString().length > 6 ? 6 : item['id'].toString().length)}",
-                                  style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 13),
+                                Container(
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: isLocked
+                                        ? const Color(0xFFEF4444).withOpacity(0.15)
+                                        : const Color(0xFF10B981).withOpacity(0.15),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    isLocked ? Icons.lock_rounded : Icons.check_circle_outline_rounded,
+                                    color: isLocked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                                    size: 16,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        slot['label'] as String,
+                                        style: GoogleFonts.inter(
+                                          color: AppTheme.textHighContrast,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        isLocked
+                                            ? "Dipesan: ${slot['timeRangeString']} (${slot['clientName']})"
+                                            : "Driver Bebas & Siap Menerima Order",
+                                        style: GoogleFonts.inter(
+                                          color: isLocked ? const Color(0xFFEF4444) : AppTheme.textMuted,
+                                          fontSize: 11,
+                                          fontWeight: isLocked ? FontWeight.w600 : FontWeight.normal,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
-                                    color: AppTheme.primaryPink.withOpacity(0.15),
+                                    color: isLocked
+                                        ? const Color(0xFFEF4444).withOpacity(0.15)
+                                        : const Color(0xFF10B981).withOpacity(0.15),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
-                                    status.toString().toUpperCase(),
-                                    style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold),
+                                    isLocked ? "TERKUNCI" : "FREE",
+                                    style: GoogleFonts.inter(
+                                      color: isLocked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                const Icon(Icons.location_on_rounded, color: AppTheme.primaryPink, size: 16),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    pickup,
-                                    style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
+                          );
+                        },
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // SECTION 2: DAFTAR RINCIAN PESANAN TERKUNCI
+                      Text(
+                        "Daftar Rincian Pesanan ($count)",
+                        style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+
+                      if (dayBookings.isEmpty)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: AppTheme.surface,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppTheme.border),
+                          ),
+                          child: Column(
+                            children: [
+                              const Icon(Icons.event_available_rounded, color: Color(0xFF10B981), size: 40),
+                              const SizedBox(height: 8),
+                              Text(
+                                "Tidak Ada Pesanan Terjadwal",
+                                style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                "Jadwal driver pada tanggal ini sepenuhnya kosong dan siap menerima booking baru.",
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: dayBookings.length,
+                          itemBuilder: (context, idx) {
+                            final item = dayBookings[idx];
+                            final status = item['status']?.toString() ?? 'pending';
+                            final price = item['total_price'] ?? 0;
+                            final pickup = item['pickup_location'] ?? item['pickup_address'] ?? 'Lokasi Penjemputan';
+                            final dropoff = item['dropoff_location'] ?? item['dropoff_address'] ?? '';
+                            final bStart = _extractBookingDateTime(item);
+                            final dur = _extractBookingDurationHours(item);
+                            final bEnd = bStart?.add(Duration(hours: dur));
+
+                            final timeStr = bStart != null && bEnd != null
+                                ? "${bStart.hour.toString().padLeft(2, '0')}:${bStart.minute.toString().padLeft(2, '0')} - ${bEnd.hour.toString().padLeft(2, '0')}:${bEnd.minute.toString().padLeft(2, '0')} WIB"
+                                : "Waktu Fleksibel";
+
+                            final add = item['additional_details'] is Map ? item['additional_details'] as Map : null;
+                            final clientObj = item['users'] is Map ? item['users'] as Map : null;
+                            final clientName = clientObj?['full_name']?.toString() ??
+                                add?['client_name']?.toString() ??
+                                add?['user_name']?.toString() ??
+                                'Pelanggan Temenin Ajaa';
+                            final clientPhone = clientObj?['phone']?.toString() ?? add?['client_phone']?.toString() ?? '-';
+                            final serviceName = item['service_type']?.toString() ?? add?['service_name']?.toString() ?? 'Layanan Pendamping';
+
+                            final idStr = item['id']?.toString() ?? '';
+                            final displayId = idStr.length > 8 ? idStr.substring(0, 8) : idStr;
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: AppTheme.surface,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        "Pesanan #$displayId",
+                                        style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 13),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primaryPink.withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          status.toUpperCase(),
+                                          style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  "Tarif: Rp ${price.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}",
-                                  style: GoogleFonts.inter(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ],
+                                  const SizedBox(height: 10),
+
+                                  // Locked time banner
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEF4444).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.lock_clock_rounded, color: Color(0xFFEF4444), size: 16),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            "Jam Terkunci: $timeStr (Durasi: $dur Jam)",
+                                            style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 11.5, fontWeight: FontWeight.bold),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+
+                                  // Client info
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.person_outline_rounded, color: AppTheme.primaryPink, size: 16),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          "Pemesan: $clientName • $clientPhone",
+                                          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11.5),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+
+                                  // Service info
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.category_outlined, color: AppTheme.primaryPink, size: 16),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          "Layanan: $serviceName",
+                                          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11.5),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+
+                                  // Location info
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.location_on_outlined, color: AppTheme.primaryPink, size: 16),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          "Jemput: $pickup${dropoff.isNotEmpty ? ' -> $dropoff' : ''}",
+                                          style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        "Tarif: Rp ${price.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}",
+                                        style: GoogleFonts.inter(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 12.5),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
-                      );
-                    },
+                    ],
                   ),
                 ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                height: 46,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPink,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: Text(
+                    "Tutup",
+                    style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+              ),
             ],
           ),
         );
@@ -3520,9 +4210,33 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "Ulasan & Penilaian Pelanggan (${_driverReviews.length})",
-            style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 15, fontWeight: FontWeight.bold),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "Ulasan & Penilaian Pelanggan (${_driverReviews.length})",
+                style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+              if (_driverReviews.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF59E0B).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                      const SizedBox(width: 4),
+                      Text(
+                        (_driverReviews.map((r) => (r['rating'] as num).toDouble()).reduce((a, b) => a + b) / _driverReviews.length).toStringAsFixed(1),
+                        style: GoogleFonts.plusJakartaSans(color: const Color(0xFFF59E0B), fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 14),
           if (_driverReviews.isEmpty)
@@ -3547,6 +4261,13 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
           else
             Column(
               children: _driverReviews.map((r) {
+                final text = r['text']?.toString().trim() ?? '';
+                final hasText = text.isNotEmpty;
+                final author = r['author']?.toString() ?? 'Pelanggan';
+                final avatar = r['avatar']?.toString() ?? '';
+                final ratingVal = (r['rating'] as num).toDouble();
+                final driverNote = r['driver_note_to_client']?.toString();
+
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.all(14),
@@ -3559,20 +4280,96 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(r['author'] ?? 'Pelanggan', style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold)),
-                          Row(
-                            children: [
-                              const Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
-                              const SizedBox(width: 3),
-                              Text("${r['rating']}", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ],
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor: AppTheme.primaryPink.withOpacity(0.2),
+                            backgroundImage: (avatar.isNotEmpty && !avatar.contains('dummy'))
+                                ? NetworkImage(avatar)
+                                : null,
+                            child: (avatar.isEmpty || avatar.contains('dummy'))
+                                ? Text(
+                                    author.isNotEmpty ? author[0].toUpperCase() : 'P',
+                                    style: GoogleFonts.inter(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 14),
+                                  )
+                                : null,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  author,
+                                  style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                                if (r['date'] != null && r['date'].toString().isNotEmpty)
+                                  Text(
+                                    r['date'].toString(),
+                                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF59E0B).withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.star_rounded, color: Color(0xFFF59E0B), size: 14),
+                                const SizedBox(width: 3),
+                                Text(
+                                  ratingVal.toStringAsFixed(1),
+                                  style: GoogleFonts.inter(color: const Color(0xFFF59E0B), fontSize: 12, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      Text('"${r['text']}"', style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, fontStyle: FontStyle.italic)),
+                      if (hasText) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.background.withOpacity(0.5),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '"$text"',
+                            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, fontStyle: FontStyle.italic),
+                          ),
+                        ),
+                      ],
+                      if (driverNote != null && driverNote.trim().isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00FF7F).withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF00FF7F).withOpacity(0.3)),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.note_alt_rounded, size: 14, color: Color(0xFF00FF7F)),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  "Catatan Anda untuk klien: $driverNote",
+                                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 );

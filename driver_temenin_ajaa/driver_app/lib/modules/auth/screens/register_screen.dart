@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/services/auth_service.dart';
 import '../../../providers/auth_provider.dart';
 import '../../driver/screens/home_screen.dart';
 
@@ -29,7 +30,10 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
   int _resendTimerSeconds = 60;
   bool _canResendOtp = false;
   bool _isOtpVerified = false;
-  String _selectedOtpChannel = 'WhatsApp';
+  bool _isSendingOtp = false;
+  bool _isVerifyingOtp = false;
+  String _sentViaChannel = '';
+  String _selectedOtpChannel = 'Voice Call OTP';
   
   // Step 3: Operational Cities
   final List<String> _cities = [
@@ -117,96 +121,122 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
     });
   }
 
-  // Handle OTP request simulation
-  void _requestOtp() {
-    if (_phoneController.text.trim().isEmpty) {
+  // Handle real OTP request via Zenziva Gateway API
+  Future<void> _requestOtp() async {
+    final phone = _phoneController.text.trim();
+    if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Masukkan nomor HP Anda terlebih dahulu')),
       );
       return;
     }
-    
-    // Simulate generating an OTP code
-    final generatedOtp = "123456";
-    
-    // Show WhatsApp-style SnackBar with SALIN action exactly like the client app
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFF121B22),
-        content: Row(
-          children: [
-            const Icon(Icons.mark_chat_unread_rounded, color: Color(0xFF25D366), size: 28),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'WhatsApp Simulator',
-                    style: GoogleFonts.inter(
-                      color: const Color(0xFF25D366),
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'Kode verifikasi unik Anda adalah: $generatedOtp. Jangan bagikan kode ini kepada siapapun.',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontSize: 13,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        duration: const Duration(seconds: 15),
-        action: SnackBarAction(
-          label: 'SALIN',
-          textColor: const Color(0xFF25D366),
-          onPressed: () {
-            setState(() {
-              _otpController.text = generatedOtp;
-            });
-            // Automatically verify the OTP immediately after it is pasted!
-            Future.delayed(const Duration(milliseconds: 300), () {
-              if (mounted) _verifyOtp();
-            });
-          },
-        ),
-      ),
-    );
 
-    _startOtpTimer();
-    _pageController.nextPage(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    setState(() => _isSendingOtp = true);
+
+    try {
+      final res = await AuthService().sendOtp(phone, channel: _selectedOtpChannel);
+      if (!mounted) return;
+      setState(() => _isSendingOtp = false);
+
+      if (res['success'] == true) {
+        final channelName = res['channel'] ?? _selectedOtpChannel;
+        _sentViaChannel = channelName.toString();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF10B981),
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    res['message'] ?? 'Kode OTP berhasil dikirim via $channelName!',
+                    style: GoogleFonts.inter(color: Colors.white, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+
+        _startOtpTimer();
+        _pageController.nextPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.redAccent,
+            content: Text(res['message'] ?? 'Gagal mengirim kode OTP'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSendingOtp = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: Colors.redAccent,
+          content: Text('Terjadi kesalahan pengiriman OTP: $e'),
+        ),
+      );
+    }
   }
 
-  // Handle OTP verification simulation
-  void _verifyOtp() {
-    if (_otpController.text.length < 6) {
+  // Handle real OTP verification via backend / Supabase
+  Future<void> _verifyOtp() async {
+    final phone = _phoneController.text.trim();
+    final otp = _otpController.text.trim();
+
+    if (otp.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Masukkan 6 digit kode OTP')),
       );
       return;
     }
-    setState(() {
-      _isOtpVerified = true;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Verifikasi OTP Berhasil!'),
-        backgroundColor: Colors.green,
-      ),
-    );
-    _pageController.nextPage(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+
+    setState(() => _isVerifyingOtp = true);
+
+    try {
+      final res = await AuthService().verifyOtp(phone, otp);
+      if (!mounted) return;
+      setState(() => _isVerifyingOtp = false);
+
+      if (res['success'] == true) {
+        setState(() {
+          _isOtpVerified = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Verifikasi OTP Berhasil!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        _pageController.nextPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message'] ?? 'Kode OTP salah atau telah kedaluwarsa'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isVerifyingOtp = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gagal verifikasi OTP: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 
   // Real Document Capture / Upload
@@ -497,7 +527,7 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
           
           // OTP Delivery Channel Option
           Text(
-            "PILIH SALURAN PENGIRIMAN OTP",
+            "PILIH SALURAN PENGIRIMAN OTP (ZENZIVA GATEWAY)",
             style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold, color: AppTheme.primaryPink),
           ),
           const SizedBox(height: 12),
@@ -505,12 +535,42 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
             children: [
               Expanded(
                 child: GestureDetector(
+                  onTap: () => setState(() => _selectedOtpChannel = 'Voice Call OTP'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: _selectedOtpChannel == 'Voice Call OTP' 
+                          ? AppTheme.primaryPink.withOpacity(0.15) 
+                          : AppTheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: _selectedOtpChannel == 'Voice Call OTP' 
+                            ? AppTheme.primaryPink 
+                            : Colors.white.withOpacity(0.05)
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        const Icon(Icons.phone_in_talk_rounded, color: Colors.orangeAccent, size: 22),
+                        const SizedBox(height: 6),
+                        Text(
+                          "Panggilan",
+                          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                        )
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GestureDetector(
                   onTap: () => setState(() => _selectedOtpChannel = 'WhatsApp'),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                     decoration: BoxDecoration(
                       color: _selectedOtpChannel == 'WhatsApp' 
-                          ? AppTheme.primaryPink.withOpacity(0.1) 
+                          ? AppTheme.primaryPink.withOpacity(0.15) 
                           : AppTheme.surface,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
@@ -521,26 +581,26 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
                     ),
                     child: Column(
                       children: [
-                        const Icon(Icons.chat_bubble_rounded, color: Colors.greenAccent, size: 24),
-                        const SizedBox(height: 8),
+                        const Icon(Icons.chat_bubble_rounded, color: Colors.greenAccent, size: 22),
+                        const SizedBox(height: 6),
                         Text(
                           "WhatsApp",
-                          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                         )
                       ],
                     ),
                   ),
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 8),
               Expanded(
                 child: GestureDetector(
                   onTap: () => setState(() => _selectedOtpChannel = 'SMS'),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                     decoration: BoxDecoration(
                       color: _selectedOtpChannel == 'SMS' 
-                          ? AppTheme.primaryPink.withOpacity(0.1) 
+                          ? AppTheme.primaryPink.withOpacity(0.15) 
                           : AppTheme.surface,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
@@ -551,11 +611,11 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
                     ),
                     child: Column(
                       children: [
-                        const Icon(Icons.sms_rounded, color: Colors.blueAccent, size: 24),
-                        const SizedBox(height: 8),
+                        const Icon(Icons.sms_rounded, color: Colors.blueAccent, size: 22),
+                        const SizedBox(height: 6),
                         Text(
                           "SMS",
-                          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                         )
                       ],
                     ),
@@ -564,22 +624,49 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 48),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.amber.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.amber.withOpacity(0.2)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.info_outline_rounded, color: Colors.amber, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "Panggilan Suara otomatis Zenziva akan menelepon nomor HP Anda untuk mendiktekan kode OTP.",
+                    style: GoogleFonts.inter(color: Colors.amber.shade200, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 36),
           
           // Submit Button
           SizedBox(
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: _requestOtp,
+              onPressed: _isSendingOtp ? null : _requestOtp,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryPink,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
-              child: Text(
-                "KIRIM KODE OTP",
-                style: GoogleFonts.poppins(color: const Color(0xFF4A1031), fontWeight: FontWeight.bold, fontSize: 14),
-              ),
+              child: _isSendingOtp
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(color: Color(0xFF4A1031), strokeWidth: 2),
+                    )
+                  : Text(
+                      "KIRIM KODE OTP",
+                      style: GoogleFonts.poppins(color: const Color(0xFF4A1031), fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
             ),
           )
         ],
@@ -600,8 +687,10 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            "Kami telah mengirimkan 6 digit kode OTP ke nomor +62 ${_phoneController.text} via $_selectedOtpChannel",
-            style: GoogleFonts.poppins(fontSize: 13, color: Colors.white54),
+            _sentViaChannel.isNotEmpty
+                ? "Kode OTP 6 digit telah dikirim ke nomor ${_phoneController.text} melalui $_sentViaChannel (Zenziva Gateway)."
+                : "Kami telah mengirimkan 6 digit kode OTP ke nomor ${_phoneController.text} via $_selectedOtpChannel",
+            style: GoogleFonts.poppins(fontSize: 13, color: Colors.white70, height: 1.4),
           ),
           const SizedBox(height: 32),
           
@@ -631,20 +720,26 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
                 contentPadding: EdgeInsets.symmetric(vertical: 16),
               ),
               onChanged: (val) {
-                if (val.length == 6) {
+                if (val.length == 6 && !_isVerifyingOtp) {
                   _verifyOtp();
                 }
               },
             ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            "💡 Jika menerima panggilan dari Zenziva, masukkan 6 digit kode yang disebutkan. (Kode sandbox: 123456)",
+            style: GoogleFonts.poppins(fontSize: 11, color: Colors.amber.shade300, fontStyle: FontStyle.italic),
           ),
           const SizedBox(height: 24),
           
           // Resend section
           Center(
             child: _canResendOtp 
-              ? TextButton(
-                  onPressed: _startOtpTimer,
-                  child: Text(
+              ? TextButton.icon(
+                  onPressed: _isSendingOtp ? null : _requestOtp,
+                  icon: const Icon(Icons.refresh_rounded, color: AppTheme.primaryPink, size: 18),
+                  label: Text(
                     "Kirim ulang kode OTP",
                     style: GoogleFonts.poppins(color: AppTheme.primaryPink, fontWeight: FontWeight.bold),
                   ),
@@ -661,15 +756,21 @@ class _DriverRegisterScreenState extends State<DriverRegisterScreen> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: _verifyOtp,
+              onPressed: _isVerifyingOtp ? null : _verifyOtp,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.roseGold,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
-              child: Text(
-                "VERIFIKASI OTP",
-                style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-              ),
+              child: _isVerifyingOtp
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : Text(
+                      "VERIFIKASI OTP",
+                      style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
             ),
           )
         ],

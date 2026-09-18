@@ -5,6 +5,9 @@ enum NotificationType {
   orderCancelled,
   orderNegotiation,
   systemAlert,
+  newMessage,
+  dpPaid,
+  pelunasanPaid,
 }
 
 class DriverNotificationModel {

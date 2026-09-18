@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../core/theme/app_theme.dart';
+import 'edit_profile_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -656,7 +657,10 @@ class _SettingsPageState extends State<SettingsPage> {
               subtitle: 'Change your personal information',
               value: '',
               onTap: () {
-                Navigator.pushNamed(context, '/edit-profile');
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const EditProfilePage()),
+                );
               },
               icon: Icons.person_outline,
             ),

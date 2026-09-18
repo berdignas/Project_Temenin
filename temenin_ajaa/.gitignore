@@ -11,6 +11,11 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
+.env
+.env.*
+!.env.example
+android/local.properties
+
 
 # IntelliJ related
 *.iml

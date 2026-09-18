@@ -6,6 +6,9 @@ import '../../../data/models/booking_model.dart';
 import '../../../data/models/driver_notification_model.dart';
 import '../../../providers/booking_provider.dart';
 import 'driver_negotiation_screen.dart';
+import 'chat_room_screen.dart';
+import 'active_booking_screen.dart';
+import 'driver_waiting_countdown_screen.dart';
 
 class OpenOffersScreen extends StatefulWidget {
   const OpenOffersScreen({super.key});
@@ -161,12 +164,48 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> with SingleTickerPr
           onTap: () {
             provider.markNotificationAsRead(notif.id);
             if (notif.booking != null) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => DriverNegotiationScreen(bookingData: notif.booking!),
-                ),
-              );
+              if (notif.type == NotificationType.newMessage) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => DriverChatRoomScreen(
+                      bookingId: notif.booking!.id,
+                      clientName: notif.booking!.client?.fullName ?? 'Pelanggan',
+                      clientImage: notif.booking!.client?.avatarUrl ?? notif.booking!.client?.profileImage ?? '',
+                    ),
+                  ),
+                );
+              } else if (notif.type == NotificationType.dpPaid) {
+                if (notif.booking != null) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DriverWaitingCountdownScreen(bookingData: notif.booking!),
+                    ),
+                  );
+                } else {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const DriverActiveBookingScreen(),
+                    ),
+                  );
+                }
+              } else if (notif.booking != null && !notif.booking!.isFlexible) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => DriverWaitingCountdownScreen(bookingData: notif.booking!),
+                  ),
+                );
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => DriverNegotiationScreen(bookingData: notif.booking!),
+                  ),
+                );
+              }
             }
           },
           child: Container(
@@ -189,7 +228,15 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> with SingleTickerPr
                     color: AppTheme.primaryPink.withOpacity(0.15),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.bolt_rounded, color: AppTheme.primaryPink, size: 20),
+                  child: Icon(
+                    notif.type == NotificationType.newMessage
+                        ? Icons.chat_bubble_rounded
+                        : (notif.type == NotificationType.orderCancelled
+                            ? Icons.cancel_rounded
+                            : Icons.bolt_rounded),
+                    color: AppTheme.primaryPink,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -346,12 +393,16 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> with SingleTickerPr
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppTheme.primaryPink.withOpacity(0.12),
+                  color: (offer.isFlexible ? AppTheme.primaryPink : const Color(0xFF10B981)).withOpacity(0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  "CUSTOM",
-                  style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontSize: 9, fontWeight: FontWeight.w800),
+                  offer.isFlexible ? "FLEKSIBEL" : "TARIF PAS",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: offer.isFlexible ? AppTheme.primaryPink : const Color(0xFF10B981),
+                    fontSize: 9, 
+                    fontWeight: FontWeight.w800
+                  ),
                 ),
               )
             ],
@@ -370,30 +421,54 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> with SingleTickerPr
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Penawaran Harga:", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10)),
+                  Text(offer.isFlexible ? "Tawaran Klien:" : "Tarif Resmi Platform:", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10)),
                   Text(
                     "Rp ${_formatPrice(offer.totalPrice)}",
-                    style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontWeight: FontWeight.w800, fontSize: 16),
+                    style: GoogleFonts.plusJakartaSans(
+                      color: offer.isFlexible ? AppTheme.primaryPink : const Color(0xFF10B981), 
+                      fontWeight: FontWeight.w800, 
+                      fontSize: 16
+                    ),
                   ),
                 ],
               ),
-              ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => DriverNegotiationScreen(bookingData: offer),
-                    ),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryPink,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              if (offer.isFlexible)
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => DriverNegotiationScreen(bookingData: offer),
+                      ),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPink,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  ),
+                  child: Text("Tawar / Nego", style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 12)),
+                )
+              else
+                ElevatedButton(
+                  onPressed: () async {
+                    final bookingProvider = Provider.of<BookingProvider>(context, listen: false);
+                    final success = await bookingProvider.acceptBooking(offer.id);
+                    if (context.mounted && success) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text("Pesanan berhasil diterima dengan tarif resmi platform!")),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  ),
+                  child: Text("Terima Pesanan", style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
-                child: Text("Beli / Tawar", style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 12)),
-              ),
             ],
           )
         ],

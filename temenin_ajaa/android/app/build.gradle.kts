@@ -5,6 +5,33 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+import java.util.Properties
+import java.io.FileInputStream
+import java.io.File
+
+val localProperties = Properties()
+val localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localProperties.load(FileInputStream(localPropertiesFile))
+}
+
+// Read API Key from local.properties or .env in project root
+var mapsKey = localProperties.getProperty("GOOGLE_MAPS_API_KEY") ?: localProperties.getProperty("MAPS_API_KEY") ?: ""
+if (mapsKey.isEmpty()) {
+    val envFile = File(rootDir.parentFile, ".env")
+    if (envFile.exists()) {
+        envFile.forEachLine { line ->
+            val trimmed = line.trim()
+            if (trimmed.startsWith("GOOGLE_MAPS_API_KEY=")) {
+                mapsKey = trimmed.substringAfter("GOOGLE_MAPS_API_KEY=").trim().trim('"', '\'')
+            }
+        }
+    }
+}
+if (mapsKey.isEmpty()) {
+    mapsKey = System.getenv("GOOGLE_MAPS_API_KEY") ?: ""
+}
+
 android {
     namespace = "com.example.temenin_ajaa"
     compileSdk = flutter.compileSdkVersion

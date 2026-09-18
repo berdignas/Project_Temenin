@@ -11,6 +11,8 @@ class UserModel {
   final bool isVerified;
   final DateTime? createdAt;
 
+  String get profileImage => avatarUrl ?? '';
+
   UserModel({
     required this.id,
     required this.email,

@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/providers/auth_provider.dart';
 import 'package:temenin_ajaa/providers/driver_provider.dart';
 import 'package:temenin_ajaa/providers/client_booking_provider.dart';
+import 'package:temenin_ajaa/providers/client_notification_provider.dart';
 import 'package:temenin_ajaa/data/models/user_model.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/modules/clients/screens/profile_completion_screen.dart';
@@ -17,6 +18,12 @@ import 'package:temenin_ajaa/modules/clients/driver/screens/partner_list_screen.
 import 'package:temenin_ajaa/modules/clients/pages/booking_history_page.dart';
 import 'package:temenin_ajaa/modules/clients/chat/screens/chat_list_screen.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/booking_type_selector_screen.dart';
+import 'package:temenin_ajaa/modules/clients/booking/screens/virtual_call_booking_screen.dart';
+import 'package:temenin_ajaa/modules/clients/booking/screens/sleep_call_booking_screen.dart';
+import 'package:temenin_ajaa/modules/clients/booking/screens/gaming_buddy_booking_screen.dart';
+import 'package:temenin_ajaa/modules/clients/booking/screens/call_lobby_screen.dart';
+import 'package:temenin_ajaa/modules/clients/booking/screens/call_room_screen.dart';
+import 'package:temenin_ajaa/core/utils/booking_date_helper.dart';
 import 'package:temenin_ajaa/modules/clients/pages/notifications_page.dart';
 import 'package:temenin_ajaa/modules/clients/pages/rewards_page.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/antar_jemput_booking_screen.dart';
@@ -26,19 +33,22 @@ import 'package:temenin_ajaa/core/services/reward_service.dart';
 import 'package:temenin_ajaa/modules/clients/community/screens/community_feed_screen.dart';
 import 'package:temenin_ajaa/modules/clients/matching/screens/smart_match_screen.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/tracking_driver_screen.dart';
+import 'package:temenin_ajaa/modules/clients/booking/screens/client_waiting_countdown_screen.dart';
 import 'package:temenin_ajaa/modules/clients/driver/screens/partner_profile_screen.dart';
 import 'package:temenin_ajaa/modules/clients/pages/help_center_page.dart';
+import 'package:temenin_ajaa/modules/clients/events/screens/event_detail_screen.dart';
+import 'package:temenin_ajaa/core/services/location_service.dart';
 
 // ============================================================
 // 02 - Color System (Clean Modern Fuchsia + Putih + Abu-abu Terang)
 // ============================================================
 class AppColors {
-  // Core Palette - Signature Pink + Deep Dark Void
-  static const Color deepVoid = Color(0xFF0B0B0F);     // Pure Obsidian Black
-  static const Color obsidian = Color(0xFF16151A);     // Elevated Dark Card
-  static const Color elevatedDark = Color(0xFF24222A); // Sub-surface Container / Chip
-  static const Color electricPink = Color(0xFFFF4DA6); // Signature Electric Pink Fuchsia
-  static const Color roseGold = Color(0xFFDB2777);     // Fuchsia Secondary / Rose
+  // Core Palette - Clean Fuchsia Light Mode
+  static const Color deepVoid = Color(0xFFFAFAFA);     // Clean Light Background
+  static const Color obsidian = Color(0xFFFFFFFF);     // White Card Surface
+  static const Color elevatedDark = Color(0xFFF5EBF2); // Soft Blush Container
+  static const Color electricPink = Color(0xFFEC4899); // Fuchsia Primary
+  static const Color roseGold = Color(0xFFDB2777);     // Deep Fuchsia Secondary
 
   // Status Colors
   static const Color success = Color(0xFF10B981);
@@ -47,8 +57,8 @@ class AppColors {
   static const Color info = Color(0xFF3B82F6);
 
   // Text
-  static const Color textMain = Color(0xFFFFFFFF); // Pure White
-  static const Color textMuted = Color(0xFF94A3B8); // Slate 400
+  static const Color textMain = Color(0xFF1E1B2E); // Deep Plum
+  static const Color textMuted = Color(0xFF9B8A9D); // Muted Plum
 
   // Gradients
   static const LinearGradient brandGradient = LinearGradient(
@@ -58,16 +68,16 @@ class AppColors {
   );
 
   static const LinearGradient glassGradient = LinearGradient(
-    colors: [Color(0x33FF4DA6), Color(0x1AFF4DA6)],
+    colors: [Color(0x1AEC4899), Color(0x0DEC4899)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient darkBgGradient = LinearGradient(
     colors: [
-      Color(0xFF0B0B0F),
-      Color(0xFF1A0A16),
-      Color(0xFF0B0B0F),
+      Color(0xFFFAFAFA),
+      Color(0xFFFDF2F8),
+      Color(0xFFFAFAFA),
     ],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
@@ -170,6 +180,17 @@ class _HomeLoggedInScreenState extends State<HomeLoggedInScreen> {
     const ChatListScreen(),
     const ProfileTab(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Otomatis cek apakah GPS/Lokasi menyala saat membuka halaman utama
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        LocationService.checkAndPromptLocation(context);
+      }
+    });
+  }
 
 
 
@@ -459,12 +480,14 @@ class _HomeContentState extends State<HomeContent> {
   ];
 
   bool _isLoadingPromosEvents = false;
+  List<Map<String, dynamic>> _communityReviews = [];
 
   @override
   void initState() {
     super.initState();
     _loadUserPoints();
     _fetchPromosAndEvents();
+    _fetchCommunityReviews();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndShowVerificationPopup();
       try {
@@ -476,6 +499,7 @@ class _HomeContentState extends State<HomeContent> {
       if (authProvider.user != null) {
         try {
           context.read<ClientBookingProvider>().subscribeToClientBookings(authProvider.user!.id);
+          context.read<ClientNotificationProvider>().subscribeToNotifications(authProvider.user!.id);
         } catch (_) {}
       }
     });
@@ -562,6 +586,35 @@ class _HomeContentState extends State<HomeContent> {
     }
   }
 
+  Future<void> _fetchCommunityReviews() async {
+    try {
+      final List<dynamic> rows = await Supabase.instance.client
+          .from('reviews')
+          .select('*, users(full_name, avatar_url)')
+          .order('created_at', ascending: false)
+          .limit(10);
+
+      if (rows.isNotEmpty && mounted) {
+        setState(() {
+          _communityReviews = rows.map((r) {
+            final u = r['users'] ?? {};
+            final author = u['full_name']?.toString().trim();
+            final comment = r['comment']?.toString().trim() ?? '';
+            return {
+              'name': (author != null && author.isNotEmpty) ? author : 'Pelanggan',
+              'role': 'Verified Review',
+              'comment': comment,
+              'rating': double.tryParse(r['rating']?.toString() ?? '5.0')?.toStringAsFixed(1) ?? '5.0',
+              'avatar': u['avatar_url']?.toString() ?? '',
+            };
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching community reviews: $e');
+    }
+  }
+
   void _updateTier() {
     if (_totalPoints >= 30000) {
       _currentTier = 'Diamond';
@@ -594,7 +647,7 @@ class _HomeContentState extends State<HomeContent> {
   void _showBookingModal(BuildContext context, String partnerName, double rating) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.obsidian,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
           topLeft: Radius.circular(28),
@@ -604,7 +657,7 @@ class _HomeContentState extends State<HomeContent> {
       builder: (context) {
         return Container(
           padding: const EdgeInsets.all(24),
-          color: AppColors.obsidian,
+          color: Colors.white,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -726,9 +779,9 @@ class _HomeContentState extends State<HomeContent> {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppColors.obsidian,
+          color: const Color(0xFFFDF2F8),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.elevatedDark),
+          border: Border.all(color: const Color(0xFFF0E4EC)),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -843,68 +896,198 @@ class _HomeContentState extends State<HomeContent> {
     final clientBooking = context.watch<ClientBookingProvider>().currentBooking;
     if (clientBooking == null) return const SizedBox.shrink();
 
-    final status = clientBooking['status']?.toString() ?? 'pending';
-    final activeStatuses = ['pending', 'accepted', 'confirmed', 'on_the_way', 'arrived', 'started', 'ongoing', 'in_progress'];
+    final status = clientBooking['status']?.toString().toLowerCase() ?? 'pending';
+    final activeStatuses = ['pending', 'accepted', 'confirmed', 'on_the_way', 'arrived', 'started', 'ongoing', 'in_progress', 'dp_paid'];
     if (!activeStatuses.contains(status)) return const SizedBox.shrink();
+
+    // Check if completed/paid
+    final add = clientBooking['additional_details'] is Map
+        ? clientBooking['additional_details'] as Map
+        : (clientBooking['additionalDetails'] is Map ? clientBooking['additionalDetails'] as Map : null);
+    final sub = add?['sub_status']?.toString().toLowerCase();
+    if (status == 'completed' || status == 'paid' || status == 'selesai' || sub == 'completed' || sub == 'paid' || sub == 'selesai' || add?['pelunasan_paid'] == true || add?['has_reviewed'] == true || add?['review'] != null || add?['payment_status'] == 'LUNAS') {
+      return const SizedBox.shrink();
+    }
+
+    // Check if scheduled for a future date
+    final now = DateTime.now();
+    final scheduledDt = BookingDateHelper.extractScheduledDateTime(clientBooking);
+    final isFutureSchedule = scheduledDt != null && 
+        (scheduledDt.year > now.year ||
+         (scheduledDt.year == now.year && scheduledDt.month > now.month) ||
+         (scheduledDt.year == now.year && scheduledDt.month == now.month && scheduledDt.day > now.day));
 
     final bookingId = clientBooking['id']?.toString() ?? '';
     final driver = clientBooking['driver'] as Map<String, dynamic>?;
     final pickup = clientBooking['pickup_location'] ?? clientBooking['pickup'] ?? 'Lokasi Penjemputan';
     final destination = clientBooking['dropoff_location'] ?? clientBooking['destination'] ?? 'Lokasi Tujuan';
 
+    final hasAssignedPartner = driver != null || 
+                               clientBooking['driver_id'] != null || 
+                               (clientBooking['driverName'] != null && 
+                                !clientBooking['driverName'].toString().toLowerCase().contains('radar') &&
+                                !clientBooking['driverName'].toString().toLowerCase().contains('open bid'));
+
+    final isDpPaid = status == 'dp_paid' || add?['dp_paid'] == true || sub == 'dp_paid';
+
+    String headerLabel = "PESANAN AKTIF";
     String statusText = 'Pesanan Sedang Diproses';
     Color statusColor = AppTheme.primaryPink;
 
-    switch (status) {
-      case 'pending':
-        statusText = 'Mencari Partner Terdekat... 📡';
-        break;
-      case 'accepted':
-      case 'confirmed':
-        statusText = 'Partner Mengonfirmasi Pesanan ✔';
-        statusColor = const Color(0xFF00FF7F);
-        break;
-      case 'on_the_way':
-        statusText = 'Driver Sedang Menuju Ke Lokasi Anda 🛵';
-        statusColor = const Color(0xFF00E5FF);
-        break;
-      case 'arrived':
-        statusText = 'Driver Sudah Sampai Di Lokasi Penjemputan 📍';
-        statusColor = const Color(0xFF00FF7F);
-        break;
-      case 'started':
-      case 'ongoing':
-      case 'in_progress':
-        statusText = 'Perjalanan / Layanan Sedang Berlangsung ✨';
-        statusColor = const Color(0xFF9D6BFF);
-        break;
+    if (isFutureSchedule && isDpPaid) {
+      final schedDisplay = BookingDateHelper.getScheduleDisplay(clientBooking);
+      headerLabel = "JADWAL RESERVASI MENDATANG";
+      statusText = "Jadwal Terkonfirmasi: $schedDisplay";
+      statusColor = const Color(0xFF00FF7F);
+    } else {
+      switch (status) {
+        case 'pending':
+          headerLabel = "MENUNGGU RESPON";
+          statusText = hasAssignedPartner 
+              ? 'Menunggu Konfirmasi Partner... ⏳' 
+              : 'Mencari Partner Terdekat... 📡';
+          statusColor = const Color(0xFFF59E0B);
+          break;
+        case 'accepted':
+          headerLabel = "MENUNGGU PEMBAYARAN DP";
+          statusText = 'Partner Menyetujui! Silakan Bayar DP';
+          statusColor = const Color(0xFFF59E0B);
+          break;
+        case 'confirmed':
+        case 'dp_paid':
+          headerLabel = "DP TERBAYAR • JADWAL AMAN";
+          statusText = 'Partner Mengonfirmasi Pesanan ✔';
+          statusColor = const Color(0xFF00FF7F);
+          break;
+        case 'on_the_way':
+          headerLabel = "DRIVER MENUJU LOKASI";
+          statusText = 'Driver Sedang Menuju Ke Lokasi Anda 🛵';
+          statusColor = const Color(0xFF00E5FF);
+          break;
+        case 'arrived':
+          headerLabel = "DRIVER TELAH TIBA";
+          statusText = 'Driver Sudah Sampai Di Lokasi Penjemputan 📍';
+          statusColor = const Color(0xFF00FF7F);
+          break;
+        case 'started':
+        case 'ongoing':
+        case 'in_progress':
+          headerLabel = "PESANAN BERLANGSUNG";
+          statusText = 'Perjalanan / Layanan Sedang Berlangsung ✨';
+          statusColor = const Color(0xFF9D6BFF);
+          break;
+      }
+    }
+
+    final sTypeLower = (clientBooking['serviceType'] ?? clientBooking['service_type'] ?? add?['service_type'] ?? add?['serviceType'] ?? '').toString().toLowerCase();
+    IconData cardIcon = Icons.directions_car_rounded;
+    if (sTypeLower.contains('hangout')) {
+      cardIcon = Icons.local_cafe_rounded;
+    } else if (sTypeLower.contains('game') || sTypeLower.contains('gaming') || sTypeLower.contains('mabar')) {
+      cardIcon = Icons.sports_esports_rounded;
+    } else if (sTypeLower.contains('sleep')) {
+      cardIcon = Icons.bedtime_rounded;
+    } else if (sTypeLower.contains('curhat') || sTypeLower.contains('counseling')) {
+      cardIcon = Icons.psychology_rounded;
     }
 
     return GestureDetector(
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => TrackingDriverScreen(
-              bookingId: bookingId,
-              bookingData: clientBooking,
+        final st = clientBooking['status']?.toString().toLowerCase();
+        final sType = (clientBooking['serviceType'] ?? clientBooking['service_type'] ?? add?['service_type'] ?? add?['serviceType'] ?? '').toString().toLowerCase();
+        final isVirtual = clientBooking['service_category'] == 'VIRTUAL' ||
+                          clientBooking['is_virtual'] == true ||
+                          add?['service_category'] == 'VIRTUAL' ||
+                          add?['is_virtual'] == true ||
+                          sType.contains('gaming') ||
+                          sType.contains('mabar') ||
+                          sType.contains('sleep') ||
+                          sType.contains('telepon') ||
+                          sType.contains('curhat') ||
+                          sType.contains('counseling') ||
+                          sType.contains('virtual');
+
+        // ROUTE 1: LAYANAN VIRTUAL (Gaming Buddy, Sleep Call, Telepon Curhat)
+        if (isVirtual) {
+          final isOngoing = st == 'ongoing' || st == 'started' || st == 'in_progress' || sub == 'ongoing' || sub == 'started';
+          final partner = clientBooking['driver'] as Map<String, dynamic>? ?? add?['driver'] as Map<String, dynamic>?;
+          final partnerName = partner?['name'] ?? partner?['fullName'] ?? clientBooking['driverName'] ?? add?['driverName'] ?? 'Mitra Gamer';
+          final durationMins = clientBooking['call_duration_minutes'] ?? clientBooking['duration'] ?? add?['duration'] ?? 60;
+          final isSleep = sType.contains('sleep');
+          final topic = clientBooking['chat_topic'] ?? add?['chat_topic'] ?? add?['game_name'] ?? 'Mabar & Voice Chat';
+
+          if (isOngoing) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CallRoomScreen(
+                  partnerName: partnerName.toString(),
+                  serviceType: clientBooking['serviceType']?.toString() ?? add?['serviceType']?.toString() ?? (sType.contains('gaming') ? 'Gaming Buddy (Mabar)' : 'Pendampingan Virtual'),
+                  durationMinutes: (durationMins is num) ? durationMins.toInt() : 60,
+                  isSleepCall: isSleep,
+                  topicOrAlarm: topic.toString(),
+                  bookingId: bookingId,
+                ),
+              ),
+            );
+          } else {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CallLobbyScreen(
+                  bookingDetails: clientBooking,
+                  bookingId: bookingId,
+                ),
+              ),
+            );
+          }
+          return;
+        }
+
+        // ROUTE 2: LAYANAN OFFLINE (Tatap Muka & Perjalanan)
+        final isCountdownEnded = add?['countdown_ended'] == true;
+        final isWaiting = (st == 'accepted' || st == 'dp_paid' || sub == 'dp_paid' || (sub == null && st != 'on_the_way' && st != 'arrived' && st != 'started' && st != 'ongoing' && st != 'completed' && st != 'paid'));
+
+        if (isWaiting && !isCountdownEnded) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ClientWaitingCountdownScreen(
+                bookingId: bookingId,
+                bookingData: clientBooking,
+              ),
             ),
-          ),
-        );
+          );
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TrackingDriverScreen(
+                bookingId: bookingId,
+                bookingData: clientBooking,
+              ),
+            ),
+          );
+        }
       },
       child: Container(
         margin: const EdgeInsets.only(bottom: 4),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppTheme.surface,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: statusColor, width: 1.5),
+          border: Border.all(color: statusColor.withOpacity(0.3), width: 1.5),
           boxShadow: [
             BoxShadow(
-              color: statusColor.withOpacity(0.2),
-              blurRadius: 12,
+              color: statusColor.withOpacity(0.12),
+              blurRadius: 16,
               offset: const Offset(0, 4),
-            )
+            ),
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
           ],
         ),
         child: Column(
@@ -918,7 +1101,7 @@ class _HomeContentState extends State<HomeContent> {
                     color: statusColor.withOpacity(0.15),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.directions_car_rounded, color: statusColor, size: 20),
+                  child: Icon(cardIcon, color: statusColor, size: 20),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -926,7 +1109,7 @@ class _HomeContentState extends State<HomeContent> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        "PESANAN BERLANGSUNG",
+                        headerLabel,
                         style: GoogleFonts.plusJakartaSans(
                           color: statusColor,
                           fontSize: 10,
@@ -974,7 +1157,7 @@ class _HomeContentState extends State<HomeContent> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: AppTheme.cardDeep,
+                color: const Color(0xFFFDF2F8),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -1074,52 +1257,71 @@ class _HomeContentState extends State<HomeContent> {
           ),
         ),
         // Navigasi Atas: Notifikasi
-        GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const NotificationsPage()),
+        Builder(
+          builder: (context) {
+            final unreadCount = context.watch<ClientNotificationProvider>().unreadCount;
+            return GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const NotificationsPage()),
+                );
+              },
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFF0E4EC), width: 1.2),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.04),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    const Icon(
+                      Icons.notifications_none_rounded,
+                      color: AppColors.textMain,
+                      size: 26,
+                    ),
+                    if (unreadCount > 0)
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: BoxDecoration(
+                            color: AppColors.electricPink,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppColors.obsidian, width: 1.5),
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 16,
+                            minHeight: 16,
+                          ),
+                          child: Center(
+                            child: Text(
+                              '$unreadCount',
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             );
           },
-          child: Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              color: AppColors.obsidian,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.elevatedDark, width: 1.2),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                const Icon(
-                  Icons.notifications_none_rounded,
-                  color: AppColors.textMain,
-                  size: 26,
-                ),
-                Positioned(
-                  top: 10,
-                  right: 10,
-                  child: Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      color: AppColors.electricPink,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: AppColors.obsidian, width: 1.5),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ),
       ],
     );
@@ -1153,21 +1355,21 @@ class _HomeContentState extends State<HomeContent> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.obsidian,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: AppColors.electricPink.withOpacity(0.18),
-          width: 1.2,
+          color: AppColors.electricPink.withOpacity(0.12),
+          width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.electricPink.withOpacity(0.06),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
+            color: AppColors.electricPink.withOpacity(0.08),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
+            blurRadius: 12,
             offset: const Offset(0, 2),
           ),
         ],
@@ -1383,12 +1585,19 @@ class _HomeContentState extends State<HomeContent> {
       width: double.infinity,
       height: 120,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(20),
         gradient: const LinearGradient(
           colors: [AppColors.electricPink, AppColors.roseGold],
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.electricPink.withOpacity(0.25),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Stack(
         children: [
@@ -1410,17 +1619,19 @@ class _HomeContentState extends State<HomeContent> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.6),
-                    borderRadius: BorderRadius.circular(6),
+                    color: Colors.white.withOpacity(0.25),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withOpacity(0.4)),
                   ),
                   child: Text(
                     'WEEKEND PROMO',
                     style: GoogleFonts.inter(
-                      color: AppColors.roseGold,
+                      color: Colors.white,
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
                     ),
                   ),
                 ),
@@ -1445,14 +1656,19 @@ class _HomeContentState extends State<HomeContent> {
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
-        color: AppColors.obsidian,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.electricPink.withOpacity(0.25), width: 1.5),
+        border: Border.all(color: AppColors.electricPink.withOpacity(0.18), width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: AppColors.electricPink.withOpacity(0.08),
-            blurRadius: 20,
-            spreadRadius: 2,
+            color: AppColors.electricPink.withOpacity(0.10),
+            blurRadius: 24,
+            spreadRadius: 0,
+            offset: const Offset(0, 6),
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
           ),
         ],
       ),
@@ -1468,7 +1684,7 @@ class _HomeContentState extends State<HomeContent> {
                 height: 120,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: AppColors.electricPink.withOpacity(0.15),
+                  color: AppColors.electricPink.withOpacity(0.08),
                 ),
               ),
             ),
@@ -1692,414 +1908,54 @@ class _HomeContentState extends State<HomeContent> {
   }
 
   void _showEventDetail(Map<String, dynamic> ev) {
-    final title = (ev['title'] ?? 'Event').toString();
-    final location = (ev['location'] ?? 'Lokasi Acara').toString();
-    final dateString = (ev['date_string'] ?? ev['date'] ?? 'Segera Hadir').toString();
-    final imageUrl = (ev['image_url'] ?? ev['image'] ?? '').toString();
-    final description = (ev['description'] ?? 'Tidak ada deskripsi detail untuk event ini.').toString();
-    final ticketUrl = (ev['ticket_url'] ?? '').toString();
-    final category = (ev['category'] ?? 'Event Musik & Seni').toString();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.obsidian,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.85,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: AppColors.obsidian,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: Column(
-            children: [
-              Container(
-                margin: const EdgeInsets.only(top: 12, bottom: 8),
-                width: 44,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.elevatedDark,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              Expanded(
-                child: ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-                  children: [
-                    if (imageUrl.isNotEmpty)
-                      Stack(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(20),
-                            child: Image.network(
-                              imageUrl,
-                              height: 190,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
-                                height: 190,
-                                color: AppColors.elevatedDark,
-                                child: const Center(
-                                  child: Icon(Icons.broken_image_rounded, color: AppColors.textMuted, size: 40),
-                                ),
-                              ),
-                            ),
-                          ),
-                          Positioned(
-                            top: 12,
-                            left: 12,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.65),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: AppColors.electricPink.withOpacity(0.5)),
-                              ),
-                              child: Text(
-                                category,
-                                style: GoogleFonts.inter(
-                                  color: AppColors.roseGold,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    const SizedBox(height: 16),
-                    Text(
-                      title,
-                      style: GoogleFonts.plusJakartaSans(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 20,
-                        height: 1.25,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.elevatedDark,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.elevatedDark),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.calendar_month_rounded, color: AppColors.electricPink, size: 16),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  dateString,
-                                  style: GoogleFonts.inter(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on_rounded, color: AppColors.roseGold, size: 16),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  location,
-                                  style: GoogleFonts.inter(
-                                    color: Colors.white70,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Tentang Event',
-                      style: GoogleFonts.plusJakartaSans(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      description,
-                      style: GoogleFonts.inter(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1F1A24),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppColors.warning.withOpacity(0.35)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.info_outline_rounded, color: AppColors.warning, size: 16),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Ketentuan Tiket & Layanan Partner',
-                                style: GoogleFonts.plusJakartaSans(
-                                  color: AppColors.warning,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            '• Tarif layanan Temenin Ajaa adalah biaya transportasi & pendampingan resmi partner. Jika acara berbayar, tiket masuk untuk partner sepenuhnya ditanggung oleh Client.',
-                            style: GoogleFonts.inter(
-                              color: Colors.white70,
-                              fontSize: 11,
-                              height: 1.4,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '• Tidak sempat antre tiket OTS? Pilih "Freedom Request" agar partner dapat membantu membelikan atau mengantrekan tiket untuk Anda!',
-                            style: GoogleFonts.inter(
-                              color: AppColors.roseGold,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    if (ticketUrl.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            try {
-                              final uri = Uri.parse(ticketUrl);
-                              if (await canLaunchUrl(uri)) {
-                                await launchUrl(uri, mode: LaunchMode.externalApplication);
-                              } else {
-                                if (context.mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Tidak dapat membuka link tiket.')),
-                                  );
-                                }
-                              }
-                            } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error: $e')),
-                                );
-                              }
-                            }
-                          },
-                          icon: const Icon(Icons.confirmation_number_outlined, color: AppColors.electricPink, size: 18),
-                          label: Text(
-                            'Beli Tiket Resmi di Web Mitra',
-                            style: GoogleFonts.inter(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            side: const BorderSide(color: AppColors.electricPink, width: 1.2),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                          ),
-                        ),
-                      ),
-                    Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        gradient: AppColors.brandGradient,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.electricPink.withOpacity(0.35),
-                            blurRadius: 14,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _showEventOrderSelectionSheet(context, title, location);
-                        },
-                        icon: const Icon(Icons.directions_car_filled_rounded, color: Colors.white, size: 18),
-                        label: Text(
-                          'Pesan Perjalanan / Teman ke Sini',
-                          style: GoogleFonts.plusJakartaSans(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          padding: const EdgeInsets.symmetric(vertical: 15),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EventDetailScreen(eventData: ev),
       ),
     );
   }
 
-  void _showEventOrderSelectionSheet(BuildContext context, String eventTitle, String eventLocation) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.obsidian,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: AppColors.elevatedDark,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Pilih Layanan Menuju Event',
-              style: GoogleFonts.plusJakartaSans(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Tujuan otomatis diatur ke: $eventLocation',
-              style: GoogleFonts.inter(
-                color: AppColors.roseGold,
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 18),
-            _buildModalOption(
-              context,
-              icon: Icons.local_taxi_rounded,
-              title: '🚕 Antar Jemput (Ride Service)',
-              subtitle: 'Diantar langsung ke lokasi acara secara aman',
-              color: AppColors.electricPink,
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AntarJemputBookingScreen(
-                      initialDestination: eventLocation,
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 10),
-            _buildModalOption(
-              context,
-              icon: Icons.wine_bar_rounded,
-              title: '🍸 Hangout Service (Temani Nonton)',
-              subtitle: 'Ditemani partner seru selama acara berlangsung',
-              color: AppColors.roseGold,
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => HangoutBookingScreen(
-                      initialDestination: eventLocation,
-                      initialActivity: 'Event: $eventTitle',
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 10),
-            _buildModalOption(
-              context,
-              icon: Icons.explore_rounded,
-              title: '✨ Freedom Request (Jastip Tiket / Antri)',
-              subtitle: 'Minta bantuan partner antrekan tiket atau negosiasi bebas',
-              color: const Color(0xFFFF8552),
-              onTap: () {
-                Navigator.pop(ctx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => FreedomRequestBookingScreen(
-                      initialDestination: eventLocation,
-                      initialDescription: 'Bantu antri tiket dan temani nonton event $eventTitle',
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 14),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   Widget _buildCategoriesGrid() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Pilih Layanan',
-          style: GoogleFonts.plusJakartaSans(
-            color: AppColors.textMain,
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Pilih Layanan',
+              style: GoogleFonts.plusJakartaSans(
+                color: AppColors.textMain,
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            InkWell(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BookingTypeSelectorScreen()),
+                );
+              },
+              child: Row(
+                children: [
+                  Text(
+                    'Lihat 3 Pilar',
+                    style: GoogleFonts.inter(
+                      color: AppColors.electricPink,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                  const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.electricPink, size: 10),
+                ],
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         Row(
@@ -2112,23 +1968,23 @@ class _HomeContentState extends State<HomeContent> {
                 physics: const BouncingScrollPhysics(),
                 child: Row(
                   children: [
-                    _buildCategoryCard('ride', Icons.motorcycle_rounded, 'Ride', width: 75),
+                    _buildCategoryCard('hangout', Icons.celebration_rounded, 'Hangout', width: 85),
                     const SizedBox(width: 8),
-                    _buildCategoryCard('hangout', Icons.wine_bar_rounded, 'Hangout', width: 75),
+                    _buildCategoryCard('freedom', Icons.assignment_turned_in_rounded, 'Jasa Suruh', width: 95),
                     const SizedBox(width: 8),
-                    _buildCategoryCard('event', Icons.celebration_rounded, 'Event', width: 75),
+                    _buildCategoryCard('detektif', Icons.search_rounded, 'Detektif', width: 85),
                     const SizedBox(width: 8),
-                    _buildCategoryCard('freedom', Icons.savings_rounded, 'Freedom', width: 75),
+                    _buildCategoryCard('sporty_ride', Icons.two_wheeler_rounded, 'Motor Sport', width: 100),
                     const SizedBox(width: 8),
-                    _buildCategoryCard('sporty', Icons.sports_tennis_rounded, 'Sporty', width: 75),
+                    _buildCategoryCard('counseling', Icons.psychology_rounded, 'Konseling Curhat', width: 125),
                     const SizedBox(width: 8),
-                    _buildCategoryCard('counseling', Icons.psychology_rounded, 'Counseling', width: 85),
+                    _buildCategoryCard('hiking', Icons.terrain_rounded, 'Hiking Partner', width: 110),
                     const SizedBox(width: 8),
-                    _buildCategoryCard('curhat', Icons.forum_rounded, 'Curhat', width: 75),
+                    _buildCategoryCard('assistant', Icons.badge_rounded, 'Personal Assistant', width: 130),
                     const SizedBox(width: 8),
-                    _buildCategoryCard('hiking', Icons.terrain_rounded, 'Hiking', width: 75),
+                    _buildCategoryCard('sleep', Icons.bedtime_rounded, 'Sleep Call', width: 90),
                     const SizedBox(width: 8),
-                    _buildCategoryCard('assistant', Icons.support_agent_rounded, 'Assistant', width: 80),
+                    _buildCategoryCard('telepon', Icons.phone_in_talk_rounded, 'Telepon WA', width: 95),
                   ],
                 ),
               ),
@@ -2225,7 +2081,7 @@ class _HomeContentState extends State<HomeContent> {
         return Container(
           height: MediaQuery.of(context).size.height * 0.85,
           decoration: const BoxDecoration(
-            color: AppColors.obsidian,
+            color: Colors.white,
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(28),
               topRight: Radius.circular(28),
@@ -2241,7 +2097,7 @@ class _HomeContentState extends State<HomeContent> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppColors.elevatedDark,
+                  color: const Color(0xFFF0E4EC),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -2285,32 +2141,65 @@ class _HomeContentState extends State<HomeContent> {
                   physics: const BouncingScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(20, 10, 20, 40),
                   children: [
+                    // --- PILAR 1: OFFLINE COMPANION (TATAP MUKA) ---
+                    _buildPillarSectionHeader("PILAR 1: OFFLINE COMPANION (TATAP MUKA)", Icons.people_alt_rounded, AppColors.electricPink),
+                    const SizedBox(height: 10),
                     _buildDetailedServiceCard(
                       context,
                       title: "Hangout Partner",
-                      desc: "Teman nongkrong asyik di cafe, nonton bioskop, atau menghadiri acara formal bersama.",
+                      desc: "Teman nongkrong di kafe, nonton bioskop, makan santai, atau pendamping ke pesta/kondangan/wisuda.",
                       imageUrl: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=400&auto=format&fit=crop",
-                      actionText: "Booking Partner",
+                      actionText: "Booking Hangout",
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const HangoutBookingScreen()),
+                          MaterialPageRoute(builder: (_) => const HangoutBookingScreen(serviceType: 'hangout')),
                         );
                       },
                     ),
                     const SizedBox(height: 16),
                     _buildDetailedServiceCard(
                       context,
-                      title: "Freedom Request",
-                      desc: "Tentukan acara dan kebutuhan Anda secara bebas, lalu tawar harga langsung dengan partner.",
-                      imageUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=400&auto=format&fit=crop",
-                      actionText: "Ajukan Request",
+                      title: "Antar Jemput Sporty (Motor Sport)",
+                      desc: "Sensasi diantar/dijemput naik motor sport keren (ZX25R, CBR, Ninja, R15/R25) dengan riding gear aman & gaya stylish.",
+                      imageUrl: "https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?q=80&w=400&auto=format&fit=crop",
+                      actionText: "Pesan Motor Sport",
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const HangoutBookingScreen(serviceType: 'freedom')),
+                          MaterialPageRoute(builder: (_) => const AntarJemputBookingScreen(serviceType: 'sporty')),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _buildDetailedServiceCard(
+                      context,
+                      title: "Hiking Partner (Mendaki Gunung)",
+                      desc: "Jasa teman mendaki gunung, trekking alam bebas, safety buddy jalur pendakian, serta bantuan bawa logistik.",
+                      imageUrl: "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?q=80&w=400&auto=format&fit=crop",
+                      actionText: "Cari Hiking Partner",
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const HangoutBookingScreen(serviceType: 'hiking')),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    _buildDetailedServiceCard(
+                      context,
+                      title: "Personal Assistant Service",
+                      desc: "Asisten pribadi harian serbaguna: bawain koper, bawain belanjaan, hingga personal bodyguard / escort di club & event malam.",
+                      imageUrl: "https://images.unsplash.com/photo-1507679799987-c73779587ccf?q=80&w=400&auto=format&fit=crop",
+                      actionText: "Sewa Personal Assistant",
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const FreedomRequestBookingScreen(serviceType: 'assistant')),
                         );
                       },
                     ),
@@ -2318,101 +2207,82 @@ class _HomeContentState extends State<HomeContent> {
                     _buildDetailedServiceCard(
                       context,
                       title: "Detektif Relationship",
-                      desc: "Layanan penyelidikan rahasia untuk memantau kesetiaan pasangan Anda secara profesional, aman, dan rahasia.",
-                      imageUrl: "https://images.unsplash.com/photo-1509248961158-e54f6934749c?q=80&w=400&auto=format&fit=crop",
-                      actionText: "Konsultasi Rahasia",
+                      desc: "Investigasi rahasia pasangan, cek kesetiaan, stalking aman & observasi situasi tempat publik secara discreet.",
+                      imageUrl: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=400&auto=format&fit=crop",
+                      actionText: "Sewa Detektif Asmara",
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const HangoutBookingScreen(serviceType: 'detective'),
-                          ),
+                          MaterialPageRoute(builder: (_) => const FreedomRequestBookingScreen(serviceType: 'detektif')),
                         );
                       },
                     ),
                     const SizedBox(height: 16),
                     _buildDetailedServiceCard(
                       context,
-                      title: "Antar Jemput Sporty",
-                      desc: "Layanan antar jemput eksklusif dengan partner sporty, mengendarai motor besar atau mobil sporty pilihan.",
-                      imageUrl: "https://images.unsplash.com/photo-1568605117036-5fe5e7bab0b7?q=80&w=400&auto=format&fit=crop",
-                      actionText: "Pesan Shuttle",
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const HangoutBookingScreen(serviceType: 'sporty'),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    _buildDetailedServiceCard(
-                      context,
-                      title: "Relationship Counseling",
-                      desc: "Sesi curhat dan konseling hubungan terpercaya untuk menyelesaikan konflik asmara atau keluarga secara bijak.",
+                      title: "Relationship Counseling (Offline)",
+                      desc: "Ruang aman bercerita dan mendengarkan curhat asmara atau masalah hidup tatap muka di kafe santai.",
                       imageUrl: "https://images.unsplash.com/photo-1573497019940-1c28c88b4f3e?q=80&w=400&auto=format&fit=crop",
-                      actionText: "Mulai Konseling",
+                      actionText: "Konseling Offline",
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const HangoutBookingScreen(serviceType: 'counseling'),
-                          ),
+                          MaterialPageRoute(builder: (_) => const HangoutBookingScreen(serviceType: 'counseling_offline')),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 24),
+
+                    // --- PILAR 2: VIRTUAL COMPANION (ONLINE) ---
+                    _buildPillarSectionHeader("PILAR 2: VIRTUAL COMPANION (ONLINE)", Icons.phone_iphone_rounded, const Color(0xFF6366F1)),
+                    const SizedBox(height: 10),
+                    _buildDetailedServiceCard(
+                      context,
+                      title: "Sleep Call Companion",
+                      desc: "Teman tidur malam hari untuk mengusir kesepian & alarm pengingat bangun pagi tepat waktu.",
+                      imageUrl: "https://images.unsplash.com/photo-1511295742362-92c96b124e52?q=80&w=400&auto=format&fit=crop",
+                      actionText: "Pesan Sleep Call",
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const SleepCallBookingScreen()),
                         );
                       },
                     ),
                     const SizedBox(height: 16),
                     _buildDetailedServiceCard(
                       context,
-                      title: "Mendengarkan Curhat (Offline/Online)",
-                      desc: "Butuh teman dengar keluh kesah? Partner kami siap mendengarkan cerita Anda via online call atau bertemu offline.",
+                      title: "Relationship Counseling (Online & WA)",
+                      desc: "Mendengarkan curhat & konsultasi asmara online secara rahasia via panggilan suara in-app atau WhatsApp call/chat.",
                       imageUrl: "https://images.unsplash.com/photo-1529156069898-49953e39b3ac?q=80&w=400&auto=format&fit=crop",
-                      actionText: "Mulai Curhat",
+                      actionText: "Curhat Online / WA",
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const HangoutBookingScreen(serviceType: 'curhat'),
-                          ),
+                          MaterialPageRoute(builder: (_) => const VirtualCallBookingScreen(serviceType: 'counseling')),
                         );
                       },
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 24),
+
+                    // --- PILAR 3: CUSTOM & FLEXIBLE ---
+                    _buildPillarSectionHeader("PILAR 3: CUSTOM & FLEKSIBEL", Icons.auto_awesome_rounded, const Color(0xFFF97316)),
+                    const SizedBox(height: 10),
                     _buildDetailedServiceCard(
                       context,
-                      title: "Hiking Partner",
-                      desc: "Menyediakan pendamping mendaki gunung, hiking lintas alam, atau jogging santai untuk keselamatan dan keseruan ekstra.",
-                      imageUrl: "https://images.unsplash.com/photo-1551632811-561732d1e306?q=80&w=400&auto=format&fit=crop",
-                      actionText: "Pesan Partner",
+                      title: "Freedom Request (Jasa Suruh)",
+                      desc: "Tentukan tugas / suruhan apa saja secara bebas (antri tiket, beliin barang, antar dokumen, dll) lalu tawar budget langsung.",
+                      imageUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=400&auto=format&fit=crop",
+                      actionText: "Ajukan Jasa Suruh",
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
                           context,
-                          MaterialPageRoute(
-                            builder: (_) => const HangoutBookingScreen(serviceType: 'hiking'),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    _buildDetailedServiceCard(
-                      context,
-                      title: "Personal Assistance Service",
-                      desc: "Asisten pribadi harian serbaguna: membawakan belanjaan, escort bodyguard, mengurus antrean, dan lain-lain.",
-                      imageUrl: "https://images.unsplash.com/photo-1441986300917-64674bd600d8?q=80&w=400&auto=format&fit=crop",
-                      actionText: "Pesan Asisten",
-                      onTap: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const HangoutBookingScreen(serviceType: 'assistant'),
-                          ),
+                          MaterialPageRoute(builder: (_) => const FreedomRequestBookingScreen(serviceType: 'freedom')),
                         );
                       },
                     ),
@@ -2426,6 +2296,34 @@ class _HomeContentState extends State<HomeContent> {
     );
   }
 
+  Widget _buildPillarSectionHeader(String title, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              title,
+              style: GoogleFonts.plusJakartaSans(
+                color: color,
+                fontSize: 11.5,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDetailedServiceCard(
     BuildContext context, {
     required String title,
@@ -2436,14 +2334,14 @@ class _HomeContentState extends State<HomeContent> {
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.obsidian,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.elevatedDark),
+        border: Border.all(color: const Color(0xFFF0E4EC)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -2708,17 +2606,17 @@ class _HomeContentState extends State<HomeContent> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppColors.obsidian,
+          color: Colors.white,
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
-            color: AppColors.elevatedDark,
+            color: const Color(0xFFF0E4EC),
             width: 1.0,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
+              color: Colors.black.withOpacity(0.04),
               blurRadius: 16,
-              offset: const Offset(0, 3),
+              offset: const Offset(0, 4),
             ),
           ],
         ),
@@ -2874,17 +2772,17 @@ class _HomeContentState extends State<HomeContent> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.obsidian,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.electricPink.withOpacity(0.2), width: 1.2),
+        border: Border.all(color: AppColors.electricPink.withOpacity(0.12), width: 1.0),
         boxShadow: [
           BoxShadow(
             color: AppColors.electricPink.withOpacity(0.06),
             blurRadius: 20,
-            offset: const Offset(0, 4),
+            offset: const Offset(0, 6),
           ),
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withOpacity(0.03),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -2972,29 +2870,10 @@ class _HomeContentState extends State<HomeContent> {
   }
 
   Widget _buildCommunityHighlightsSection() {
-    final highlights = [
-      {
-        'name': 'Budi & Partner Sarah',
-        'role': 'Event Companion',
-        'comment': 'Nemenin ke kondangan mantan, super profesional & ramah banget! Sangat membantu.',
-        'rating': '5.0',
-        'avatar': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=150&auto=format&fit=crop',
-      },
-      {
-        'name': 'Dina & Partner Rayhan',
-        'role': 'Sesi Curhat & Ngopi',
-        'comment': 'Pendengar yang baik, ngobrol nyambung banget. Terasa lega setelah sesi kemarin.',
-        'rating': '4.9',
-        'avatar': 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=150&auto=format&fit=crop',
-      },
-      {
-        'name': 'Fikri & Partner Amanda',
-        'role': 'Teman Hiking',
-        'comment': 'Seru bgt hiking bareng ke Mt. Gede! Fisik kuat dan bikin perjalanan makin menyenangkan.',
-        'rating': '5.0',
-        'avatar': 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?q=80&w=150&auto=format&fit=crop',
-      },
-    ];
+    if (_communityReviews.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final highlights = _communityReviews;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3003,7 +2882,7 @@ class _HomeContentState extends State<HomeContent> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text(
-              'Keseruan Komunitas ✨',
+              'Ulasan Nyata Komunitas ✨',
               style: GoogleFonts.plusJakartaSans(
                 color: AppColors.textMain,
                 fontSize: 15,
@@ -3038,18 +2917,22 @@ class _HomeContentState extends State<HomeContent> {
             separatorBuilder: (_, __) => const SizedBox(width: 12),
             itemBuilder: (context, index) {
               final item = highlights[index];
+              final avatar = item['avatar']?.toString() ?? '';
+              final name = item['name']?.toString() ?? 'Pelanggan';
+              final comment = item['comment']?.toString().trim() ?? '';
+
               return Container(
                 width: 260,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppColors.obsidian,
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.elevatedDark),
+                  border: Border.all(color: const Color(0xFFF0E4EC)),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.02),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2),
+                      color: Colors.black.withOpacity(0.04),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
                     ),
                   ],
                 ),
@@ -3060,7 +2943,16 @@ class _HomeContentState extends State<HomeContent> {
                       children: [
                         CircleAvatar(
                           radius: 16,
-                          backgroundImage: NetworkImage(item['avatar']!),
+                          backgroundColor: AppColors.electricPink.withOpacity(0.2),
+                          backgroundImage: (avatar.isNotEmpty && !avatar.contains('dummy'))
+                              ? NetworkImage(avatar)
+                              : null,
+                          child: (avatar.isEmpty || avatar.contains('dummy'))
+                              ? Text(
+                                  name.isNotEmpty ? name[0].toUpperCase() : 'P',
+                                  style: GoogleFonts.inter(color: AppColors.electricPink, fontSize: 11, fontWeight: FontWeight.bold),
+                                )
+                              : null,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -3068,7 +2960,7 @@ class _HomeContentState extends State<HomeContent> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                item['name']!,
+                                name,
                                 style: GoogleFonts.plusJakartaSans(
                                   color: AppColors.textMain,
                                   fontSize: 12,
@@ -3078,7 +2970,7 @@ class _HomeContentState extends State<HomeContent> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               Text(
-                                item['role']!,
+                                item['role'] ?? 'Verified Review',
                                 style: GoogleFonts.inter(
                                   color: AppColors.electricPink,
                                   fontSize: 10,
@@ -3093,7 +2985,7 @@ class _HomeContentState extends State<HomeContent> {
                             const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
                             const SizedBox(width: 2),
                             Text(
-                              item['rating']!,
+                              item['rating'] ?? '5.0',
                               style: GoogleFonts.inter(
                                 color: AppColors.textMain,
                                 fontSize: 11,
@@ -3104,17 +2996,19 @@ class _HomeContentState extends State<HomeContent> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      '"${item['comment']!}"',
-                      style: GoogleFonts.inter(
-                        color: AppColors.textMuted,
-                        fontSize: 11,
-                        fontStyle: FontStyle.italic,
+                    if (comment.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        '"$comment"',
+                        style: GoogleFonts.inter(
+                          color: AppColors.textMuted,
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+                    ],
                   ],
                 ),
               );
@@ -3129,14 +3023,14 @@ class _HomeContentState extends State<HomeContent> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: AppColors.obsidian,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.elevatedDark),
+        border: Border.all(color: const Color(0xFFF0E4EC)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
           ),
         ],
       ),

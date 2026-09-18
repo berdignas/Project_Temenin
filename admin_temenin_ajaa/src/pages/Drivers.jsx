@@ -23,9 +23,19 @@ export const Drivers = () => {
     fetchDrivers();
   }, [statusFilter]);
 
+  const handleQuickVerify = async (driverId, status) => {
+    const res = await adminApi.verifyDriver(driverId, status);
+    setMessage(res.message);
+    fetchDrivers();
+    setTimeout(() => setMessage(''), 3000);
+  };
+
   const handleUpdateDriver = async (e) => {
     e.preventDefault();
     if (!selectedDriver) return;
+    if (selectedDriver.status) {
+      await adminApi.verifyDriver(selectedDriver.id, selectedDriver.status);
+    }
     const res = await adminApi.updateDriver(selectedDriver.id, selectedDriver);
     setMessage(res.message);
     setSelectedDriver(null);
@@ -135,15 +145,35 @@ export const Drivers = () => {
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-                <span className="text-[10px] font-mono text-slate-500">EXP: {driver.experience_years || 0} Tahun</span>
-                <button
-                  onClick={() => setSelectedDriver(driver)}
-                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 rounded-lg flex items-center gap-1.5 transition-colors"
-                >
-                  <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
-                  <span>Edit Driver</span>
-                </button>
+              <div className="pt-3 border-t border-slate-800 space-y-2">
+                {driver.status === 'pending' && (
+                  <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
+                    <button
+                      onClick={() => handleQuickVerify(driver.id, 'rejected')}
+                      className="flex-1 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 font-bold text-xs rounded-lg flex items-center justify-center gap-1 transition-colors"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Tolak</span>
+                    </button>
+                    <button
+                      onClick={() => handleQuickVerify(driver.id, 'approved')}
+                      className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1 shadow-md shadow-emerald-600/20 transition-all"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      <span>Setujui Mitra</span>
+                    </button>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-mono text-slate-500">EXP: {driver.experience_years || 0} Tahun</span>
+                  <button
+                    onClick={() => setSelectedDriver(driver)}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-semibold text-slate-200 rounded-lg flex items-center gap-1.5 transition-colors"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Edit Driver</span>
+                  </button>
+                </div>
               </div>
             </div>
           ))
@@ -189,14 +219,29 @@ export const Drivers = () => {
               </div>
             </div>
 
-            <div>
-              <label className="block text-slate-400 mb-1 font-semibold">Kategori Kendaraan</label>
-              <input
-                type="text"
-                value={selectedDriver.vehicle_type || ''}
-                onChange={(e) => setSelectedDriver({ ...selectedDriver, vehicle_type: e.target.value })}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-slate-400 mb-1 font-semibold">Kategori Kendaraan</label>
+                <input
+                  type="text"
+                  value={selectedDriver.vehicle_type || ''}
+                  onChange={(e) => setSelectedDriver({ ...selectedDriver, vehicle_type: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-semibold">Status Verifikasi Mitra</label>
+                <select
+                  value={selectedDriver.status || 'pending'}
+                  onChange={(e) => setSelectedDriver({ ...selectedDriver, status: e.target.value })}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white font-semibold focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="approved">🟢 Approved (Disetujui & Aktif)</option>
+                  <option value="pending">🟡 Pending (Menunggu Verifikasi)</option>
+                  <option value="rejected">🔴 Rejected (Ditolak)</option>
+                </select>
+              </div>
             </div>
 
             <div className="flex items-center gap-3 pt-2">

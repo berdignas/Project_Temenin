@@ -3,14 +3,14 @@ import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   // TDS Colors - Signature Electric Pink + Cyberpunk Dark Obsidian
-  static const Color background = Color(0xFF0B0B0F); // Deep Obsidian Black
-  static const Color surface = Color(0xFF16151A);    // Dark Surface
-  static const Color card = Color(0xFF1C1B21);       // Elevated Dark Card
-  static const Color cardDeep = Color(0xFF24222A);   // Sub-surface Container
-  static const Color border = Color(0xFF2A2832);     // Subtle Dark Border
-  static const Color primaryPink = Color(0xFFFF4DA6); // Signature Electric Pink Fuchsia
-  static const Color roseGold = Color(0xFFDB2777);    // Deep Fuchsia / Pink Rose
-  static const Color fuchsiaLight = Color(0x33FF4DA6); // Subtle Fuchsia Glow
+  static const Color background = Color(0xFFFAFAFA); // Clean Light Background
+  static const Color surface = Color(0xFFFFFFFF);    // White Surface
+  static const Color card = Color(0xFFFFFFFF);       // White Card
+  static const Color cardDeep = Color(0xFFF8F0F5);   // Soft Blush Sub-surface
+  static const Color border = Color(0xFFF0E4EC);     // Soft Pink Border
+  static const Color primaryPink = Color(0xFFEC4899); // Fuchsia Primary
+  static const Color roseGold = Color(0xFFDB2777);    // Deep Fuchsia
+  static const Color fuchsiaLight = Color(0x33EC4899); // Subtle Fuchsia Glow
 
   // Status Colors
   static const Color success = Color(0xFF10B981); // Emerald Green
@@ -18,14 +18,20 @@ class AppTheme {
   static const Color danger = Color(0xFFEF4444);  // Crimson Red
   static const Color info = Color(0xFF3B82F6);    // Royal Blue
 
-  // Text Colors (Dark Mode Hierarchy)
-  static const Color textHighContrast = Color(0xFFFFFFFF); // Pure White
-  static const Color textMediumContrast = Color(0xFFE2E8F0); // Light Slate
-  static const Color textMuted = Color(0xFF94A3B8); // Muted Slate 400
+  // Text Colors (Light Mode Hierarchy)
+  static const Color textHighContrast = Color(0xFF1E1B2E); // Deep Plum
+  static const Color textMediumContrast = Color(0xFF6B5B6E); // Medium Plum
+  static const Color textMuted = Color(0xFF9B8A9D); // Muted Plum
+
+  // Alias Compatibility
+  static const Color darkBackground = background;
+  static const Color darkCard = card;
+  static const Color textSecondary = textMuted;
+  static const Color secondaryPink = roseGold;
 
   // Gradients
   static const LinearGradient heroGradient = LinearGradient(
-    colors: [Color(0xFFFF4DA6), Color(0xFFFF1493), Color(0xFFBE185D)],
+    colors: [Color(0xFFEC4899), Color(0xFFDB2777), Color(0xFFBE185D)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -38,28 +44,28 @@ class AppTheme {
 
   static const LinearGradient darkBgGradient = LinearGradient(
     colors: [
-      Color(0xFF0B0B0F),
-      Color(0xFF16151A),
-      Color(0xFF0B0B0F),
+      Color(0xFFFAFAFA),
+      Color(0xFFFDF2F8),
+      Color(0xFFFAFAFA),
     ],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
   );
 
   static const LinearGradient cardGradient = LinearGradient(
-    colors: [Color(0xFF1C1B21), Color(0xFF16151A)],
+    colors: [Color(0xFFFFFFFF), Color(0xFFFDF2F8)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient safetyGradient = LinearGradient(
-    colors: [Color(0xFF2B121E), Color(0xFF180A12)],
+    colors: [Color(0xFFFDF2F8), Color(0xFFF8F0F5)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient glassBorderGradient = LinearGradient(
-    colors: [Color(0x66FF4DA6), Color(0x1AFFFFFF)],
+    colors: [Color(0x40EC4899), Color(0x1AEC4899)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -67,12 +73,12 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       scaffoldBackgroundColor: background,
       primaryColor: primaryPink,
       cardColor: surface,
       dividerColor: border,
-      colorScheme: const ColorScheme.dark(
+      colorScheme: const ColorScheme.light(
         primary: primaryPink,
         secondary: roseGold,
         surface: surface,
@@ -81,7 +87,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: surface,
+        fillColor: const Color(0xFFF5EBF2),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),

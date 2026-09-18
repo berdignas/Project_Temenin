@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 export const Login = () => {
   const [email, setEmail] = useState('admin@temenin.aja');
   const [password, setPassword] = useState('admin123');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();

@@ -1,7 +1,11 @@
 // controllers/driverController.js
-const { supabase } = require('../../config/supabase');
+const { supabase, supabaseAdmin } = require('../../config/supabase');
+const { lockDriverSchedule, unlockDriverSchedule } = require('../../services/scheduleService');
+const escrowService = require('../../services/escrowService');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { ensureAuthUser } = require('../../utils/authSync');
+const { atomicDeductBalance, atomicIncrementBalance } = require('../../utils/balanceHelper');
 
 // Register Driver
 const registerDriver = async (req, res) => {
@@ -120,9 +124,29 @@ const registerDriver = async (req, res) => {
       });
     }
 
-    // Generate token JWT
+    // Ensure user exists in auth.users with matching user.id for GoTrue compatibility
+    await ensureAuthUser(user.id, user.email);
+
+    // Generate token JWT dengan klaim standar Supabase GoTrue
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: 'driver' },
+      { 
+        aud: 'authenticated',
+        role: 'authenticated',
+        sub: user.id,
+        id: user.id, 
+        email: user.email, 
+        phone: user.phone,
+        full_name: user.full_name,
+        app_metadata: {
+          provider: 'email',
+          providers: ['email'],
+          role: 'driver'
+        },
+        user_metadata: {
+          full_name: user.full_name,
+          role: 'driver'
+        }
+      },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRE || '7d' }
     );
@@ -159,11 +183,16 @@ const getDriverProfile = async (req, res) => {
       .select(`
         *,
         users:user_id (
+          id,
           full_name,
           email,
           phone,
           avatar_url,
-          gender
+          gender,
+          role,
+          balance,
+          points,
+          is_verified
         )
       `)
       .eq('user_id', userId)
@@ -295,6 +324,13 @@ const updateBookingStatus = async (req, res) => {
     const { status } = req.body;
     const userId = req.user.id;
 
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        message: 'Status is required'
+      });
+    }
+
     // Get driver_id
     const { data: driver, error: driverError } = await supabase
       .from('drivers')
@@ -302,22 +338,69 @@ const updateBookingStatus = async (req, res) => {
       .eq('user_id', userId)
       .single();
 
-    if (driverError) {
+    if (driverError || !driver) {
       return res.status(404).json({
         success: false,
         message: 'Driver not found'
       });
     }
 
+    // Fetch existing booking
+    const { data: existingBooking, error: getError } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .single();
+
+    if (getError || !existingBooking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
+      });
+    }
+
+    // 🛡️ PERBAIKAN ISU B: Driver tidak boleh mengubah status pembayaran
+    const forbiddenFinancialStatuses = ['paid', 'closed', 'dp_paid'];
+    if (forbiddenFinancialStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Status pembayaran '${status}' tidak dapat diubah oleh driver. Pelunasan harus diproses secara sah oleh client/sistem.`
+      });
+    }
+
+    // Map sub-statuses to valid DB schema constraint status
+    // Allowed DB status: 'pending', 'accepted', 'ongoing', 'completed', 'cancelled'
+    let dbStatus = status;
+    let subStatus = status;
+
+    if (['on_the_way', 'arrived', 'started', 'completion_requested'].includes(status)) {
+      dbStatus = 'ongoing';
+    } else if (status === 'completed') {
+      dbStatus = 'completed';
+    } else if (status === 'cancelled') {
+      dbStatus = 'cancelled';
+    } else if (!['pending', 'accepted', 'ongoing', 'completed', 'cancelled'].includes(status)) {
+      dbStatus = 'ongoing';
+    }
+
+    const currentDetails = (existingBooking.additional_details && typeof existingBooking.additional_details === 'object')
+      ? { ...existingBooking.additional_details }
+      : {};
+
+    const updatedDetails = {
+      ...currentDetails,
+      sub_status: subStatus
+    };
+
     // Update booking
     const { data: booking, error } = await supabase
       .from('bookings')
       .update({
-        status: status,
+        status: dbStatus,
+        additional_details: updatedDetails,
         updated_at: new Date()
       })
       .eq('id', bookingId)
-      .eq('driver_id', driver.id)
       .select(`
         *,
         users:user_id (
@@ -339,6 +422,83 @@ const updateBookingStatus = async (req, res) => {
         message: error.message
       });
     }
+
+    // Schedule Lifecycle Management
+    const targetDriverId = existingBooking.driver_id || driver.id;
+    if (targetDriverId) {
+      if (dbStatus === 'accepted') {
+        await lockDriverSchedule(targetDriverId, booking.id, booking.booking_date, booking.duration || 60, 'Pesanan Terkonfirmasi');
+      } else if (dbStatus === 'cancelled') {
+        await unlockDriverSchedule(booking.id);
+        const cancelReason = req.body.cancellation_reason || req.body.reason || 'Dibatalkan oleh driver';
+        await escrowService.handleBookingCancellation({
+          bookingId,
+          cancelledBy: 'driver',
+          reason: cancelReason,
+          actorId: req.user.id
+        });
+      }
+    }
+
+    // If status is completed, increment driver's total_rides
+    if (dbStatus === 'completed' && targetDriverId) {
+      const { data: driverData } = await supabase
+        .from('drivers')
+        .select('total_rides')
+        .eq('id', targetDriverId)
+        .single();
+
+      const newTotalRides = (driverData?.total_rides || 0) + 1;
+      await supabase
+        .from('drivers')
+        .update({ total_rides: newTotalRides })
+        .eq('id', targetDriverId);
+
+      // 💰 Pencairan bagi hasil 90% ke saldo driver HANYA jika pembayaran sudah lunas (Pelunasan terverifikasi)
+      // Mencegah kebocoran dana platform saat pesanan baru dibayar DP
+      const isPelunasanVerified = currentDetails.pelunasan_paid === true || currentDetails.final_paid === true || existingBooking.sub_status === 'paid' || existingBooking.sub_status === 'closed';
+      if (isPelunasanVerified) {
+        await escrowService.releaseDriverPayout(bookingId, booking, 'Pesanan Diselesaikan Driver');
+      } else {
+        console.log(`ℹ️ [Driver Booking] Pesanan #${bookingId.substring(0, 8)} selesai operasional oleh driver, namun pelunasan belum dibayar oleh klien. Payout driver tetap aman tertahan di Escrow.`);
+      }
+    }
+
+    // Auto-create notification record for client
+    try {
+      let notifTitle = '';
+      let notifMessage = '';
+
+      if (status === 'accepted') {
+        notifTitle = 'Pesanan Diterima Driver! 🎉';
+        notifMessage = 'Driver menyetujui pesanan Anda.';
+      } else if (status === 'on_the_way') {
+        notifTitle = 'Driver Sedang Menuju Lokasi 🛵';
+        notifMessage = 'Driver Anda sedang dalam perjalanan ke lokasi penjemputan.';
+      } else if (status === 'arrived') {
+        notifTitle = 'Driver Sudah Sampai! 📍';
+        notifMessage = 'Driver Anda telah tiba di lokasi penjemputan.';
+      } else if (status === 'started' || status === 'ongoing') {
+        notifTitle = 'Layanan Dimulai ✨';
+        notifMessage = 'Pendampingan bersama driver sedang berlangsung.';
+      } else if (status === 'completed' || status === 'closed' || status === 'paid') {
+        notifTitle = 'Layanan Selesai 🏁';
+        notifMessage = 'Terima kasih telah menggunakan Temenin Ajaa. Jangan lupa beri ulasan!';
+      } else if (status === 'cancelled') {
+        notifTitle = 'Pesanan Dibatalkan Driver ⚠️';
+        notifMessage = 'Driver membatalkan pesanan. Dana DP Anda telah dikembalikan 100% ke saldo dompet aplikasi.';
+      }
+
+      if (notifTitle && existingBooking.user_id) {
+        await supabase.from('notifications').insert({
+          user_id: existingBooking.user_id,
+          title: notifTitle,
+          message: notifMessage,
+          type: 'booking',
+          data: { booking_id: bookingId }
+        });
+      }
+    } catch (_) {}
 
     res.status(200).json({
       success: true,
@@ -418,11 +578,34 @@ const getDriverEarnings = async (req, res) => {
     const totalEarnings = completedBookings.reduce((sum, booking) => sum + (booking.total_price || 0), 0);
     const totalRides = completedBookings.length;
 
+    // Calculate pending escrow from bookings where payout is still held in escrow
+    let pendingEscrow = 0;
+    try {
+      const { data: activeBookings } = await supabase
+        .from('bookings')
+        .select('total_price, escrow_balance, status, payout_status, additional_details')
+        .eq('driver_id', driver.id)
+        .neq('status', 'cancelled');
+
+      (activeBookings || []).forEach(b => {
+        const add = (b.additional_details && typeof b.additional_details === 'object') ? b.additional_details : {};
+        const isReleased = b.payout_status === 'released' || add.payout_status === 'released' || add.driver_credited === true;
+        const esc = parseFloat(b.escrow_balance) || parseFloat(add.escrow_balance) || 0;
+        if (!isReleased && esc > 0) {
+          pendingEscrow += esc;
+        }
+      });
+    } catch (_) {}
+
     res.status(200).json({
       success: true,
+      totalEarnings,
+      totalRides,
+      pendingEscrow,
       data: {
         total_earnings: totalEarnings,
         total_rides: totalRides,
+        pending_escrow: pendingEscrow,
         period: period || 'all',
         bookings: completedBookings
       }
@@ -483,6 +666,433 @@ const getAllDrivers = async (req, res) => {
   }
 };
 
+// Get Driver Schedule Slots (Public or for Driver)
+const getDriverSchedules = async (req, res) => {
+  try {
+    const { id } = req.params;
+    let driverId = id;
+
+    if (!driverId || driverId === 'my') {
+      const { data: d } = await supabase
+        .from('drivers')
+        .select('id')
+        .eq('user_id', req.user.id)
+        .single();
+      if (!d) return res.status(404).json({ success: false, message: 'Driver profile not found' });
+      driverId = d.id;
+    }
+
+    const { data: schedules, error } = await supabase
+      .from('driver_schedules')
+      .select('*')
+      .eq('driver_id', driverId)
+      .eq('status', 'locked')
+      .order('start_time', { ascending: true });
+
+    if (error) throw error;
+
+    res.status(200).json({
+      success: true,
+      data: schedules
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Add Manual Off/Block Time Slot (Driver)
+const addManualSchedule = async (req, res) => {
+  try {
+    const { start_time, end_time, title } = req.body;
+    const userId = req.user.id;
+
+    if (!start_time || !end_time) {
+      return res.status(400).json({ success: false, message: 'Waktu mulai dan selesai wajib diisi' });
+    }
+
+    const { data: driver } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (!driver) return res.status(404).json({ success: false, message: 'Driver tidak ditemukan' });
+
+    const { data: schedule, error } = await supabase
+      .from('driver_schedules')
+      .insert({
+        driver_id: driver.id,
+        booking_id: null,
+        start_time: new Date(start_time).toISOString(),
+        end_time: new Date(end_time).toISOString(),
+        status: 'locked'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json({
+      success: true,
+      message: 'Jadwal manual berhasil dikunci',
+      data: schedule
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Delete Manual Schedule Slot (Driver)
+const deleteManualSchedule = async (req, res) => {
+  try {
+    const { scheduleId } = req.params;
+    const userId = req.user.id;
+
+    const { data: driver } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('user_id', userId)
+      .single();
+
+    if (!driver) return res.status(404).json({ success: false, message: 'Driver tidak ditemukan' });
+
+    const { error } = await supabase
+      .from('driver_schedules')
+      .delete()
+      .eq('id', scheduleId)
+      .eq('driver_id', driver.id);
+
+    if (error) throw error;
+
+    res.status(200).json({
+      success: true,
+      message: 'Jadwal berhasil dihapus'
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Update Buffer Time (Driver)
+const updateBufferTime = async (req, res) => {
+  try {
+    const { buffer_time_minutes } = req.body;
+    const userId = req.user.id;
+
+    if (buffer_time_minutes === undefined || buffer_time_minutes < 0) {
+      return res.status(400).json({ success: false, message: 'Buffer time minimal 0 menit' });
+    }
+
+    const { data: driver, error } = await supabase
+      .from('drivers')
+      .update({ buffer_time_minutes: parseInt(buffer_time_minutes, 10), updated_at: new Date() })
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(200).json({
+      success: true,
+      message: 'Toleransi waktu istirahat (buffer time) berhasil diperbarui',
+      data: driver
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Update Driver Profile
+const updateDriverProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const {
+      full_name,
+      phone,
+      avatar_url,
+      gender,
+      vehicle_name,
+      plate_number,
+      price_per_hour,
+      experience_years,
+      vehicle_stnk
+    } = req.body;
+
+    // Update user details
+    const userUpdates = {};
+    if (full_name) userUpdates.full_name = full_name.trim();
+    if (phone) userUpdates.phone = phone.trim();
+    if (avatar_url) userUpdates.avatar_url = avatar_url.trim();
+    if (gender) userUpdates.gender = gender.trim();
+    userUpdates.updated_at = new Date();
+
+    if (Object.keys(userUpdates).length > 1) {
+      const { error: userError } = await supabase
+        .from('users')
+        .update(userUpdates)
+        .eq('id', userId);
+
+      if (userError) {
+        return res.status(400).json({
+          success: false,
+          message: 'Failed to update user table: ' + userError.message
+        });
+      }
+    }
+
+    // Update driver details
+    const driverUpdates = {};
+    if (vehicle_name) driverUpdates.vehicle_name = vehicle_name.trim();
+    if (plate_number) driverUpdates.plate_number = plate_number.toUpperCase().trim();
+    if (price_per_hour !== undefined) driverUpdates.price_per_hour = Number(price_per_hour);
+    if (experience_years !== undefined) driverUpdates.experience_years = Number(experience_years);
+    if (vehicle_stnk) driverUpdates.vehicle_stnk = vehicle_stnk;
+    driverUpdates.updated_at = new Date();
+
+    const { data: updatedDriver, error: driverError } = await supabase
+      .from('drivers')
+      .update(driverUpdates)
+      .eq('user_id', userId)
+      .select(`
+        *,
+        users:user_id (
+          full_name,
+          email,
+          phone,
+          avatar_url,
+          gender,
+          balance,
+          points
+        )
+      `)
+      .single();
+
+    if (driverError) {
+      return res.status(400).json({
+        success: false,
+        message: 'Failed to update driver profile: ' + driverError.message
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: updatedDriver
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+/**
+ * Driver requests withdrawal from wallet balance
+ * Enforces strict limit: amount <= balance, cannot withdraw more than balance
+ * Automatically and atomically deducts the balance immediately
+ */
+const requestWithdrawal = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { 
+      amount, 
+      bank_name = 'Bank BCA', 
+      account_number, 
+      account_name, 
+      notes = '' 
+    } = req.body;
+
+    const withdrawAmount = parseFloat(amount || 0);
+
+    if (isNaN(withdrawAmount) || withdrawAmount < 10000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nominal penarikan minimal Rp 10.000'
+      });
+    }
+
+    if (!account_number || account_number.toString().trim() === '') {
+      return res.status(400).json({
+        success: false,
+        message: 'Nomor rekening / e-wallet tujuan wajib diisi'
+      });
+    }
+
+    // 1. Fetch current driver user data
+    const { data: user, error: userErr } = await supabaseAdmin
+      .from('users')
+      .select('id, balance, full_name, email, role')
+      .eq('id', userId)
+      .single();
+
+    if (userErr || !user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Akun driver tidak ditemukan'
+      });
+    }
+
+    const currentBalance = parseFloat(user.balance || 0);
+
+    // 2. STRICT VALIDATION: Cannot withdraw more than active balance
+    if (withdrawAmount > currentBalance) {
+      return res.status(400).json({
+        success: false,
+        message: `Saldo tidak mencukupi untuk melakukan penarikan sebesar Rp ${withdrawAmount.toLocaleString('id-ID')}. Saldo aktif Anda: Rp ${currentBalance.toLocaleString('id-ID')}`
+      });
+    }
+
+    // 3. Ensure user exists in auth.users for FK integrity
+    await ensureAuthUser(userId, user.email);
+
+    // 4. ATOMIC DEDUCTION: deduct immediately using PostgreSQL row-lock via RPC / OCC CAS
+    let newBalance;
+    try {
+      newBalance = await atomicDeductBalance(userId, withdrawAmount);
+    } catch (deductErr) {
+      if (deductErr.message === 'INSUFFICIENT_BALANCE') {
+        return res.status(400).json({
+          success: false,
+          message: `Saldo tidak mencukupi untuk melakukan penarikan sebesar Rp ${withdrawAmount.toLocaleString('id-ID')}.`
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: 'Gagal memproses pemotongan saldo: ' + deductErr.message
+      });
+    }
+
+    // 5. Insert withdrawal request into payment_transactions
+    const recipientName = (account_name && account_name.trim()) ? account_name.trim() : user.full_name;
+    const trxPayload = {
+      user_id: userId,
+      type: 'WITHDRAWAL',
+      amount: withdrawAmount,
+      unique_code: 0,
+      total_payable: withdrawAmount,
+      status: 'PENDING',
+      sla_deadline: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      admin_notes: JSON.stringify({
+        bank_name: bank_name.trim(),
+        account_number: account_number.toString().trim(),
+        account_name: recipientName,
+        notes: notes || 'Pengajuan penarikan saldo driver'
+      })
+    };
+
+    const { data: newTrx, error: insErr } = await supabaseAdmin
+      .from('payment_transactions')
+      .insert([trxPayload])
+      .select()
+      .single();
+
+    if (insErr) {
+      console.error('Insert payment_transactions withdrawal error:', insErr);
+      // Rollback deducted balance atomically
+      try {
+        await atomicIncrementBalance(userId, withdrawAmount);
+      } catch (rbErr) {
+        console.error('❌ Failed to rollback deducted balance:', rbErr.message);
+      }
+      return res.status(500).json({
+        success: false,
+        message: 'Gagal menyimpan pengajuan penarikan: ' + insErr.message
+      });
+    }
+
+    // 6. Record in wallet_transactions
+    try {
+      const { error: wtErr } = await supabaseAdmin.from('wallet_transactions').insert([{
+        user_id: userId,
+        type: 'WITHDRAWAL_PENDING',
+        amount: -withdrawAmount,
+        description: `Pengajuan penarikan dana ke ${bank_name} (${account_number}) - A.N ${recipientName}`,
+        reference_id: newTrx.id,
+        created_at: new Date().toISOString()
+      }]);
+      if (wtErr) {
+        console.error('❌ [DriverWithdrawal] Failed to record wallet_transactions:', wtErr.message, wtErr.details);
+      }
+    } catch (wtErr) {
+      console.warn('wallet_transactions insert warning:', wtErr.message);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Permintaan penarikan dana sebesar Rp ${withdrawAmount.toLocaleString('id-ID')} berhasil diajukan! Saldo aktif otomatis terpotong dan menunggu konfirmasi transfer Admin.`,
+      data: {
+        transaction: newTrx,
+        bank_name,
+        account_number,
+        account_name: recipientName,
+        deducted_amount: withdrawAmount,
+        remaining_balance: newBalance
+      }
+    });
+
+  } catch (error) {
+    console.error('Driver withdrawal error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Gagal memproses penarikan dana: ' + error.message
+    });
+  }
+};
+
+/**
+ * Driver gets their withdrawal requests and statuses
+ */
+const getWithdrawalHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const { data: withdrawals, error } = await supabaseAdmin
+      .from('payment_transactions')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('type', 'WITHDRAWAL')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const formatted = (withdrawals || []).map(w => {
+      let bankInfo = {};
+      try {
+        if (w.admin_notes && (w.admin_notes.startsWith('{') || w.admin_notes.startsWith('['))) {
+          bankInfo = JSON.parse(w.admin_notes);
+        }
+      } catch {
+        // ignore JSON parse
+      }
+
+      return {
+        id: w.id,
+        amount: parseFloat(w.amount || 0),
+        status: w.status,
+        sla_deadline: w.sla_deadline,
+        bank_name: bankInfo.bank_name || 'Bank BCA',
+        account_number: bankInfo.account_number || '-',
+        account_name: bankInfo.account_name || '-',
+        admin_notes: bankInfo.notes || w.admin_notes,
+        created_at: w.created_at
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: formatted
+    });
+  } catch (error) {
+    console.error('Get withdrawal history error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 module.exports = {
   registerDriver,
   getDriverProfile,
@@ -490,5 +1100,12 @@ module.exports = {
   getDriverBookings,
   updateBookingStatus,
   getDriverEarnings,
-  getAllDrivers
-};
+  getAllDrivers,
+  getDriverSchedules,
+  addManualSchedule,
+  deleteManualSchedule,
+  updateBufferTime,
+  updateDriverProfile,
+  requestWithdrawal,
+  getWithdrawalHistory
+};

@@ -11,11 +11,17 @@ import '../../../providers/booking_provider.dart';
 import '../../../data/models/booking_model.dart';
 import 'active_booking_screen.dart';
 import 'chat_list_screen.dart';
+import 'chat_room_screen.dart';
 import 'earnings_screen.dart';
 import 'profile_screen.dart';
 import 'driver_negotiation_screen.dart';
 import 'open_offers_screen.dart';
 import 'driver_community_screen.dart';
+import 'driver_orders_screen.dart';
+import 'driver_waiting_countdown_screen.dart';
+import 'driver_waiting_dp_screen.dart';
+import '../../../data/models/driver_notification_model.dart';
+import '../../../core/utils/booking_date_helper.dart';
 
 class DriverHomeScreen extends StatefulWidget {
   const DriverHomeScreen({super.key});
@@ -54,7 +60,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     // List of screens to display in bottom navigation
     final List<Widget> screens = [
       _buildDashboard(auth, booking),
-      const DriverCommunityScreen(),
+      const DriverOrdersScreen(),
       const DriverChatListScreen(),
       const DriverEarningsScreen(),
       const DriverProfileScreen(),
@@ -147,9 +153,43 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 const SizedBox(width: 8),
                 ElevatedButton(
                   onPressed: () {
-                    final targetBooking = notif.booking ?? booking.incomingBooking;
+                    final targetBooking = notif.booking ?? booking.activeBooking ?? booking.incomingBooking;
                     booking.dismissBannerNotification();
-                    if (targetBooking != null) {
+                    if (notif.type == NotificationType.newMessage && targetBooking != null) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => DriverChatRoomScreen(
+                            bookingId: targetBooking.id,
+                            clientName: targetBooking.client?.fullName ?? 'Pelanggan',
+                            clientImage: targetBooking.client?.avatarUrl ?? targetBooking.client?.profileImage ?? '',
+                          ),
+                        ),
+                      );
+                    } else if (notif.type == NotificationType.pelunasanPaid) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => DriverOrderSummaryScreen(booking: targetBooking),
+                        ),
+                      );
+                    } else if (notif.type == NotificationType.dpPaid) {
+                      if (targetBooking != null) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => DriverWaitingCountdownScreen(bookingData: targetBooking),
+                          ),
+                        );
+                      } else {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const DriverActiveBookingScreen(),
+                          ),
+                        );
+                      }
+                    } else if (targetBooking != null) {
                       _showIncomingRequestDialog(targetBooking);
                     } else {
                       Navigator.push(
@@ -166,7 +206,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     elevation: 0,
                   ),
                   child: Text(
-                    "Terima",
+                    notif.type == NotificationType.newMessage
+                        ? "Buka Chat"
+                        : (notif.type == NotificationType.pelunasanPaid ? "Beri Ulasan" : "Lihat"),
                     style: GoogleFonts.plusJakartaSans(fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -188,13 +230,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   // SLEEK MODERN BOTTOM NAVIGATION BAR (Matching Reference Style)
   // ============================================================
   Widget _buildModernBottomNavBar() {
+    final booking = context.watch<BookingProvider>();
+    final hasUnreadChatNotif = booking.notifications.any((n) => !n.isRead && n.type == NotificationType.newMessage);
+
     final navItems = [
       {'icon': Icons.home_rounded, 'label': 'Home'},
-      {'icon': Icons.explore_rounded, 'label': 'Komunitas'},
+      {'icon': Icons.receipt_long_rounded, 'label': 'Aktivitas'},
       {'icon': Icons.chat_bubble_rounded, 'label': 'Chat'},
       {'icon': Icons.account_balance_wallet_rounded, 'label': 'Pendapatan'},
       {'icon': Icons.person_rounded, 'label': 'Profil'},
     ];
+
+    final hasActiveOrUpcoming = booking.isCurrentlyOnTrip || booking.upcomingBookings.isNotEmpty;
 
     return Container(
       decoration: const BoxDecoration(
@@ -214,12 +261,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           children: List.generate(navItems.length, (index) {
             final isSelected = _currentIndex == index;
             final item = navItems[index];
+            final isChat = index == 2;
+            final isOrders = index == 1;
 
             return GestureDetector(
               onTap: () {
                 setState(() {
                   _currentIndex = index;
                 });
+                if (index == 0 || index == 3 || index == 4) {
+                  final authProv = Provider.of<AuthProvider>(context, listen: false);
+                  final bookProv = Provider.of<BookingProvider>(context, listen: false);
+                  authProv.refreshProfile();
+                  bookProv.loadEarnings('daily');
+                }
               },
               behavior: HitTestBehavior.opaque,
               child: Container( // Changed from AnimatedContainer to Container to remove delay
@@ -231,10 +286,41 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      item['icon'] as IconData,
-                      color: isSelected ? AppTheme.primaryPink : AppTheme.textMuted,
-                      size: 22,
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Icon(
+                          item['icon'] as IconData,
+                          color: isSelected ? AppTheme.primaryPink : AppTheme.textMuted,
+                          size: 22,
+                        ),
+                        if (isChat && hasUnreadChatNotif)
+                          Positioned(
+                            top: -2,
+                            right: -2,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: AppTheme.primaryPink,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                        if (isOrders && hasActiveOrUpcoming)
+                          Positioned(
+                            top: -2,
+                            right: -2,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF10B981),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -261,21 +347,28 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Widget _buildDashboard(AuthProvider auth, BookingProvider booking) {
     final name = auth.user?.fullName ?? 'Driver';
     final vehicle = auth.driverProfileData?['vehicle_name'] ?? 'Unit Kendaraan';
-    final plate = auth.driverProfileData?['plate_number'] ?? 'B 1234 DS';
+    final plate = auth.driverProfileData?['plate_number'] ?? '-';
     final rating = (auth.driverProfileData?['rating'] != null)
         ? (auth.driverProfileData!['rating'] as num).toDouble()
-        : 5.0;
+        : 0.0;
     final totalRides = auth.driverProfileData?['total_rides'] ?? 0;
 
     String formatCurrency(double amount) {
       return "Rp ${amount.toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
     }
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+    return RefreshIndicator(
+      color: AppTheme.primaryPink,
+      backgroundColor: AppTheme.surface,
+      onRefresh: () async {
+        await auth.refreshProfile();
+        await booking.loadEarnings('daily');
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           // ======================================================
           // 1. TOP HERO SECTION (Vibrant Pink Fuchsia Gradient)
           // ======================================================
@@ -508,10 +601,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           child: _buildHeroCard(
                             title: "Saldo Dompet",
                             subtitle: formatCurrency(auth.user?.balance ?? 0.0),
-                            badgeText: "TARIK DANA",
-                            badgeColor: const Color(0xFF8B5CF6),
+                            badgeText: booking.pendingEscrowBalance > 0
+                                ? "ESCROW: ${formatCurrency(booking.pendingEscrowBalance)}"
+                                : "TARIK DANA",
+                            badgeColor: booking.pendingEscrowBalance > 0
+                                ? const Color(0xFFF59E0B) // Warm Amber for Escrow Held
+                                : const Color(0xFF8B5CF6),
                             icon: Icons.account_balance_wallet_rounded,
-                            iconColor: const Color(0xFF8B5CF6),
+                            iconColor: booking.pendingEscrowBalance > 0
+                                ? const Color(0xFFF59E0B)
+                                : const Color(0xFF8B5CF6),
                             onTap: () {
                               setState(() {
                                 _currentIndex = 3; // Switch to Earnings/Wallet Tab
@@ -521,18 +620,18 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         ),
                         const SizedBox(width: 14),
 
-                        // Card 4: Riwayat & Komunitas
+                        // Card 4: Total Perjalanan & Riwayat Pesanan
                         Expanded(
                           child: _buildHeroCard(
                             title: "Total Perjalanan",
                             subtitle: "$totalRides Selesai",
-                            badgeText: "COMMUNITY",
+                            badgeText: "PESANAN",
                             badgeColor: AppTheme.primaryPink,
-                            icon: Icons.two_wheeler_rounded,
+                            icon: Icons.receipt_long_rounded,
                             iconColor: AppTheme.primaryPink,
                             onTap: () {
                               setState(() {
-                                _currentIndex = 1; // Switch to Community Tab
+                                _currentIndex = 1; // Switch to DriverOrdersScreen (Aktivitas & Pesanan)
                               });
                             },
                           ),
@@ -558,13 +657,13 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
                 const SizedBox(height: 24),
 
-                // --- ACTIVE ORDER (IF ANY) OR STANDBY RADAR ---
-                if (booking.activeBooking != null) ...[
+                // --- ONGOING LIVE TRIP (IF IN TRANSIT) OR STANDBY RADAR & UPCOMING SCHEDULES ---
+                if (booking.isCurrentlyOnTrip) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        "ORDER PENDAMPINGAN AKTIF",
+                        "PERJALANAN BERLANGSUNG",
                         style: GoogleFonts.plusJakartaSans(
                           color: AppTheme.primaryPink,
                           fontSize: 12,
@@ -590,7 +689,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              "BERLANGSUNG",
+                              "LIVE TRIP",
                               style: GoogleFonts.inter(
                                 color: const Color(0xFF10B981),
                                 fontSize: 9,
@@ -603,11 +702,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _buildActiveBookingCard(booking.activeBooking!),
+                  _buildActiveBookingCard(booking.ongoingTrip!),
+                  const SizedBox(height: 28),
+                ] else if (booking.pendingReviewBooking != null) ...[
+                  _buildPendingReviewCard(context, booking.pendingReviewBooking!),
                   const SizedBox(height: 28),
                 ] else ...[
                   _buildStandbyRadarCard(auth.isAvailable),
-                  const SizedBox(height: 26),
+                  const SizedBox(height: 16),
+                  if (booking.upcomingBookings.isNotEmpty) ...[
+                    _buildUpcomingSchedulePreviewCard(booking.upcomingBookings),
+                    const SizedBox(height: 16),
+                  ],
+                  const SizedBox(height: 10),
                 ],
 
                 // --- RECENT / AVAILABLE ROUTES LIST (Screen 1 List Items) ---
@@ -642,31 +749,65 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                 ),
                 const SizedBox(height: 14),
 
-                // Mock Recent Activities / Available Routes matching reference style
-                _buildRouteItemCard(
-                  vehicleIcon: Icons.directions_car_rounded,
-                  title: "Grand Indonesia • Lobby Shinta",
-                  subtitle: "Senopati, Kebayoran Baru • 23 Ags, 19:00",
-                  price: "Rp 120.000",
-                  statusTag: "SELESAI",
-                  isCompleted: true,
-                ),
-                _buildRouteItemCard(
-                  vehicleIcon: Icons.two_wheeler_rounded,
-                  title: "Mall Kelapa Gading 3",
-                  subtitle: "Pantai Indah Kapuk (PIK) • 20 Ags, 14:30",
-                  price: "Rp 145.000",
-                  statusTag: "SELESAI",
-                  isCompleted: true,
-                ),
-                _buildRouteItemCard(
-                  vehicleIcon: Icons.directions_car_rounded,
-                  title: "Stasiun Gambir • Pintu Timur",
-                  subtitle: "BSD City, Tangerang Selatan • 18 Ags, 09:15",
-                  price: "Rp 210.000",
-                  statusTag: "SELESAI",
-                  isCompleted: true,
-                ),
+                // Dynamic Recent Activities / Available Routes from real data
+                if (booking.pendingOffers.isNotEmpty) ...[
+                  ...booking.pendingOffers.take(3).map((offer) {
+                    return _buildRouteItemCard(
+                      vehicleIcon: Icons.directions_car_rounded,
+                      title: offer.dropoffLocation.isNotEmpty ? offer.dropoffLocation : 'Lokasi Tujuan',
+                      subtitle: "${offer.pickupLocation.isNotEmpty ? offer.pickupLocation : 'Titik Jemput'} • ${offer.duration} Jam",
+                      price: "Rp ${offer.totalPrice.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
+                      statusTag: "TERSEDIA",
+                      isCompleted: false,
+                      onTap: () => _showIncomingRequestDialog(offer),
+                    );
+                  }),
+                ] else if (booking.completedBookings.isNotEmpty) ...[
+                  ...booking.completedBookings.take(3).map((trip) {
+                    return _buildRouteItemCard(
+                      vehicleIcon: Icons.directions_car_rounded,
+                      title: trip.dropoffLocation.isNotEmpty ? trip.dropoffLocation : 'Lokasi Tujuan',
+                      subtitle: "${trip.pickupLocation.isNotEmpty ? trip.pickupLocation : 'Titik Jemput'} • ${trip.duration} Jam",
+                      price: "Rp ${trip.totalPrice.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
+                      statusTag: "SELESAI",
+                      isCompleted: true,
+                    );
+                  }),
+                ] else ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 20),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surface,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: AppTheme.border),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.route_rounded, size: 36, color: AppTheme.textMuted.withOpacity(0.4)),
+                        const SizedBox(height: 10),
+                        Text(
+                          "Belum ada rute atau aktivitas perjalanan",
+                          style: GoogleFonts.plusJakartaSans(
+                            color: AppTheme.textHighContrast,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "Permintaan baru dan riwayat perjalanan Anda akan muncul di sini.",
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.inter(
+                            color: AppTheme.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 30),
               ],
@@ -674,8 +815,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ============================================================
   // HERO 2x2 CARD COMPONENT (Matching Reference Screen 1)
@@ -916,6 +1058,171 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   // ============================================================
+  // UPCOMING SCHEDULE PREVIEW CARD (Dashboard preview)
+  // ============================================================
+  Widget _buildUpcomingSchedulePreviewCard(List<BookingModel> upcomingList) {
+    final earliest = upcomingList.first;
+    final scheduleText = BookingDateHelper.getScheduleDisplay(earliest.toJson());
+    final clientName = earliest.client?.fullName ?? 'Pelanggan';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryPink.withOpacity(0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header: Title + Count Badge
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryPink.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.calendar_month_rounded, color: AppTheme.primaryPink, size: 16),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Jadwal Reservasi Mendatang",
+                    style: GoogleFonts.plusJakartaSans(
+                      color: AppTheme.textHighContrast,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryPink.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  "${upcomingList.length} Terjadwal",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.primaryPink,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Info container
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.cardDeep,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppTheme.border),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.access_time_rounded, color: Colors.blueAccent, size: 14),
+                    const SizedBox(width: 6),
+                    Text(
+                      scheduleText,
+                      style: GoogleFonts.plusJakartaSans(
+                        color: Colors.blueAccent,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        "DP 50% Aman",
+                        style: GoogleFonts.inter(
+                          color: const Color(0xFF10B981),
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "$clientName • ${earliest.duration} Jam Pendampingan",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.textHighContrast,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "${earliest.pickupLocation} ➔ ${earliest.dropoffLocation}",
+                  style: GoogleFonts.inter(
+                    color: AppTheme.textMuted,
+                    fontSize: 11,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Quick Tap Action
+          InkWell(
+            onTap: () {
+              setState(() {
+                _currentIndex = 1; // Open DriverOrdersScreen
+              });
+            },
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    "Buka Aktivitas & Semua Jadwal",
+                    style: GoogleFonts.plusJakartaSans(
+                      color: AppTheme.primaryPink,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_forward_rounded, color: AppTheme.primaryPink, size: 14),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
   // ROUTE ITEM CARD (Screen 1 & 2 List Style)
   // ============================================================
   Widget _buildRouteItemCard({
@@ -925,8 +1232,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     required String price,
     required String statusTag,
     bool isCompleted = true,
+    VoidCallback? onTap,
   }) {
-    return Container(
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1015,6 +1326,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -1027,10 +1339,34 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
     return GestureDetector(
       onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const DriverActiveBookingScreen()),
-        );
+        final st = bookingData.status;
+        final sub = bookingData.additionalDetails?['sub_status']?.toString();
+        final isCountdownEnded = bookingData.additionalDetails?['countdown_ended'] == true;
+        final isDpPaid = st == 'dp_paid' ||
+            bookingData.additionalDetails?['dp_paid'] == true ||
+            sub == 'dp_paid';
+        final isWaiting = (st == 'accepted' || st == 'dp_paid' || sub == 'dp_paid' || (sub == null && st != 'on_the_way' && st != 'arrived' && st != 'started' && st != 'ongoing' && st != 'completed' && st != 'paid'));
+        
+        if (!isDpPaid && (st == 'accepted' || (sub == null && !isCountdownEnded && st != 'on_the_way' && st != 'arrived' && st != 'started' && st != 'ongoing' && st != 'completed' && st != 'paid'))) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DriverWaitingDpScreen(bookingData: bookingData),
+            ),
+          );
+        } else if (isWaiting && !isCountdownEnded) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DriverWaitingCountdownScreen(bookingData: bookingData),
+            ),
+          );
+        } else {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const DriverActiveBookingScreen()),
+          );
+        }
       },
       child: Container(
         padding: const EdgeInsets.all(18),
@@ -1087,21 +1423,30 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryPink.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    bookingData.status.toUpperCase(),
-                    style: GoogleFonts.plusJakartaSans(
-                      color: AppTheme.primaryPink,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                )
+                Builder(
+                  builder: (context) {
+                    final isDpUnpaid = bookingData.status == 'accepted' && 
+                        bookingData.additionalDetails?['dp_paid'] != true && 
+                        bookingData.additionalDetails?['sub_status'] != 'dp_paid';
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isDpUnpaid 
+                            ? Colors.amber.withOpacity(0.15) 
+                            : AppTheme.primaryPink.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        isDpUnpaid ? "MENUNGGU DP (50%)" : bookingData.status.toUpperCase(),
+                        style: GoogleFonts.plusJakartaSans(
+                          color: isDpUnpaid ? Colors.amber.shade800 : AppTheme.primaryPink,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
             const Divider(color: AppTheme.border, height: 24),
@@ -1168,14 +1513,126 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   // ============================================================
+  // PENDING REVIEW CARD (When trip settled & waiting driver review)
+  // ============================================================
+  Widget _buildPendingReviewCard(BuildContext context, BookingModel bookingData) {
+    final clientName = bookingData.client?.fullName ?? 'Klien';
+    final price = bookingData.totalPrice.toInt().toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]}.',
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF00FF7F).withOpacity(0.4), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00FF7F).withOpacity(0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00FF7F).withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check_circle_rounded, color: Color(0xFF00FF7F), size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "PESANAN SELESAI & LUNAS",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFF00FF7F),
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      "Pendapatan Rp $price telah masuk",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: AppTheme.textHighContrast,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: Colors.white38, size: 18),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () {
+                  Provider.of<BookingProvider>(context, listen: false).clearPendingReview();
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "Berikan rating & catatan rekomendasi untuk $clientName.",
+            style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11, height: 1.4),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => DriverOrderSummaryScreen(booking: bookingData),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.rate_review_rounded, size: 16, color: Colors.black),
+              label: Text(
+                "BERI RATING & CATATAN KLIEN ➔",
+                style: GoogleFonts.plusJakartaSans(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00FF7F),
+                foregroundColor: Colors.black,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
   // INCOMING REQUEST ALERT DIALOG (Preserved Logic + Clean Fuchsia)
   // ============================================================
   Future<void> _showIncomingRequestDialog(BookingModel request) {
     final bookingProvider = Provider.of<BookingProvider>(context, listen: false);
-    final String clientName = request.client?.fullName ?? 'Siti Rahma';
-    final String clientPhone = request.client?.phone ?? '+62 812-9876-5432';
-    const String bookingDate = 'Minggu, 07 Sep 2026';
-    const String bookingTime = '14:00 WIB';
+    final String clientName = request.client?.fullName ?? 'Pelanggan';
+    final String clientPhone = request.client?.phone ?? '-';
+    final dt = request.bookingDate ?? request.createdAt;
+    final List<String> monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+    final String bookingDate = "${dt.day} ${monthNames[dt.month]} ${dt.year}";
+    final String bookingTime = "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} WIB";
 
     return showDialog(
       context: context,
@@ -1274,7 +1731,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                       backgroundColor: AppTheme.border,
                                       backgroundImage: (request.client?.avatarUrl != null && request.client!.avatarUrl!.isNotEmpty)
                                           ? NetworkImage(_resolveImageUrl(request.client!.avatarUrl!))
-                                          : const NetworkImage('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'),
+                                          : null,
+                                      child: (request.client?.avatarUrl == null || request.client!.avatarUrl!.isEmpty)
+                                          ? const Icon(Icons.person, color: AppTheme.textMuted, size: 22)
+                                          : null,
                                     ),
                                     Positioned(
                                       bottom: 0,
@@ -1312,18 +1772,19 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                             decoration: BoxDecoration(
-                                              color: Colors.amber.withOpacity(0.2),
+                                              color: Colors.green.withOpacity(0.15),
                                               borderRadius: BorderRadius.circular(6),
+                                              border: Border.all(color: Colors.green.withOpacity(0.3)),
                                             ),
                                             child: Row(
                                               children: [
-                                                const Icon(Icons.star_rounded, color: Colors.amber, size: 12),
-                                                const SizedBox(width: 3),
+                                                const Icon(Icons.verified_user_rounded, color: Colors.green, size: 11),
+                                                const SizedBox(width: 4),
                                                 Text(
-                                                  "4.9",
+                                                  "Pelanggan Baru",
                                                   style: GoogleFonts.inter(
-                                                    color: Colors.amber,
-                                                    fontSize: 10,
+                                                    color: Colors.green,
+                                                    fontSize: 9,
                                                     fontWeight: FontWeight.bold,
                                                   ),
                                                 ),
@@ -1347,30 +1808,58 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             const Divider(color: AppTheme.border, height: 1),
                             const SizedBox(height: 8),
 
-                            // Reputation & Driver Notes Tags
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: [
-                                _buildReputationTag("Sopan & Tepat Waktu", Colors.green),
-                                _buildReputationTag("Bagus", AppTheme.primaryPink),
-                                _buildReputationTag("18 Trip Selesai", Colors.blueAccent),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              "💬 \"Klien sangat ramah & penjemputan jelas di lobby apartemen.\" — Driver Bagas P.",
-                              style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 11, fontStyle: FontStyle.italic),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 6),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                "👆 Klik Foto/Nama untuk Detail Profile & Review Mitra ➔",
-                                style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
+                            // Real Client Notes / Clean Status
+                            Builder(
+                              builder: (context) {
+                                final clientNotes = request.additionalDetails?['notes']?.toString() ??
+                                    request.additionalDetails?['clientNotes']?.toString() ??
+                                    request.additionalDetails?['specialRequests']?.toString() ??
+                                    request.additionalDetails?['additionalAntarJemputNotes']?.toString() ??
+                                    '';
+                                if (clientNotes.isNotEmpty) {
+                                  return Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.surface,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: AppTheme.border),
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Icon(Icons.edit_note_rounded, color: AppTheme.primaryPink, size: 16),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            "Catatan Klien: \"$clientNotes\"",
+                                            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11, fontStyle: FontStyle.italic),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                return Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.surface,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: AppTheme.border),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.info_outline_rounded, color: AppTheme.textMuted, size: 14),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        "Klien Baru • Belum ada catatan khusus",
+                                        style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
                             ),
                           ],
                         ),
@@ -1459,6 +1948,122 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
                     const SizedBox(height: 14),
 
+                    // Detail Layanan Utama & Multi-Layanan
+                    Builder(
+                      builder: (context) {
+                        final rawService = request.additionalDetails?['serviceType']?.toString() ??
+                            request.additionalDetails?['service_type']?.toString() ??
+                            'antar_jemput';
+                        String serviceLabel = 'Antar Jemput';
+                        IconData serviceIcon = Icons.directions_bike_rounded;
+                        if (rawService.contains('hangout')) {
+                          serviceLabel = 'Hangout & Teman Jalan';
+                          serviceIcon = Icons.coffee_rounded;
+                        } else if (rawService.contains('freedom')) {
+                          serviceLabel = 'Freedom Request';
+                          serviceIcon = Icons.explore_rounded;
+                        } else if (rawService.contains('sleep')) {
+                          serviceLabel = 'Sleep Call';
+                          serviceIcon = Icons.bedtime_rounded;
+                        } else if (rawService.contains('virtual') || rawService.contains('telepon')) {
+                          serviceLabel = 'Virtual Call';
+                          serviceIcon = Icons.video_call_rounded;
+                        } else if (rawService.contains('gaming') || rawService.contains('mabar')) {
+                          serviceLabel = 'Gaming Buddy';
+                          serviceIcon = Icons.sports_esports_rounded;
+                        }
+
+                        final vehicleType = request.additionalDetails?['vehicleType']?.toString() ??
+                            request.additionalDetails?['vehicle_type']?.toString() ?? '';
+                        final dynamic rawExtra = request.additionalDetails?['additionalServices'] ??
+                            request.additionalDetails?['services'];
+                        List<Map<String, dynamic>> extraServices = [];
+                        if (rawExtra is List) {
+                          for (var item in rawExtra) {
+                            if (item is Map) extraServices.add(Map<String, dynamic>.from(item));
+                          }
+                        }
+
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.cardDeep,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppTheme.border),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(serviceIcon, color: AppTheme.primaryPink, size: 16),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      "$serviceLabel ${vehicleType.isNotEmpty ? '($vehicleType)' : ''}",
+                                      style: GoogleFonts.plusJakartaSans(
+                                        color: AppTheme.textHighContrast,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primaryPink.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      "${request.duration} Jam",
+                                      style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 9, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (extraServices.isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                const Divider(color: AppTheme.border, height: 1),
+                                const SizedBox(height: 6),
+                                Text(
+                                  "Layanan Tambahan (+${extraServices.length}):",
+                                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10, fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 4),
+                                ...extraServices.map((extra) {
+                                  final title = extra['title'] ?? extra['name'] ?? extra['type'] ?? 'Layanan Ekstra';
+                                  final price = extra['price'] ?? extra['fee'] ?? 0;
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 2),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.add_circle_outline_rounded, color: Colors.green, size: 12),
+                                        const SizedBox(width: 6),
+                                        Expanded(
+                                          child: Text(
+                                            title.toString(),
+                                            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        Text(
+                                          "+Rp ${(price as num).toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
+                                          style: GoogleFonts.inter(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 10),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+
+                    const SizedBox(height: 14),
+
                     // Route Details Card
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -1504,16 +2109,93 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
                     const SizedBox(height: 14),
 
-                    // Total Payment Summary
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text("Total Est. Pendapatan:", style: GoogleFonts.plusJakartaSans(color: AppTheme.textMuted, fontSize: 12)),
-                        Text(
-                          "Rp ${(request.totalPrice).toStringAsFixed(0)}",
-                          style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 18),
-                        ),
-                      ],
+                    // Total Payment Summary & DP
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppTheme.surface,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppTheme.border),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text("DP Wajib (50% Masuk Saldo):", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11)),
+                              Text(
+                                "Rp ${(request.totalPrice * 0.5).toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
+                                style: GoogleFonts.inter(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text("Sisa Pelunasan Akhir:", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11)),
+                              Text(
+                                "Rp ${(request.totalPrice * 0.5).toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
+                                style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.w600, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          const Divider(color: AppTheme.border, height: 1),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text("Total Est. Pendapatan:", style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 12)),
+                              Text(
+                                "Rp ${(request.totalPrice).toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
+                                style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          if (!request.isFlexible)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppTheme.cardDeep,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppTheme.border),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.lock_rounded, color: AppTheme.primaryPink, size: 13),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    "Tarif Pas Resmi (Ditetapkan Admin • Non-Nego)",
+                                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryPink.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.auto_awesome_rounded, color: AppTheme.primaryPink, size: 13),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    "Layanan Fleksibel (Negosiasi / Tawar Diizinkan)",
+                                    style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.w700),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
 
                     const SizedBox(height: 18),
@@ -1537,28 +2219,31 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             child: Text("TOLAK", style: GoogleFonts.plusJakartaSans(color: AppTheme.danger, fontWeight: FontWeight.bold, fontSize: 12)),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () {
-                              if (dialogContext.mounted) {
-                                Navigator.pop(dialogContext);
-                              }
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => DriverNegotiationScreen(bookingData: request),
-                                ),
-                              );
-                            },
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: AppTheme.primaryPink),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
+                        // Tombol TAWAR HANYA muncul untuk Layanan Fleksibel (Freedom Request)
+                        if (request.isFlexible) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {
+                                if (dialogContext.mounted) {
+                                  Navigator.pop(dialogContext);
+                                }
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => DriverNegotiationScreen(bookingData: request),
+                                  ),
+                                );
+                              },
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: AppTheme.primaryPink),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                              ),
+                              child: Text("TAWAR", style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 12)),
                             ),
-                            child: Text("TAWAR", style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 12)),
                           ),
-                        ),
+                        ],
                         const SizedBox(width: 8),
                         Expanded(
                           flex: 2,
@@ -1583,7 +2268,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                                   }
                                   Navigator.push(
                                     context,
-                                    MaterialPageRoute(builder: (context) => const DriverActiveBookingScreen()),
+                                    MaterialPageRoute(
+                                      builder: (context) => DriverWaitingDpScreen(bookingData: request),
+                                    ),
                                   );
                                 }
                               },
@@ -1613,11 +2300,71 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   // ============================================================
-  // CUSTOMER DETAIL MODAL (Preserved)
+  // CUSTOMER DETAIL MODAL (Dynamic Real Data)
   // ============================================================
+  Future<Map<String, dynamic>> _fetchClientReputation(String? clientId) async {
+    if (clientId == null || clientId.isEmpty) {
+      return {'totalOrders': 0, 'cancelRate': 0, 'rating': 0.0, 'reviews': <Map<String, dynamic>>[]};
+    }
+    try {
+      final rows = await Supabase.instance.client
+          .from('bookings')
+          .select('id, status, additional_details, created_at')
+          .eq('user_id', clientId);
+
+      if (rows is List) {
+        int total = rows.length;
+        int cancelled = rows.where((b) => b['status'] == 'cancelled').length;
+        double cancelRate = total > 0 ? (cancelled / total) * 100 : 0.0;
+
+        List<Map<String, dynamic>> reviews = [];
+        double sumRating = 0;
+        int ratingCount = 0;
+
+        for (var b in rows) {
+          final add = b['additional_details'];
+          if (add is Map) {
+            final drvRating = add['driver_rating_client'];
+            final drvComment = add['driver_comment_client'];
+            final drvName = add['driver_name_reviewer'] ?? 'Mitra Pengemudi';
+            if (drvRating != null) {
+              final r = (drvRating as num).toDouble();
+              if (r > 0) {
+                sumRating += r;
+                ratingCount++;
+              }
+            }
+            if (drvComment != null && drvComment.toString().trim().isNotEmpty) {
+              final dateStr = b['created_at'] != null ? b['created_at'].toString().split('T').first : '-';
+              final isPositive = drvRating == null || (drvRating as num) >= 4;
+              reviews.add({
+                'driverName': drvName.toString(),
+                'date': dateStr,
+                'riskTag': isPositive ? 'Aman & Sopan' : 'Perlu Perhatian',
+                'riskColor': isPositive ? Colors.green : Colors.amber,
+                'note': drvComment.toString(),
+              });
+            }
+          }
+        }
+
+        double avgRating = ratingCount > 0 ? (sumRating / ratingCount) : 0.0;
+        return {
+          'totalOrders': total,
+          'cancelRate': cancelRate.toInt(),
+          'rating': avgRating,
+          'reviews': reviews,
+        };
+      }
+    } catch (e) {
+      debugPrint("Error fetching client reputation: $e");
+    }
+    return {'totalOrders': 0, 'cancelRate': 0, 'rating': 0.0, 'reviews': <Map<String, dynamic>>[]};
+  }
+
   void _showCustomerDetailSummaryModal(BuildContext context, BookingModel request) {
-    final String clientName = request.client?.fullName ?? 'Siti Rahma';
-    final String clientPhone = request.client?.phone ?? '+62 812-9876-5432';
+    final String clientName = request.client?.fullName ?? 'Pelanggan';
+    final String clientPhone = request.client?.phone ?? '-';
 
     showModalBottomSheet(
       context: context,
@@ -1664,7 +2411,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         backgroundColor: AppTheme.cardDeep,
                         backgroundImage: (request.client?.avatarUrl != null && request.client!.avatarUrl!.isNotEmpty)
                             ? NetworkImage(_resolveImageUrl(request.client!.avatarUrl!))
-                            : const NetworkImage('https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150'),
+                            : null,
+                        child: (request.client?.avatarUrl == null || request.client!.avatarUrl!.isEmpty)
+                            ? const Icon(Icons.person, color: AppTheme.textMuted, size: 30)
+                            : null,
                       ),
                       const SizedBox(width: 16),
                       Expanded(
@@ -1687,71 +2437,95 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                             ),
                             const SizedBox(height: 4),
                             Text(clientPhone, style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12)),
-                            const SizedBox(height: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryPink.withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text("VIP CLIENT • 18 TRIPS", style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold)),
-                            ),
                           ],
                         ),
                       ),
                     ],
                   ),
 
-                  const SizedBox(height: 20),
-                  const Divider(color: AppTheme.border),
                   const SizedBox(height: 16),
 
-                  // Stats Grid
-                  Row(
-                    children: [
-                      _buildStatBox("⭐ 4.9", "Rating Mitra"),
-                      const SizedBox(width: 10),
-                      _buildStatBox("18", "Total Order"),
-                      const SizedBox(width: 10),
-                      _buildStatBox("0%", "Pembatalan"),
-                    ],
-                  ),
+                  FutureBuilder<Map<String, dynamic>>(
+                    future: _fetchClientReputation(request.userId),
+                    builder: (context, snapshot) {
+                      final data = snapshot.data ?? {'totalOrders': 0, 'cancelRate': 0, 'rating': 0.0, 'reviews': <Map<String, dynamic>>[]};
+                      final totalOrders = data['totalOrders'] as int? ?? 0;
+                      final cancelRate = data['cancelRate'] as int? ?? 0;
+                      final rating = data['rating'] as double? ?? 0.0;
+                      final reviews = data['reviews'] as List<Map<String, dynamic>>? ?? [];
 
-                  const SizedBox(height: 22),
+                      final statusTag = totalOrders >= 5 ? "PELANGGAN SETIA • $totalOrders TRIP" : "PELANGGAN BARU • $totalOrders TRIP";
+                      final ratingDisplay = rating > 0 ? "⭐ ${rating.toStringAsFixed(1)}" : "-";
 
-                  Text(
-                    "REPUTASI & CATATAN DRIVER LAIN",
-                    style: GoogleFonts.plusJakartaSans(
-                      color: AppTheme.textHighContrast,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryPink.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(statusTag, style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold)),
+                          ),
+                          const SizedBox(height: 20),
+                          const Divider(color: AppTheme.border),
+                          const SizedBox(height: 16),
 
-                  _buildDriverNoteCard(
-                    driverName: "Bagas Pradana (★ DIAMOND TIER)",
-                    date: "26 Ags 2026",
-                    riskTag: "Aman & Sopan",
-                    riskColor: Colors.green,
-                    note: "Klien sangat ramah, komunikatif, dan menunggu tepat di titik jemput lobby apartemen.",
-                  ),
-                  const SizedBox(height: 10),
-                  _buildDriverNoteCard(
-                    driverName: "Rayhan Putra (★ GOLD TIER)",
-                    date: "14 Ags 2026",
-                    riskTag: "Baik & Tepat Waktu",
-                    riskColor: Colors.blueAccent,
-                    note: "Pembayaran tepat waktu, rute jelas, bersikap sopan dan kooperatif sepanjang jalan.",
-                  ),
-                  const SizedBox(height: 10),
-                  _buildDriverNoteCard(
-                    driverName: "Dimas Setiawan (★ PLATINUM TIER)",
-                    date: "02 Jul 2026",
-                    riskTag: "Waspada",
-                    riskColor: Colors.amber,
-                    note: "Minta perpanjangan waktu rute secara spontan. Disarankan untuk minta klien input Freedom Request di aplikasi.",
+                          // Stats Grid
+                          Row(
+                            children: [
+                              _buildStatBox(ratingDisplay, "Rating Mitra"),
+                              const SizedBox(width: 10),
+                              _buildStatBox("$totalOrders", "Total Order"),
+                              const SizedBox(width: 10),
+                              _buildStatBox("$cancelRate%", "Pembatalan"),
+                            ],
+                          ),
+
+                          const SizedBox(height: 22),
+
+                          Text(
+                            "REPUTASI & CATATAN DRIVER LAIN",
+                            style: GoogleFonts.plusJakartaSans(
+                              color: AppTheme.textHighContrast,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+
+                          if (reviews.isNotEmpty)
+                            ...reviews.map((r) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _buildDriverNoteCard(
+                                driverName: r['driverName'] as String,
+                                date: r['date'] as String,
+                                riskTag: r['riskTag'] as String,
+                                riskColor: r['riskColor'] as Color,
+                                note: r['note'] as String,
+                              ),
+                            ))
+                          else
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: AppTheme.cardDeep,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: AppTheme.border),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  "Belum ada catatan reputasi untuk klien ini.",
+                                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+                                ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
                   ),
 
                   const SizedBox(height: 24),

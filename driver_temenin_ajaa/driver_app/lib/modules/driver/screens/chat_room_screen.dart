@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../providers/auth_provider.dart';
 
 class DriverChatRoomScreen extends StatefulWidget {
   final String bookingId;
@@ -25,9 +27,9 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
   final ScrollController _scrollController = ScrollController();
   
   List<Map<String, dynamic>> _messages = [];
-  Map<String, dynamic>? _bookingData;
   StreamSubscription<List<Map<String, dynamic>>>? _streamSubscription;
   Timer? _pollingTimer;
+
   bool _isConnecting = true;
 
   @override
@@ -45,20 +47,6 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
     super.dispose();
   }
 
-  String _getMockClientReply(String driverMessage) {
-    final lower = driverMessage.toLowerCase();
-    if (lower.contains('halo') || lower.contains('hi') || lower.contains('hello')) {
-      return "Halo Kak! Saya siap menunggu di lokasi penjemputan.";
-    } else if (lower.contains('jalan') || lower.contains('menuju') || lower.contains('otw')) {
-      return "Siap Kak, hati-hati di jalan ya! Kabari kalau sudah sampai.";
-    } else if (lower.contains('sampai') || lower.contains('lokasi') || lower.contains('disini')) {
-      return "Baik Kak, saya langsung keluar ke lobi sekarang.";
-    } else if (lower.contains('terima kasih') || lower.contains('makasih') || lower.contains('thanks')) {
-      return "Sama-sama Kak! 🙏";
-    }
-    return "Baik Kak, terima kasih infonya. Saya tunggu ya.";
-  }
-
   void _subscribeToChat() {
     debugPrint('📡 Subscribing to chat updates for Booking: ${widget.bookingId}');
     if (widget.bookingId.isEmpty) {
@@ -71,17 +59,30 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
 
     try {
       _streamSubscription = Supabase.instance.client
-          .from('bookings')
+          .from('booking_messages')
           .stream(primaryKey: ['id'])
-          .eq('id', widget.bookingId)
+          .eq('booking_id', widget.bookingId)
+          .order('created_at', ascending: true)
           .listen((List<Map<String, dynamic>> data) {
-            if (data.isNotEmpty && mounted) {
+            if (mounted) {
+              final formatted = data.map((m) {
+                final sender = m['sender_role'] ?? m['sender'] ?? 'driver';
+                String time = '';
+                if (m['created_at'] != null) {
+                  final dt = DateTime.tryParse(m['created_at'].toString())?.toLocal() ?? DateTime.now();
+                  time = "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+                }
+                return {
+                  'id': m['id'],
+                  'sender': (sender == 'driver') ? 'driver' : 'user',
+                  'text': m['message'] ?? m['text'] ?? '',
+                  'time': time.isNotEmpty ? time : _getCurrentTime(),
+                  'timestamp': m['created_at'],
+                };
+              }).toList();
+
               setState(() {
-                _bookingData = data.first;
-                final details = _bookingData?['additional_details'] as Map<String, dynamic>?;
-                final msgs = details?['chat_messages'] as List<dynamic>?;
-                
-                _messages = msgs?.map((m) => Map<String, dynamic>.from(m as Map)).toList() ?? [];
+                _messages = formatted;
                 _isConnecting = false;
               });
               _scrollToBottom();
@@ -103,23 +104,35 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
       }
     }
 
-    // Polling fallback every 2 seconds for instant sync
-    _pollingTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      if (!mounted || widget.bookingId.contains('mock')) return;
+    // Polling fallback every 3 seconds for instant sync via booking_messages
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      if (!mounted || widget.bookingId.isEmpty) return;
       try {
         final data = await Supabase.instance.client
-            .from('bookings')
+            .from('booking_messages')
             .select()
-            .eq('id', widget.bookingId)
-            .maybeSingle();
-        if (data != null && mounted) {
-          _bookingData = data;
-          final details = data['additional_details'] as Map<String, dynamic>?;
-          final msgs = details?['chat_messages'] as List<dynamic>?;
-          final newMessages = msgs?.map((m) => Map<String, dynamic>.from(m as Map)).toList() ?? [];
-          if (newMessages.length != _messages.length) {
+            .eq('booking_id', widget.bookingId)
+            .order('created_at', ascending: true);
+        if (data is List && mounted) {
+          final formatted = data.map((m) {
+            final sender = m['sender_role'] ?? m['sender'] ?? 'driver';
+            String time = '';
+            if (m['created_at'] != null) {
+              final dt = DateTime.tryParse(m['created_at'].toString())?.toLocal() ?? DateTime.now();
+              time = "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+            }
+            return {
+              'id': m['id'],
+              'sender': (sender == 'driver') ? 'driver' : 'user',
+              'text': m['message'] ?? m['text'] ?? '',
+              'time': time.isNotEmpty ? time : _getCurrentTime(),
+              'timestamp': m['created_at'],
+            };
+          }).toList();
+
+          if (formatted.length != _messages.length) {
             setState(() {
-              _messages = newMessages;
+              _messages = formatted;
               _isConnecting = false;
             });
             _scrollToBottom();
@@ -131,12 +144,17 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
     });
   }
 
+  String _getCurrentTime() {
+    final now = DateTime.now();
+    return "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+  }
+
   void _sendMessage() async {
     final text = _msgController.text.trim();
     if (text.isEmpty) return;
 
     final now = DateTime.now();
-    final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
+    final timeStr = _getCurrentTime();
     
     final newMsg = {
       'sender': 'driver',
@@ -145,41 +163,29 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
       'timestamp': now.toIso8601String(),
     };
 
-    final isMock = widget.bookingId.isEmpty || widget.bookingId.contains('mock');
+    final updatedMessages = List<Map<String, dynamic>>.from(_messages)..add(newMsg);
 
-    if (!isMock) {
-      final updatedMessages = List<Map<String, dynamic>>.from(_messages)..add(newMsg);
+    // Optimistic UI update
+    setState(() {
+      _messages = updatedMessages;
+      _msgController.clear();
+    });
+    _scrollToBottom();
 
-      // Optimistic UI update
-      setState(() {
-        _messages = updatedMessages;
-        _msgController.clear();
-      });
-      _scrollToBottom();
-
-      // Write to database
+    if (widget.bookingId.isNotEmpty) {
+      // Write to dedicated booking_messages table (Never write to bookings.additional_details)
       try {
-        final freshRow = await Supabase.instance.client
-            .from('bookings')
-            .select('additional_details')
-            .eq('id', widget.bookingId)
-            .maybeSingle();
+        final auth = Provider.of<AuthProvider>(context, listen: false);
+        final user = Supabase.instance.client.auth.currentUser;
+        final senderId = user?.id ?? auth.user?.id ?? '00000000-0000-0000-0000-000000000000';
 
-        final currentDetails = Map<String, dynamic>.from(freshRow?['additional_details'] ?? _bookingData?['additional_details'] ?? {});
-        final serverMsgs = (currentDetails['chat_messages'] as List<dynamic>?)
-            ?.map((m) => Map<String, dynamic>.from(m as Map))
-            .toList() ?? [];
-        
-        serverMsgs.add(newMsg);
-        currentDetails['chat_messages'] = serverMsgs;
-
-        await Supabase.instance.client
-            .from('bookings')
-            .update({
-              'additional_details': currentDetails,
-            })
-            .eq('id', widget.bookingId);
-        debugPrint('✅ Message sent successfully to Supabase');
+        await Supabase.instance.client.from('booking_messages').insert({
+          'booking_id': widget.bookingId,
+          'sender_id': senderId,
+          'sender_role': 'driver',
+          'message': text,
+        });
+        debugPrint('✅ Message sent successfully to Supabase booking_messages');
       } catch (e) {
         debugPrint('❌ Failed to update messages in Supabase: $e');
         if (mounted) {
@@ -191,28 +197,6 @@ class _DriverChatRoomScreenState extends State<DriverChatRoomScreen> {
           );
         }
       }
-    } else {
-      // Mock simulation mode
-      setState(() {
-        _messages.add(newMsg);
-        _msgController.clear();
-      });
-      _scrollToBottom();
-
-      Future.delayed(const Duration(milliseconds: 1200), () {
-        if (mounted) {
-          final replyTime = DateTime.now();
-          final replyTimeStr = "${replyTime.hour.toString().padLeft(2, '0')}:${replyTime.minute.toString().padLeft(2, '0')}";
-          setState(() {
-            _messages.add({
-              'sender': 'user',
-              'text': _getMockClientReply(text),
-              'time': replyTimeStr,
-            });
-          });
-          _scrollToBottom();
-        }
-      });
     }
   }
 
