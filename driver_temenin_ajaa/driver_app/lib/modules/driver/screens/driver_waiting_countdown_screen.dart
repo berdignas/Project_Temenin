@@ -205,9 +205,7 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
     final isCountdownEnded = add['countdown_ended'] == true || add['countdown_ended'] == 'true';
 
     final isApprovedOrStarted = earlyReq == 'approved' ||
-        isCountdownEnded ||
-        subStatus == 'on_the_way' ||
-        status == 'ongoing';
+        subStatus == 'on_the_way';
 
     if (isApprovedOrStarted) {
       _hasTriggeredAutoOtw = true;
@@ -325,6 +323,244 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
 
   String _formatTime(int totalSeconds) {
     return BookingDateHelper.formatCountdownTime(totalSeconds);
+  }
+
+  Set<String> _collectAllPins(dynamic data) {
+    final pins = <String>{};
+    if (data == null) return pins;
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) {
+        pins.add(trimmed);
+      }
+      try {
+        final decoded = jsonDecode(trimmed);
+        pins.addAll(_collectAllPins(decoded));
+      } catch (_) {}
+    } else if (data is BookingModel) {
+      pins.addAll(_collectAllPins(data.additionalDetails));
+    } else if (data is Map) {
+      for (final key in [
+        'otp',
+        'security_pin',
+        'securityPin',
+        'pin',
+        'start_otp',
+        'startOtp',
+        'completion_otp',
+        'completionOtp',
+        'end_otp',
+        'endOtp'
+      ]) {
+        final val = data[key]?.toString().trim();
+        if (val != null && RegExp(r'^\d{4}$').hasMatch(val)) {
+          pins.add(val);
+        }
+      }
+      if (data['additional_details'] != null) {
+        pins.addAll(_collectAllPins(data['additional_details']));
+      }
+      if (data['additionalDetails'] != null) {
+        pins.addAll(_collectAllPins(data['additionalDetails']));
+      }
+    }
+    return pins;
+  }
+
+  Future<void> _showEnterClientPinDialog() async {
+    if (!mounted) return;
+
+    final pinController = TextEditingController();
+    String? errorMessage;
+    bool isVerifying = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: AppTheme.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+                side: const BorderSide(color: AppTheme.primaryPink, width: 1.5),
+              ),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryPink.withOpacity(0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.password_rounded, color: AppTheme.primaryPink, size: 22),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      "Masukkan PIN Klien",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: AppTheme.textHighContrast,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Minta 4 digit PIN yang tertera di layar aplikasi Klien untuk mengakhiri masa tunggu dan memulai perjalanan (OTW):",
+                    style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 13, height: 1.4),
+                  ),
+                  const SizedBox(height: 18),
+                  TextField(
+                    controller: pinController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 4,
+                    textAlign: TextAlign.center,
+                    autofocus: true,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 28,
+                      letterSpacing: 14,
+                      fontWeight: FontWeight.w900,
+                      color: AppTheme.primaryPink,
+                    ),
+                    decoration: InputDecoration(
+                      counterText: "",
+                      hintText: "••••",
+                      hintStyle: GoogleFonts.plusJakartaSans(
+                        fontSize: 24,
+                        letterSpacing: 12,
+                        color: AppTheme.textMuted.withOpacity(0.4),
+                      ),
+                      filled: true,
+                      fillColor: AppTheme.cardDeep,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: const BorderSide(color: AppTheme.border),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: const BorderSide(color: AppTheme.primaryPink, width: 2),
+                      ),
+                    ),
+                  ),
+                  if (errorMessage != null) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            errorMessage!,
+                            style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isVerifying ? null : () => Navigator.pop(dialogCtx),
+                  child: Text(
+                    "BATAL",
+                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: isVerifying
+                      ? null
+                      : () async {
+                          final enteredPin = pinController.text.trim();
+                          if (enteredPin.length != 4) {
+                            setDialogState(() {
+                              errorMessage = "Masukkan 4 digit PIN lengkap!";
+                            });
+                            return;
+                          }
+
+                          setDialogState(() {
+                            isVerifying = true;
+                            errorMessage = null;
+                          });
+
+                          final bId = _currentBooking.id.toString();
+                          final dynamic numId = int.tryParse(bId);
+
+                          Map<String, dynamic>? latestBooking;
+                          try {
+                            latestBooking = await Supabase.instance.client
+                                .from('bookings')
+                                .select()
+                                .eq('id', bId)
+                                .maybeSingle();
+                          } catch (_) {}
+
+                          if (latestBooking == null && numId != null) {
+                            try {
+                              latestBooking = await Supabase.instance.client
+                                  .from('bookings')
+                                  .select()
+                                  .eq('id', numId)
+                                  .maybeSingle();
+                            } catch (_) {}
+                          }
+
+                          final validPins = _collectAllPins(latestBooking)
+                            ..addAll(_collectAllPins(_currentBooking.additionalDetails))
+                            ..addAll(_collectAllPins(_currentBooking.toJson()));
+
+                          debugPrint("🔍 PIN Verification: Valid PINs in DB=$validPins, Entered=$enteredPin");
+
+                          if (validPins.contains(enteredPin)) {
+                            Navigator.pop(dialogCtx);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text("✅ PIN Berhasil Diverifikasi! Memulai perjalanan (OTW)..."),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                            _startTripOtw();
+                          } else {
+                            setDialogState(() {
+                              isVerifying = false;
+                              errorMessage = "PIN tidak cocok dengan Klien! Pastikan meminta 4 digit PIN yang tampil di aplikasi Klien.";
+                            });
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPink,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                  ),
+                  child: isVerifying
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : Text(
+                          "VERIFIKASI & BERANGKAT",
+                          style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold),
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _showPinVerificationDialog() async {
@@ -719,26 +955,18 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
                     const SizedBox(height: 16),
                     if (!_isCountdownFinished)
                       OutlinedButton.icon(
-                        onPressed: _earlyRequestStatus == 'pending' ? null : _showPinVerificationDialog,
-                        icon: Icon(
-                          _earlyRequestStatus == 'pending' ? Icons.hourglass_top_rounded : Icons.flash_on_rounded,
-                          color: _earlyRequestStatus == 'pending' ? Colors.grey : Colors.amber,
-                          size: 16,
-                        ),
+                        onPressed: _showEnterClientPinDialog,
+                        icon: const Icon(Icons.password_rounded, color: Colors.amber, size: 16),
                         label: Text(
-                          _earlyRequestStatus == 'pending'
-                              ? "⏳ Menunggu Konfirmasi Klien..."
-                              : "⚡ Mulai Lebih Awal (Minta Persetujuan Klien)",
+                          "⚡ Mulai Lebih Awal (Masukkan PIN Klien)",
                           style: GoogleFonts.plusJakartaSans(
-                            color: _earlyRequestStatus == 'pending' ? Colors.grey : Colors.amber,
+                            color: Colors.amber,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(
-                            color: _earlyRequestStatus == 'pending' ? Colors.grey.withOpacity(0.5) : Colors.amber.withOpacity(0.5),
-                          ),
+                          side: BorderSide(color: Colors.amber.withOpacity(0.6)),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         ),
@@ -1058,74 +1286,54 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
               const SizedBox(height: 30),
 
               // ==========================================
-              // ACTION BUTTON (LOCKED OR ACTIVE)
+              // ACTION BUTTON (INPUT CLIENT PIN TO START OTW)
               // ==========================================
-              if (!_isCountdownFinished)
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.cardDeep,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.border),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.lock_clock_rounded, color: AppTheme.textMuted, size: 18),
-                      const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          "TOMBOL OTW AKTIF SETELAH COUNTDOWN SELESAI",
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.plusJakartaSans(
-                            color: AppTheme.textMuted,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Container(
-                  width: double.infinity,
-                  height: 54,
-                  decoration: BoxDecoration(
-                    gradient: AppTheme.primaryGradient,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.primaryPink.withOpacity(0.4),
-                        blurRadius: 15,
-                        offset: const Offset(0, 4),
-                      )
-                    ],
-                  ),
-                  child: ElevatedButton(
-                    onPressed: _isStartingTrip ? null : _startTripOtw,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                    child: _isStartingTrip
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                          )
-                        : Text(
-                            "MULAI PERJALANAN (OTW) ➔",
-                            style: GoogleFonts.plusJakartaSans(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                  ),
+              Container(
+                width: double.infinity,
+                height: 54,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryPink.withOpacity(0.4),
+                      blurRadius: 15,
+                      offset: const Offset(0, 4),
+                    )
+                  ],
                 ),
+                child: ElevatedButton(
+                  onPressed: _isStartingTrip ? null : _showEnterClientPinDialog,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: _isStartingTrip
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.pin_rounded, color: Colors.white, size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              _isCountdownFinished
+                                  ? "MASUKKAN PIN KLIEN (MULAI OTW) ➔"
+                                  : "AKHIRI TUNGGU & MASUKKAN PIN ➔",
+                              style: GoogleFonts.plusJakartaSans(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
 
               const SizedBox(height: 20),
             ],

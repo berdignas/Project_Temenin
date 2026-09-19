@@ -815,6 +815,10 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     );
   }
 
+  void _handleClientBackNavigation() {
+    Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final Map<String, dynamic> details = (_bookingDetails != null && _bookingDetails!.containsKey('additional_details'))
@@ -1002,19 +1006,11 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       );
     }
 
-    void handleClientBackNavigation() {
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      } else {
-        Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
-      }
-    }
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
-          handleClientBackNavigation();
+          _handleClientBackNavigation();
         }
       },
       child: Scaffold(
@@ -1109,11 +1105,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
         children: [
           GestureDetector(
             onTap: () {
-              if (Navigator.canPop(context)) {
-                Navigator.pop(context);
-              } else {
-                Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
-              }
+              _handleClientBackNavigation();
             },
             child: Container(
               padding: const EdgeInsets.all(8),

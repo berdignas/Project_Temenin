@@ -79,22 +79,18 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
       _remainingSeconds = 300;
     }
 
-    // Check if countdown ended or trip already started in DB/bookingData
+    // Check if trip already started in DB/bookingData (via driver PIN verification)
     final add = _parseMap(_currentDetails['additional_details']) ?? _parseMap(_currentDetails['additionalDetails']);
     final st = _currentDetails['status']?.toString().toLowerCase();
     final sub = add?['sub_status']?.toString().toLowerCase();
-    final isCountdownEnded = add?['countdown_ended'] == true || add?['countdown_ended'] == 'true';
 
-    // If still in dp_paid or pending driver arrival and countdown not ended, DO NOT skip countdown
-    final isWaitingPrep = !isCountdownEnded && (sub == 'dp_paid' || st == 'dp_paid' || (sub == null && st == 'accepted'));
-    final isTripStarted = isCountdownEnded ||
-        sub == 'on_the_way' ||
+    final isTripStarted = sub == 'on_the_way' ||
         (st == 'on_the_way' && sub != 'dp_paid') ||
         sub == 'arrived' ||
         sub == 'started' ||
         sub == 'completed';
 
-    if (!isWaitingPrep && isTripStarted) {
+    if (isTripStarted) {
       _remainingSeconds = 0;
       _isCountdownFinished = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -106,7 +102,8 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     }
 
     if (_isCountdownFinished || _remainingSeconds <= 0) {
-      _handleCountdownFinished();
+      _remainingSeconds = 0;
+      _isCountdownFinished = true;
       return;
     }
 
@@ -142,64 +139,6 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     } catch (e) {
       debugPrint("Error playing notification sound: $e");
     }
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-          side: const BorderSide(color: AppTheme.primaryPink, width: 1.5),
-        ),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppTheme.primaryPink.withOpacity(0.15),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.notifications_active_rounded, color: AppTheme.primaryPink, size: 24),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                "Waktu Tunggu Selesai!",
-                style: GoogleFonts.plusJakartaSans(
-                  color: AppTheme.textHighContrast,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
-        content: Text(
-          "Waktu countdown jadwal layanan telah tiba! Mitra pengemudi Anda kini bersiap untuk memulai perjalanan (OTW) menuju lokasi Anda.",
-          style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 13, height: 1.5),
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _navigateToTracking();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryPink,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            ),
-            child: Text(
-              "LIHAT PELACAKAN (OTW)",
-              style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   bool _isShowingEarlyRequestDialog = false;
@@ -207,10 +146,25 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
   void _checkStatusAndNavigate(Map<String, dynamic> row) {
     if (!mounted || _isNavigating) return;
 
+    // Keep PIN synced with DB
+    final dbPin = _extractPin(row);
+    if (dbPin != null && dbPin.isNotEmpty && dbPin != _securityPin) {
+      setState(() {
+        _securityPin = dbPin;
+      });
+    }
+
     final status = row['status']?.toString().toLowerCase();
     final add = _parseMap(row['additional_details']) ?? _parseMap(row['additionalDetails']);
     final subStatus = add?['sub_status']?.toString().toLowerCase();
     final isCountdownEnded = add?['countdown_ended'] == true || add?['countdown_ended'] == 'true';
+    if (isCountdownEnded && !_isCountdownFinished) {
+      setState(() {
+        _remainingSeconds = 0;
+        _isCountdownFinished = true;
+      });
+    }
+
     final earlyReq = add?['early_start_request']?.toString();
 
     // Check if driver sent an early start request ('pending')
@@ -220,13 +174,8 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
       return;
     }
 
-    // If still waiting for schedule (dp_paid) and countdown has not ended, stay on countdown!
-    if (!isCountdownEnded && (subStatus == 'dp_paid' || status == 'dp_paid' || (subStatus == null && status == 'accepted'))) {
-      return;
-    }
-
-    final shouldNavigate = isCountdownEnded ||
-        subStatus == 'on_the_way' ||
+    // Trip has started when driver verified PIN and sub_status is 'on_the_way'
+    final shouldNavigate = subStatus == 'on_the_way' ||
         (subStatus != 'dp_paid' && status == 'on_the_way') ||
         subStatus == 'arrived' ||
         subStatus == 'started' ||
@@ -250,10 +199,21 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
         debugPrint("Error playing notification sound: $e");
       }
 
-      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("🚀 Driver telah memulai perjalanan (OTW) menuju lokasi Anda!"), backgroundColor: Colors.green,)); } });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("🚀 PIN Cocok! Driver telah memulai perjalanan (OTW) menuju lokasi Anda!"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      });
 
-      final nextStatus = (subStatus != null && subStatus.isNotEmpty) ? subStatus : (status == 'ongoing' ? 'on_the_way' : status ?? 'on_the_way');
-      _navigateToTracking(nextStatus: nextStatus);
+      final nextStatus = (subStatus != null && subStatus.isNotEmpty)
+          ? subStatus
+          : (status == 'ongoing' ? 'on_the_way' : status ?? 'on_the_way');
+      _navigateToTracking(nextStatus: nextStatus, force: true);
     }
   }
 
@@ -433,11 +393,16 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('id', queryId)
-          .listen((rows) {
-            if (rows.isNotEmpty && mounted) {
-              _checkStatusAndNavigate(rows.first);
-            }
-          });
+          .listen(
+            (rows) {
+              if (rows.isNotEmpty && mounted) {
+                _checkStatusAndNavigate(rows.first);
+              }
+            },
+            onError: (err) {
+              debugPrint("Error in client booking stream: $err");
+            },
+          );
     } catch (e) {
       debugPrint("Error in client booking stream: $e");
     }
@@ -475,21 +440,42 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
               : <String, dynamic>{});
       existingAdd['otp'] = pin;
       existingAdd['security_pin'] = pin;
+      existingAdd['pin'] = pin;
 
       try {
         await Supabase.instance.client
             .from('bookings')
-            .update({'additional_details': existingAdd})
+            .update({
+              'otp': pin,
+              'additional_details': existingAdd,
+            })
             .eq('id', strId);
-      } catch (_) {}
+      } catch (_) {
+        try {
+          await Supabase.instance.client
+              .from('bookings')
+              .update({'additional_details': existingAdd})
+              .eq('id', strId);
+        } catch (_) {}
+      }
 
       if (numId != null) {
         try {
           await Supabase.instance.client
               .from('bookings')
-              .update({'additional_details': existingAdd})
+              .update({
+                'otp': pin,
+                'additional_details': existingAdd,
+              })
               .eq('id', numId);
-        } catch (_) {}
+        } catch (_) {
+          try {
+            await Supabase.instance.client
+                .from('bookings')
+                .update({'additional_details': existingAdd})
+                .eq('id', numId);
+          } catch (_) {}
+        }
       }
     } catch (e) {
       debugPrint("Error saving PIN to Supabase: $e");
@@ -498,9 +484,20 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
 
   String? _extractPin(dynamic data) {
     if (data == null) return null;
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) return trimmed;
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map) return _extractPin(decoded);
+      } catch (_) {}
+      return null;
+    }
     if (data is Map) {
-      final direct = data['otp']?.toString().trim();
-      if (direct != null && direct.isNotEmpty && direct != 'null') return direct;
+      for (final key in ['otp', 'security_pin', 'securityPin', 'pin', 'start_otp', 'startOtp']) {
+        final val = data[key]?.toString().trim();
+        if (val != null && RegExp(r'^\d{4}$').hasMatch(val)) return val;
+      }
       if (data['additional_details'] is Map) {
         final sub = _extractPin(data['additional_details']);
         if (sub != null) return sub;
@@ -640,8 +637,8 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     );
   }
 
-  void _navigateToTracking({String? nextStatus}) {
-    if (_isNavigating) return;
+  void _navigateToTracking({String? nextStatus, bool force = false}) {
+    if (_isNavigating && !force) return;
     _isNavigating = true;
     _countdownTimer?.cancel();
     _pollingTimer?.cancel();
@@ -718,24 +715,33 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     final num totalPayment = _currentDetails['totalPayment'] ?? _currentDetails['totalPrice'] ?? _currentDetails['total_price'] ?? 0;
     final num dpAmount = _currentDetails['dp'] ?? (totalPayment * 0.5);
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: Text(
-          "Menunggu Jadwal Layanan",
-          style: GoogleFonts.plusJakartaSans(
-            color: AppTheme.textHighContrast,
-            fontWeight: FontWeight.w800,
-            fontSize: 16,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: Text(
+            "Menunggu Jadwal Layanan",
+            style: GoogleFonts.plusJakartaSans(
+              color: AppTheme.textHighContrast,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
+          ),
+          backgroundColor: AppTheme.surface,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textHighContrast, size: 18),
+            onPressed: () {
+              Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+            },
           ),
         ),
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textHighContrast, size: 18),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -859,11 +865,11 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
               // ==========================================
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
                   color: AppTheme.surface,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35)),
+                  border: Border.all(color: AppTheme.primaryPink.withOpacity(0.4), width: 1.5),
                   boxShadow: [
                     BoxShadow(
                       color: AppTheme.primaryPink.withOpacity(0.08),
@@ -877,28 +883,110 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.verified_user_rounded, color: AppTheme.primaryPink, size: 18),
+                        const Icon(Icons.pin_rounded, color: AppTheme.primaryPink, size: 20),
                         const SizedBox(width: 8),
                         Text(
-                          "STATUS PERSIAPAN LAYANAN",
+                          "PIN KEBERANGKATAN (OTW)",
                           style: GoogleFonts.plusJakartaSans(
                             color: AppTheme.primaryPink,
-                            fontSize: 12,
+                            fontSize: 13,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.5,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 14),
+                    const SizedBox(height: 10),
 
                     Text(
-                      "Driver Anda sedang bersiap untuk penjemputan. Anda dapat menekan tombol di bawah untuk meminta keberangkatan lebih awal.",
+                      "Berikan 4 digit PIN ini kepada Driver saat Driver siap memulai perjalanan (OTW):",
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        color: AppTheme.textMediumContrast,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 4 Digit PIN Display Boxes
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: (_securityPin.length == 4 ? _securityPin : "1234").split('').map((digit) {
+                        return Container(
+                          margin: const EdgeInsets.symmetric(horizontal: 6),
+                          width: 48,
+                          height: 58,
+                          decoration: BoxDecoration(
+                            color: AppTheme.cardDeep,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: AppTheme.primaryPink, width: 2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppTheme.primaryPink.withOpacity(0.15),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            digit,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                              color: AppTheme.primaryPink,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Copy PIN Button
+                    InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: _securityPin));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("📋 PIN disalin ke clipboard!"),
+                            duration: Duration(seconds: 2),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryPink.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.copy_rounded, color: AppTheme.primaryPink, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              "Salin PIN",
+                              style: GoogleFonts.inter(
+                                color: AppTheme.primaryPink,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      "Mitra Driver wajib memasukkan PIN ini untuk mengakhiri masa tunggu & memulai perjalanan.",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.inter(
                         color: AppTheme.textMuted,
-                        fontSize: 12,
-                        height: 1.4,
+                        fontSize: 11,
+                        height: 1.3,
                       ),
                     ),
                   ],
@@ -1119,46 +1207,46 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
               const SizedBox(height: 24),
 
               // ==========================================
-              // ACTION BUTTON (GO TO TRACKING IF FINISHED)
+              // ACTION BUTTON (GO TO TRACKING)
               // ==========================================
-              if (_isCountdownFinished)
-                Container(
-                  width: double.infinity,
-                  height: 54,
-                  decoration: BoxDecoration(
-                    gradient: AppTheme.primaryGradient,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.primaryPink.withOpacity(0.4),
-                        blurRadius: 15,
-                        offset: const Offset(0, 4),
-                      )
-                    ],
+              Container(
+                width: double.infinity,
+                height: 54,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primaryPink.withOpacity(0.4),
+                      blurRadius: 15,
+                      offset: const Offset(0, 4),
+                    )
+                  ],
+                ),
+                child: ElevatedButton(
+                  onPressed: () => _navigateToTracking(force: true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   ),
-                  child: ElevatedButton(
-                    onPressed: _navigateToTracking,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                    child: Text(
-                      "LIHAT PELACAKAN PERJALANAN ➔",
-                      style: GoogleFonts.plusJakartaSans(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
+                  child: Text(
+                    "LIHAT PELACAKAN PERJALANAN ➔",
+                    style: GoogleFonts.plusJakartaSans(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
                     ),
                   ),
                 ),
+              ),
 
               const SizedBox(height: 20),
             ],
           ),
         ),
       ),
-    );
+    ),
+  );
   }
 }
