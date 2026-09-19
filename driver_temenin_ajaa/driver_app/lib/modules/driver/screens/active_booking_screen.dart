@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -17,18 +18,77 @@ class DriverActiveBookingScreen extends StatefulWidget {
 }
 
 class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> with TickerProviderStateMixin {
+  Set<String> _collectAllPins(dynamic data) {
+    final Set<String> pins = {};
+    if (data == null) return pins;
+
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) {
+        pins.add(trimmed);
+      }
+      try {
+        final decoded = jsonDecode(trimmed);
+        pins.addAll(_collectAllPins(decoded));
+      } catch (_) {}
+    } else if (data is BookingModel) {
+      pins.addAll(_collectAllPins(data.additionalDetails));
+    } else if (data is Map) {
+      for (final key in [
+        'otp',
+        'security_pin',
+        'securityPin',
+        'pin',
+        'start_otp',
+        'startOtp',
+        'completion_otp',
+        'completionOtp',
+        'end_otp',
+        'endOtp'
+      ]) {
+        final val = data[key]?.toString().trim();
+        if (val != null && RegExp(r'^\d{4}$').hasMatch(val)) {
+          pins.add(val);
+        }
+      }
+      if (data['additional_details'] != null) {
+        pins.addAll(_collectAllPins(data['additional_details']));
+      }
+      if (data['additionalDetails'] != null) {
+        pins.addAll(_collectAllPins(data['additionalDetails']));
+      }
+    }
+    return pins;
+  }
+
   String? _extractOtp(dynamic data) {
     if (data == null) return null;
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) return trimmed;
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map) return _extractOtp(decoded);
+      } catch (_) {}
+      return null;
+    }
+    if (data is BookingModel) {
+      return _extractOtp(data.additionalDetails);
+    }
     if (data is Map) {
-      final direct = data['otp']?.toString().trim();
+      final direct = data['otp']?.toString().trim() ??
+          data['security_pin']?.toString().trim() ??
+          data['pin']?.toString().trim() ??
+          data['start_otp']?.toString().trim() ??
+          data['startOtp']?.toString().trim();
       if (direct != null && direct.isNotEmpty && direct != 'null') {
         return direct;
       }
-      if (data['additional_details'] is Map) {
+      if (data['additional_details'] != null) {
         final sub = _extractOtp(data['additional_details']);
         if (sub != null) return sub;
       }
-      if (data['additionalDetails'] is Map) {
+      if (data['additionalDetails'] != null) {
         final sub = _extractOtp(data['additionalDetails']);
         if (sub != null) return sub;
       }
@@ -38,16 +98,31 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
 
   String? _extractCompletionOtp(dynamic data) {
     if (data == null) return null;
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) return trimmed;
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map) return _extractCompletionOtp(decoded);
+      } catch (_) {}
+      return null;
+    }
+    if (data is BookingModel) {
+      return _extractCompletionOtp(data.additionalDetails);
+    }
     if (data is Map) {
-      final direct = data['completion_otp']?.toString().trim() ?? data['end_otp']?.toString().trim();
+      final direct = data['completion_otp']?.toString().trim() ??
+          data['completionOtp']?.toString().trim() ??
+          data['end_otp']?.toString().trim() ??
+          data['endOtp']?.toString().trim();
       if (direct != null && direct.isNotEmpty && direct != 'null') {
         return direct;
       }
-      if (data['additional_details'] is Map) {
+      if (data['additional_details'] != null) {
         final sub = _extractCompletionOtp(data['additional_details']);
         if (sub != null) return sub;
       }
-      if (data['additionalDetails'] is Map) {
+      if (data['additionalDetails'] != null) {
         final sub = _extractCompletionOtp(data['additionalDetails']);
         if (sub != null) return sub;
       }
@@ -272,7 +347,7 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
         nextStatus = 'arrived';
         break;
       case 'arrived':
-        actionText = "VERIFIKASI PIN KLIEN UNTUK MEMULAI";
+        actionText = "MULAI SESI PENDAMPINGAN";
         nextStatus = 'started';
         break;
       case 'started':
@@ -1052,13 +1127,13 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
               )
             ]
           ),
-          child: ElevatedButton(
-            onPressed: provider.isLoading
-                ? null
-                : () async {
-                    if (nextStatus == 'started' || nextStatus == 'on_the_way') {
-                      final active = provider.activeBooking;
-                      // Ambil OTP dari active booking
+                  child: ElevatedButton(
+                    onPressed: provider.isLoading
+                        ? null
+                        : () async {
+                            if (nextStatus == 'started') {
+                              final active = provider.activeBooking;
+                              // Ambil OTP dari active booking
                       dynamic rawOtp = _extractOtp(active?.additionalDetails) ?? _extractOtp(active);
                       
                       // Fetch directly from Supabase for this booking to be 100% up-to-date
@@ -1926,133 +2001,74 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
     String targetStatus = 'started',
     String? subtitleText,
   }) {
-    final controller = TextEditingController();
-    String? errorMessage;
-
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF16181D),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-              side: BorderSide(color: const Color(0xFFFF2E93).withOpacity(0.2)),
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF16181D),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: BorderSide(color: const Color(0xFFFF2E93).withOpacity(0.3)),
+          ),
+          title: Text(
+            targetStatus == 'completed' ? "Konfirmasi Selesai Layanan" : "Konfirmasi Memulai Layanan",
+            style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            targetStatus == 'completed'
+                ? "Apakah Anda yakin ingin menyelesaikan sesi pendampingan ini sekarang?"
+                : "Apakah Anda sudah bertemu dengan Klien dan siap untuk memulai sesi pendampingan sekarang?",
+            style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text("Batal", style: GoogleFonts.poppins(color: Colors.white30)),
             ),
-            title: Text(
-              "Verifikasi PIN Keamanan",
-              style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  subtitleText ?? "Tanyakan 4-digit PIN keamanan kepada klien untuk memverifikasi tindakan ini.",
-                  style: GoogleFonts.poppins(color: Colors.white70, fontSize: 13),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: controller,
-                  keyboardType: TextInputType.number,
-                  maxLength: 4,
-                  obscureText: true,
-                  style: GoogleFonts.shareTechMono(color: Colors.white, fontSize: 24, letterSpacing: 8),
-                  decoration: InputDecoration(
-                    counterText: "",
-                    filled: true,
-                    fillColor: const Color(0xFF0B0910),
-                    hintText: "••••",
-                    hintStyle: GoogleFonts.shareTechMono(color: Colors.white24, fontSize: 24, letterSpacing: 8),
-                    errorText: errorMessage,
-                    errorStyle: GoogleFonts.poppins(color: Colors.redAccent, fontSize: 11),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFFFF2E93)),
-                    ),
-                  ),
-                  onChanged: (_) {
-                    if (errorMessage != null) {
-                      setState(() {
-                        errorMessage = null;
-                      });
-                    }
-                  },
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text("Batal", style: GoogleFonts.poppins(color: Colors.white30)),
+            ElevatedButton(
+              onPressed: provider.isLoading
+                  ? null
+                  : () async {
+                      Navigator.pop(dialogContext);
+
+                      final success = await provider.updateBookingProgress(
+                        targetStatus,
+                        authProvider: Provider.of<AuthProvider>(context, listen: false),
+                      );
+                      if (success && context.mounted) {
+                        final msg = targetStatus == 'completed'
+                            ? "Sesi pendampingan telah diselesaikan!"
+                            : "Layanan pendampingan dimulai!";
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(msg),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                        if (targetStatus == 'completed') {
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => DriverOrderSummaryScreen(booking: provider.activeBooking),
+                            ),
+                          );
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryPink,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-                      ElevatedButton(
-                        onPressed: provider.isLoading
-                            ? null
-                            : () async {
-                                final inputPin = controller.text.trim();
-                                debugPrint("Verifying PIN: input='$inputPin', expected='$expectedPin'");
-                                
-                                final isMatch = (expectedPin.isNotEmpty && inputPin == expectedPin) ||
-                                                (expectedPin.isEmpty && inputPin.length == 4);
-                                
-                                if (isMatch) {
-                                  Navigator.pop(context);
-                                  
-                                  final success = await provider.updateBookingProgress(
-                                    targetStatus,
-                                    authProvider: Provider.of<AuthProvider>(context, listen: false),
-                                  );
-                                  if (success && context.mounted) {
-                                    final msg = targetStatus == 'completed'
-                                        ? "PIN Terverifikasi! Sesi pendampingan diselesaikan."
-                                        : "PIN Terverifikasi! Layanan pendampingan dimulai.";
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(msg),
-                                        backgroundColor: Colors.green,
-                                      ),
-                                    );
-                                    if (targetStatus == 'completed') {
-                                      Navigator.pushReplacement(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => DriverOrderSummaryScreen(booking: provider.activeBooking),
-                                        ),
-                                      );
-                                    }
-                                  }
-                                } else {
-                                  setState(() {
-                                    errorMessage = "PIN tidak sesuai dengan PIN di aplikasi Klien. Silakan cek kembali.";
-                                  });
-                                }
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFF2E93),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: provider.isLoading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                ),
-                              )
-                            : Text("Verifikasi", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-                      ),
-            ],
-          );
-        },
-      ),
+              child: Text(
+                targetStatus == 'completed' ? "YA, SELESAIKAN" : "YA, MULAI SESI",
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

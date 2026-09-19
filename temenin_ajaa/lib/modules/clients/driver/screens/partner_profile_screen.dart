@@ -248,14 +248,29 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
 
           if (vName != null && vName.isNotEmpty && vName != 'Belum diatur') {
             _parsedVehicles.add({
-              'type': (vType != null && vType.isNotEmpty) ? vType : 'Motor',
+              'type': _detectVehicleCategory(vName, vType),
               'name': vName,
               'plate_number': (vPlate != null && vPlate.isNotEmpty) ? vPlate : '',
               'image': (vImg != null && vImg.isNotEmpty) ? vImg : null,
-              'age': '< 5 Tahun',
+              'age': '< 3 Tahun',
             });
           }
         }
+      }
+
+      if (_parsedVehicles.isEmpty) {
+        final pVeh = widget.partnerData?['vehicle']?.toString().trim();
+        final vName = (pVeh != null && pVeh.isNotEmpty && pVeh != 'Kendaraan Driver')
+            ? pVeh
+            : 'Honda Vario 160';
+        final vImg = widget.partnerData?['vehicle_image'] ?? widget.partnerData?['image'];
+        final detectedCat = _detectVehicleCategory(vName, widget.partnerData?['vehicle_type']);
+        _parsedVehicles.add({
+          'type': detectedCat,
+          'name': vName,
+          'image': (vImg != null && vImg.toString().isNotEmpty && !vImg.toString().contains('dummy') && !vImg.toString().contains('ui-avatars')) ? vImg.toString() : null,
+          'age': '< 3 Tahun',
+        });
       }
 
       final targetDriverId = _dbDriverData?['id'] ?? driverId;
@@ -635,6 +650,318 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
     );
   }
 
+  String _detectVehicleCategory(String name, [String? rawType]) {
+    final lowerName = name.toLowerCase();
+    final lowerType = (rawType ?? '').toLowerCase();
+
+    if (lowerType.contains('sport') ||
+        lowerName.contains('cbr') ||
+        lowerName.contains('ninja') ||
+        lowerName.contains('r15') ||
+        lowerName.contains('r25') ||
+        lowerName.contains('zx') ||
+        lowerName.contains('gsx') ||
+        lowerName.contains('sport')) {
+      return 'Motor Sport';
+    }
+
+    if (lowerType.contains('classic') ||
+        lowerType.contains('retro') ||
+        lowerName.contains('vespa') ||
+        lowerName.contains('xsr') ||
+        lowerName.contains('w175') ||
+        lowerName.contains('cb') ||
+        lowerName.contains('scoopy') ||
+        lowerName.contains('fazzio') ||
+        lowerName.contains('filano') ||
+        lowerName.contains('enfield')) {
+      return 'Motor Classic';
+    }
+
+    if (lowerType.contains('bebek') ||
+        lowerName.contains('supra') ||
+        lowerName.contains('jupiter') ||
+        lowerName.contains('revo') ||
+        lowerName.contains('blade') ||
+        lowerName.contains('mx king')) {
+      return 'Motor Bebek';
+    }
+
+    if (lowerType.contains('mobil') ||
+        lowerType.contains('car') ||
+        lowerName.contains('avanza') ||
+        lowerName.contains('brio') ||
+        lowerName.contains('innova') ||
+        lowerName.contains('mobil')) {
+      return 'Mobil';
+    }
+
+    return 'Motor Matic';
+  }
+
+  String _getDefaultVehiclePhoto(String category, String name) {
+    if (category == 'Motor Sport') {
+      return 'https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?q=80&w=800&auto=format&fit=crop';
+    } else if (category == 'Motor Classic') {
+      return 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?q=80&w=800&auto=format&fit=crop';
+    } else if (category == 'Mobil') {
+      return 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?q=80&w=800&auto=format&fit=crop';
+    } else if (category == 'Motor Bebek') {
+      return 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?q=80&w=800&auto=format&fit=crop';
+    }
+    // Default Motor Matic
+    return 'https://images.unsplash.com/photo-1558981408-db0ecd8a1ee4?q=80&w=800&auto=format&fit=crop';
+  }
+
+  void _showClientVehicleDetailModal(BuildContext context, Map<String, dynamic> v) {
+    final vName = v['name'] ?? 'Kendaraan Driver';
+    final vCategory = _detectVehicleCategory(vName, v['type']);
+    final rawImg = (v['image'] != null && v['image'].toString().isNotEmpty && !v['image'].toString().contains('dummy') && !v['image'].toString().contains('ui-avatars'))
+        ? v['image'].toString()
+        : _getDefaultVehiclePhoto(vCategory, vName);
+    final age = v['age'] ?? '< 3 Tahun';
+
+    IconData catIcon = Icons.two_wheeler_rounded;
+    if (vCategory == 'Motor Sport') {
+      catIcon = Icons.sports_motorsports_rounded;
+    } else if (vCategory == 'Motor Classic') {
+      catIcon = Icons.moped_rounded;
+    } else if (vCategory == 'Mobil') {
+      catIcon = Icons.directions_car_rounded;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 30),
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: AppTheme.border,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Modal Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Detail Unit Kendaraan",
+                          style: GoogleFonts.plusJakartaSans(
+                            color: AppTheme.textHighContrast,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          "Fasilitas & Standar Kenyamanan Unit",
+                          style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5),
+                        ),
+                      ],
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.success.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppTheme.success.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.verified_rounded, color: AppTheme.success, size: 14),
+                          const SizedBox(width: 4),
+                          Text(
+                            "Terverifikasi",
+                            style: GoogleFonts.inter(color: AppTheme.success, fontSize: 10.5, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Vehicle Big Image with category pill
+                Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Image.network(
+                        rawImg,
+                        height: 200,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (c, e, s) => Container(
+                          height: 200,
+                          width: double.infinity,
+                          color: AppTheme.cardDeep,
+                          child: Icon(catIcon, color: AppTheme.primaryPink, size: 64),
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 12,
+                      left: 12,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.65),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppTheme.primaryPink.withOpacity(0.6)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(catIcon, color: AppTheme.primaryPink, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              vCategory,
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Vehicle Title and Specs
+                Text(
+                  vName,
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.textHighContrast,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "Kategori: $vCategory • Usia Unit: $age",
+                  style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 12.5, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 16),
+
+                // Amenities / Comfort list
+                Text(
+                  "Fasilitas & Standar Kebersihan:",
+                  style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                _buildAmenityRow(Icons.sports_motorsports_rounded, "Helm Penumpang SNI", "Bersih, harum & higienis, kaca anti silau & terawat"),
+                _buildAmenityRow(Icons.umbrella_rounded, "Jas Hujan 2 Set", "Jas hujan bersih siap sedia saat cuaca hujan"),
+                _buildAmenityRow(Icons.masks_rounded, "Hairnet & Masker Gratis", "Disediakan baru dan higienis untuk setiap penumpang"),
+                _buildAmenityRow(Icons.cleaning_services_rounded, "Unit Bersih & Servis Prima", "Dicuci berkala dan mesin dirawat sesuai standar pabrikan"),
+                const SizedBox(height: 14),
+
+                // Privacy Notice Box (Plat & STNK disembunyikan demi privasi)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFDF2F8),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.border),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.security_rounded, color: AppTheme.primaryPink, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          "Demi privasi dan keamanan mitra, dokumen STNK dan nomor plat lengkap disimpan aman terenkripsi serta telah diverifikasi 100% oleh Tim Operasional Temenin Ajaa.",
+                          style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Close button
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primaryPink,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      "TUTUP",
+                      style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAmenityRow(IconData icon, String title, String subtitle) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: AppTheme.fuchsiaLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: AppTheme.primaryPink, size: 16),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12.5, fontWeight: FontWeight.bold),
+                ),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActiveSubtabContent(String partnerName, String vehicle, String formattedPrice) {
     switch (_activeSubtab) {
       case 'profil':
@@ -651,11 +978,6 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
   }
 
   Widget _buildProfilTabContent(String partnerName, String vehicle, String formattedPrice) {
-    final priceVal = _dbDriverData?['price_per_hour'] ?? widget.partnerData?['price'] ?? 50000;
-    final displayPrice = 'Rp ${priceVal.toString().replaceAllMapped(
-      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.'
-    )}';
-
     final bioText = _driverBio.trim().isNotEmpty
         ? _driverBio
         : "Belum ada biografi yang ditulis oleh driver.";
@@ -711,93 +1033,166 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
           ),
         const SizedBox(height: 20),
 
-        Text(
-          'Kendaraan Terdaftar (${_parsedVehicles.length})',
-          style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Kendaraan Terdaftar (${_parsedVehicles.length})',
+              style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 14, fontWeight: FontWeight.bold),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppTheme.fuchsiaLight,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+              ),
+              child: Text(
+                'Ketuk untuk lihat foto unit',
+                style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
-        if (_parsedVehicles.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppTheme.border),
-            ),
-            child: Text(
-              'Belum ada kendaraan yang diatur oleh driver.',
-              style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12.5, fontStyle: FontStyle.italic),
-            ),
-          )
-        else
-          Column(
-            children: _parsedVehicles.map((v) {
-              final vName = v['name'] ?? 'Kendaraan Driver';
-              final vPlate = v['plate_number'] ?? '';
-              final vType = v['type'] ?? 'Kendaraan';
-              return Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppTheme.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.border),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppTheme.fuchsiaLight,
-                        borderRadius: BorderRadius.circular(10),
+        Column(
+          children: _parsedVehicles.map((v) {
+            final vName = v['name'] ?? 'Kendaraan Driver';
+            final vCategory = _detectVehicleCategory(vName, v['type']);
+            final vImg = (v['image'] != null && v['image'].toString().isNotEmpty && !v['image'].toString().contains('dummy') && !v['image'].toString().contains('ui-avatars'))
+                ? v['image'].toString()
+                : _getDefaultVehiclePhoto(vCategory, vName);
+
+            IconData catIcon = Icons.two_wheeler_rounded;
+            if (vCategory == 'Motor Sport') {
+              catIcon = Icons.sports_motorsports_rounded;
+            } else if (vCategory == 'Motor Classic') {
+              catIcon = Icons.moped_rounded;
+            } else if (vCategory == 'Mobil') {
+              catIcon = Icons.directions_car_rounded;
+            }
+
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => _showClientVehicleDetailModal(context, v),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.border, width: 1.2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryPink.withOpacity(0.04),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
                       ),
-                      child: Icon(
-                        vType.toString().toLowerCase().contains('mobil')
-                            ? Icons.directions_car_rounded
-                            : Icons.two_wheeler_rounded,
-                        color: AppTheme.primaryPink,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            vName,
-                            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          vImg,
+                          width: 76,
+                          height: 64,
+                          fit: BoxFit.cover,
+                          errorBuilder: (c, e, s) => Container(
+                            width: 76,
+                            height: 64,
+                            color: AppTheme.fuchsiaLight,
+                            child: Icon(catIcon, color: AppTheme.primaryPink, size: 28),
                           ),
-                          if (vPlate.isNotEmpty)
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Text(
-                              'Plat Nomor: $vPlate',
-                              style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                              vName,
+                              style: GoogleFonts.inter(
+                                color: AppTheme.textHighContrast,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          const SizedBox(height: 3),
-                          Text(
-                            'Tarif: $displayPrice / Jam',
-                            style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 11.5, fontWeight: FontWeight.bold),
-                          ),
-                        ],
+                            const SizedBox(height: 5),
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.fuchsiaLight,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(catIcon, color: AppTheme.primaryPink, size: 11),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        vCategory,
+                                        style: GoogleFonts.inter(
+                                          color: AppTheme.primaryPink,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.success.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Terverifikasi ✔',
+                                    style: GoogleFonts.inter(
+                                      color: AppTheme.success,
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Text(
+                                  "Lihat foto & fasilitas unit",
+                                  style: GoogleFonts.inter(
+                                    color: AppTheme.primaryPink,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(width: 3),
+                                const Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.primaryPink, size: 10),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.success.withOpacity(0.12),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'Terverifikasi',
-                        style: GoogleFonts.inter(color: AppTheme.success, fontSize: 10, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              );
-            }).toList(),
-          ),
+              ),
+            );
+          }).toList(),
+        ),
         const SizedBox(height: 20),
 
         Text(
@@ -1409,10 +1804,25 @@ class _PartnerProfileScreenState extends State<PartnerProfileScreen> {
                         color: const Color(0xFF6366F1),
                         onTap: () {
                           Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute(builder: (context) => BookingOrderTypeScreen(
-                            serviceType: 'gaming',
-                            partnerData: partnerInfo,
-                          )));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: const Color(0xFF6366F1),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              content: Row(
+                                children: [
+                                  const Icon(Icons.engineering_rounded, color: Colors.white),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      "Fitur Gaming Buddy (Mabar) sedang dalam tahap pengembangan!",
+                                      style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
                         },
                       ),
                       const SizedBox(height: 18),

@@ -57,57 +57,23 @@ class _GamingBuddyBookingScreenState extends State<GamingBuddyBookingScreen> {
   }
 
   void _proceedToConfirmation() {
-    final now = DateTime.now();
-    final durationMinutes = _selectedPlayMode == 'Per Jam' ? _selectedQuantity * 60 : _selectedQuantity * 20;
-
-    final Map<String, dynamic> bookingDetails = {
-      'serviceType': 'Gaming Buddy (Mabar)',
-      'service_category': 'VIRTUAL',
-      'call_type': 'GAMING',
-      'game_name': _selectedGame,
-      'play_mode': _selectedPlayMode,
-      'quantity': _selectedQuantity,
-      'call_duration_minutes': durationMinutes,
-      'duration': durationMinutes,
-      'gaming_goal': _selectedGoal,
-      'use_voice_chat': _useVoiceChat,
-      'in_game_id': _inGameIdController.text.trim(),
-      'serviceFee': _calculatedPrice,
-      'insuranceFee': 0,
-      'totalPayment': _calculatedPrice,
-      'baseCost': _calculatedPrice,
-      'dp': (_calculatedPrice * 0.5).round(),
-      'remainingPayment': (_calculatedPrice * 0.5).round(),
-      'note': 'Mabar $_selectedGame ($_selectedQuantity $_selectedPlayMode). Goal: $_selectedGoal. VC: ${_useVoiceChat ? 'On' : 'Off'}. ${_notesController.text.trim()}',
-      'pickup': 'Sesi Mabar $_selectedGame',
-      'destination': 'Target: $_selectedGoal ($_selectedQuantity $_selectedPlayMode)',
-      'date': 'Hari Ini, ${now.day}/${now.month}/${now.year}',
-      'time': 'Mulai Segera Setelah Bayar',
-      'estimatedTime': '$durationMinutes',
-      'vehicle': _useVoiceChat ? 'Discord VC' : 'No Voice Chat',
-      'plateNumber': _selectedGame,
-      'driverClass': 'Gamer Companion',
-    };
-
-    if (widget.selectedPartner != null) {
-      bookingDetails['driver'] = widget.selectedPartner;
-      bookingDetails['selectedPartner'] = widget.selectedPartner;
-      bookingDetails['driver_id'] = widget.selectedPartner!['id'] ?? widget.selectedPartner!['driverId'];
-      bookingDetails['driverName'] = widget.selectedPartner!['full_name'] ?? widget.selectedPartner!['name'] ?? 'Mitra Temenin';
-      bookingDetails['driverRating'] = widget.selectedPartner!['rating']?.toString() ?? '5.0';
-      bookingDetails['driverImage'] = widget.selectedPartner!['avatar_url'] ?? widget.selectedPartner!['image'] ?? '';
-      bookingDetails['isOpenOffer'] = false;
-      bookingDetails['is_open_offer'] = false;
-    } else {
-      bookingDetails['isOpenOffer'] = true;
-      bookingDetails['is_open_offer'] = true;
-      bookingDetails['driverName'] = 'Mitra Radar Temenin';
-    }
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BookingConfirmationScreen(bookingData: bookingDetails),
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFF6366F1),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        content: Row(
+          children: [
+            const Icon(Icons.engineering_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                "Fitur Gaming Buddy (Mabar) sedang dalam tahap pengembangan! Mohon tunggu di pembaruan selanjutnya.",
+                style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

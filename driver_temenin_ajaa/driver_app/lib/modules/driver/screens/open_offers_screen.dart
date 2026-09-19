@@ -9,6 +9,7 @@ import 'driver_negotiation_screen.dart';
 import 'chat_room_screen.dart';
 import 'active_booking_screen.dart';
 import 'driver_waiting_countdown_screen.dart';
+import 'driver_order_detail_screen.dart';
 
 class OpenOffersScreen extends StatefulWidget {
   const OpenOffersScreen({super.key});
@@ -191,18 +192,11 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> with SingleTickerPr
                     ),
                   );
                 }
-              } else if (notif.booking != null && !notif.booking!.isFlexible) {
+              } else if (notif.booking != null) {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => DriverWaitingCountdownScreen(bookingData: notif.booking!),
-                  ),
-                );
-              } else {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => DriverNegotiationScreen(bookingData: notif.booking!),
+                    builder: (context) => DriverOrderDetailScreen(bookingData: notif.booking!),
                   ),
                 );
               }
@@ -452,14 +446,13 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> with SingleTickerPr
                 )
               else
                 ElevatedButton(
-                  onPressed: () async {
-                    final bookingProvider = Provider.of<BookingProvider>(context, listen: false);
-                    final success = await bookingProvider.acceptBooking(offer.id);
-                    if (context.mounted && success) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Pesanan berhasil diterima dengan tarif resmi platform!")),
-                      );
-                    }
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => DriverOrderDetailScreen(bookingData: offer),
+                      ),
+                    );
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF10B981),
@@ -467,7 +460,7 @@ class _OpenOffersScreenState extends State<OpenOffersScreen> with SingleTickerPr
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   ),
-                  child: Text("Terima Pesanan", style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 12)),
+                  child: Text("Lihat Detail & Terima", style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
             ],
           )

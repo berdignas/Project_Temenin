@@ -413,9 +413,33 @@ class _PartnerListScreenState extends State<PartnerListScreen> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            const Icon(Icons.directions_bike_rounded, size: 14, color: AppTheme.textMuted),
+                            const Icon(Icons.two_wheeler_rounded, size: 14, color: AppTheme.primaryPink),
                             const SizedBox(width: 6),
-                            Text(vehicle, style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13)),
+                            Flexible(
+                              child: Text(
+                                vehicle, 
+                                style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12.5, fontWeight: FontWeight.w600),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: AppTheme.fuchsiaLight,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                              ),
+                              child: Text(
+                                _detectVehicleCategory(vehicle),
+                                style: GoogleFonts.inter(
+                                  color: AppTheme.primaryPink,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ],
@@ -498,5 +522,54 @@ class _PartnerListScreenState extends State<PartnerListScreen> {
         ],
       ),
     );
+  }
+
+  String _detectVehicleCategory(String name, [String? rawType]) {
+    final lowerName = name.toLowerCase();
+    final lowerType = (rawType ?? '').toLowerCase();
+
+    if (lowerType.contains('sport') ||
+        lowerName.contains('cbr') ||
+        lowerName.contains('ninja') ||
+        lowerName.contains('r15') ||
+        lowerName.contains('r25') ||
+        lowerName.contains('zx') ||
+        lowerName.contains('gsx') ||
+        lowerName.contains('sport')) {
+      return 'Motor Sport';
+    }
+
+    if (lowerType.contains('classic') ||
+        lowerType.contains('retro') ||
+        lowerName.contains('vespa') ||
+        lowerName.contains('xsr') ||
+        lowerName.contains('w175') ||
+        lowerName.contains('cb') ||
+        lowerName.contains('scoopy') ||
+        lowerName.contains('fazzio') ||
+        lowerName.contains('filano') ||
+        lowerName.contains('enfield')) {
+      return 'Motor Classic';
+    }
+
+    if (lowerType.contains('bebek') ||
+        lowerName.contains('supra') ||
+        lowerName.contains('jupiter') ||
+        lowerName.contains('revo') ||
+        lowerName.contains('blade') ||
+        lowerName.contains('mx king')) {
+      return 'Motor Bebek';
+    }
+
+    if (lowerType.contains('mobil') ||
+        lowerType.contains('car') ||
+        lowerName.contains('avanza') ||
+        lowerName.contains('brio') ||
+        lowerName.contains('innova') ||
+        lowerName.contains('mobil')) {
+      return 'Mobil';
+    }
+
+    return 'Motor Matic';
   }
 }

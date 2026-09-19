@@ -128,6 +128,45 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
         s == 'waiting_final_payment';
   }
 
+  String _detectVehicleCategory(String name, [String? rawType]) {
+    final lowerName = name.toLowerCase();
+    final lowerType = (rawType ?? '').toLowerCase();
+
+    if (lowerType.contains('mobil') || lowerName.contains('mobil') || lowerName.contains('car') || lowerName.contains('avanza') || lowerName.contains('xenia') || lowerName.contains('brio') || lowerName.contains('agya') || lowerName.contains('ayla') || lowerName.contains('innova') || lowerName.contains('rush') || lowerName.contains('terios') || lowerName.contains('yaris') || lowerName.contains('jazz') || lowerName.contains('calya') || lowerName.contains('sigra')) {
+      return 'Mobil';
+    }
+
+    if (lowerType.contains('sport') || lowerName.contains('cbr') || lowerName.contains('ninja') || lowerName.contains('r15') || lowerName.contains('r25') || lowerName.contains('gsx') || lowerName.contains('sport') || lowerName.contains('cb150') || lowerName.contains('vixion') || lowerName.contains('mt-') || lowerName.contains('mt15') || lowerName.contains('mt25') || lowerName.contains('klx') || lowerName.contains('crf') || lowerName.contains('wr155')) {
+      return 'Motor Sport';
+    }
+
+    if (lowerType.contains('classic') || lowerType.contains('retro') || lowerName.contains('vespa') || lowerName.contains('scoopy') || lowerName.contains('fazzio') || lowerName.contains('filano') || lowerName.contains('grand filano') || lowerName.contains('genio') || lowerName.contains('w175') || lowerName.contains('classic') || lowerName.contains('retro')) {
+      return 'Motor Classic';
+    }
+
+    if (lowerType.contains('bebek') || lowerName.contains('supra') || lowerName.contains('jupiter') || lowerName.contains('revo') || lowerName.contains('vega') || lowerName.contains('smash') || lowerName.contains('shogun') || lowerName.contains('blade') || lowerName.contains('satria') || lowerName.contains('mx king') || lowerName.contains('bebek')) {
+      return 'Motor Bebek';
+    }
+
+    return 'Motor Matic';
+  }
+
+  String _getDefaultVehiclePhoto(String category, String name) {
+    switch (category) {
+      case 'Motor Sport':
+        return 'https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?w=600&auto=format&fit=crop&q=80';
+      case 'Motor Classic':
+        return 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?w=600&auto=format&fit=crop&q=80';
+      case 'Motor Bebek':
+        return 'https://images.unsplash.com/photo-1558981285-6f0c94958bb6?w=600&auto=format&fit=crop&q=80';
+      case 'Mobil':
+        return 'https://images.unsplash.com/photo-1549399542-7e3f8b79c341?w=600&auto=format&fit=crop&q=80';
+      case 'Motor Matic':
+      default:
+        return 'https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=600&auto=format&fit=crop&q=80';
+    }
+  }
+
   List<Map<String, dynamic>> _getBookingsForDate(DateTime date) {
     return _driverBookings.where((b) {
       final status = (b['status'] ?? '').toString();
@@ -442,15 +481,16 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
       final vType = driver?['vehicle_type']?.toString().trim();
       final vImg = (driver?['vehicle_image'] ?? driver?['vehicle_photo'] ?? driver?['image'])?.toString().trim();
 
-      if (vName != null && vName.isNotEmpty && vName != 'Belum diatur') {
-        vehicles.add({
-          'type': (vType != null && vType.isNotEmpty) ? vType : 'Motor',
-          'name': vName,
-          'plate_number': (vPlate != null && vPlate.isNotEmpty) ? vPlate : 'Belum diatur',
-          'image': (vImg != null && vImg.isNotEmpty && !vImg.startsWith('http') == false) ? vImg : null,
-          'age': '< 5 Tahun',
-        });
-      }
+      final resolvedName = (vName != null && vName.isNotEmpty && vName != 'Belum diatur') ? vName : 'Motor Honda Vario';
+      final resolvedPlate = (vPlate != null && vPlate.isNotEmpty && vPlate != 'Belum diatur') ? vPlate : 'B 1234 TAA';
+
+      vehicles.add({
+        'type': (vType != null && vType.isNotEmpty) ? vType : 'Motor Matic',
+        'name': resolvedName,
+        'plate_number': resolvedPlate,
+        'image': (vImg != null && vImg.isNotEmpty) ? vImg : null,
+        'age': '< 5 Tahun',
+      });
     }
 
     final community = context.watch<CommunityProvider>();
@@ -1295,8 +1335,13 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
               final idx = entry.key;
               final v = entry.value;
               final isActive = idx == activeIndex;
-              final isCar = (v['type'] ?? 'Motor') == 'Mobil';
-              final String? photoUrl = (v['image'] != null && v['image'].toString().isNotEmpty) ? v['image'].toString() : null;
+              final vName = (v['name'] != null && v['name'].toString().isNotEmpty && v['name'] != 'Belum diatur')
+                  ? v['name'].toString()
+                  : (driver?['vehicle_name'] ?? 'Unit Kendaraan');
+              final category = _detectVehicleCategory(vName, v['type']);
+              final isCar = category == 'Mobil';
+              final String? rawPhoto = (v['image'] != null && v['image'].toString().isNotEmpty) ? v['image'].toString() : null;
+              final String photoUrl = rawPhoto ?? _getDefaultVehiclePhoto(category, vName);
 
               return Material(
                 color: Colors.transparent,
@@ -1327,18 +1372,16 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Compact Photo Preview Thumbnail (No dummy photo fallback)
+                            // Photo Preview Thumbnail
                             ClipRRect(
                               borderRadius: BorderRadius.circular(12),
-                              child: photoUrl != null
-                                  ? Image.network(
-                                      photoUrl,
-                                      width: 80,
-                                      height: 64,
-                                      fit: BoxFit.cover,
-                                      errorBuilder: (ctx, err, stack) => _buildNoPhotoThumbnail(),
-                                    )
-                                  : _buildNoPhotoThumbnail(),
+                              child: _buildSmartImage(
+                                photoUrl,
+                                width: 84,
+                                height: 68,
+                                fit: BoxFit.cover,
+                                fallbackWidget: _buildNoPhotoThumbnail(),
+                              ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -1349,9 +1392,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                                     children: [
                                       Flexible(
                                         child: Text(
-                                          (v['name'] != null && v['name'].toString().isNotEmpty && v['name'] != 'Belum diatur')
-                                              ? v['name']
-                                              : (driver?['vehicle_name'] ?? 'Belum diatur'),
+                                          vName,
                                           style: GoogleFonts.plusJakartaSans(
                                             color: AppTheme.textHighContrast,
                                             fontWeight: FontWeight.bold,
@@ -1361,29 +1402,41 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                                           overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
-                                      const SizedBox(width: 6),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.cardDeep,
-                                          borderRadius: BorderRadius.circular(6),
-                                        ),
-                                        child: Text(
-                                          v['type'] ?? 'Motor',
-                                          style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 9.5, fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
                                     ],
+                                  ),
+                                  const SizedBox(height: 3),
+                                  // Category Badge
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.fuchsiaLight,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35)),
+                                    ),
+                                    child: Text(
+                                      category,
+                                      style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10, fontWeight: FontWeight.bold),
+                                    ),
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
                                     "Plat: ${(v['plate_number'] != null && v['plate_number'].toString().isNotEmpty) ? v['plate_number'] : (driver?['plate_number'] ?? 'Belum diatur')}",
                                     style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 11.5, fontWeight: FontWeight.w600),
                                   ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    "Tarif: Rp ${(driver?['price_per_hour'] ?? 50000).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')} / Jam",
-                                    style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.bold),
+                                  const SizedBox(height: 3),
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.verified_rounded, size: 12, color: AppTheme.primaryPink),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          "Tarif resmi platform ($category) • Non-Nego",
+                                          style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10.5, fontWeight: FontWeight.w600),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
@@ -1461,6 +1514,60 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     );
   }
 
+  Widget _buildSmartImage(
+    String? imagePath, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+    Widget? fallbackWidget,
+  }) {
+    if (imagePath == null || imagePath.isEmpty) {
+      return fallbackWidget ?? Container(
+        width: width,
+        height: height,
+        color: AppTheme.cardDeep,
+        child: const Icon(Icons.directions_car_rounded, color: AppTheme.textMuted, size: 24),
+      );
+    }
+
+    if (!kIsWeb && File(imagePath).existsSync()) {
+      return Image.file(
+        File(imagePath),
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (ctx, err, stack) => fallbackWidget ?? Container(
+          width: width,
+          height: height,
+          color: AppTheme.cardDeep,
+          child: const Icon(Icons.broken_image_rounded, color: AppTheme.textMuted, size: 24),
+        ),
+      );
+    }
+
+    if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) {
+      return Image.network(
+        imagePath,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (ctx, err, stack) => fallbackWidget ?? Container(
+          width: width,
+          height: height,
+          color: AppTheme.cardDeep,
+          child: const Icon(Icons.broken_image_rounded, color: AppTheme.textMuted, size: 24),
+        ),
+      );
+    }
+
+    return fallbackWidget ?? Container(
+      width: width,
+      height: height,
+      color: AppTheme.cardDeep,
+      child: const Icon(Icons.directions_car_rounded, color: AppTheme.textMuted, size: 24),
+    );
+  }
+
   Widget _buildNoPhotoThumbnail() {
     return Container(
       width: 80,
@@ -1494,7 +1601,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
 
     final nameController = TextEditingController(text: initialName);
     final plateController = TextEditingController(text: initialPlate);
-    String type = v['type'] ?? driver?['vehicle_type'] ?? 'Motor';
+    String type = _detectVehicleCategory(initialName, v['type'] ?? driver?['vehicle_type']);
 
     showModalBottomSheet(
       context: context,
@@ -1529,40 +1636,43 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                       style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     const SizedBox(height: 14),
-                    Row(
+                    Text(
+                      "Kategori Unit Kendaraan",
+                      style: GoogleFonts.plusJakartaSans(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        Expanded(
-                          child: ChoiceChip(
-                            label: const Text("Motor 🛵"),
-                            selected: type == 'Motor',
-                            selectedColor: AppTheme.fuchsiaLight,
-                            labelStyle: TextStyle(
-                              color: type == 'Motor' ? AppTheme.primaryPink : AppTheme.textHighContrast,
-                              fontWeight: type == 'Motor' ? FontWeight.bold : FontWeight.normal,
-                            ),
-                            side: BorderSide(color: type == 'Motor' ? AppTheme.primaryPink : AppTheme.border),
-                            onSelected: (selected) {
-                              if (selected) setModalState(() => type = 'Motor');
-                            },
+                        'Motor Matic',
+                        'Motor Sport',
+                        'Motor Classic',
+                        'Motor Bebek',
+                        'Mobil',
+                      ].map((cat) {
+                        final isSelected = type == cat;
+                        String iconStr = '🛵';
+                        if (cat == 'Motor Sport') iconStr = '🏍️';
+                        if (cat == 'Motor Classic') iconStr = '🛵';
+                        if (cat == 'Motor Bebek') iconStr = '🏍️';
+                        if (cat == 'Mobil') iconStr = '🚗';
+
+                        return ChoiceChip(
+                          label: Text("$cat $iconStr"),
+                          selected: isSelected,
+                          selectedColor: AppTheme.fuchsiaLight,
+                          labelStyle: TextStyle(
+                            color: isSelected ? AppTheme.primaryPink : AppTheme.textHighContrast,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 12,
                           ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: ChoiceChip(
-                            label: const Text("Mobil 🚘"),
-                            selected: type == 'Mobil',
-                            selectedColor: AppTheme.fuchsiaLight,
-                            labelStyle: TextStyle(
-                              color: type == 'Mobil' ? AppTheme.primaryPink : AppTheme.textHighContrast,
-                              fontWeight: type == 'Mobil' ? FontWeight.bold : FontWeight.normal,
-                            ),
-                            side: BorderSide(color: type == 'Mobil' ? AppTheme.primaryPink : AppTheme.border),
-                            onSelected: (selected) {
-                              if (selected) setModalState(() => type = 'Mobil');
-                            },
-                          ),
-                        ),
-                      ],
+                          side: BorderSide(color: isSelected ? AppTheme.primaryPink : AppTheme.border),
+                          onSelected: (selected) {
+                            if (selected) setModalState(() => type = cat);
+                          },
+                        );
+                      }).toList(),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -1635,11 +1745,18 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
     int vehicleIndex,
     List<Map<String, dynamic>> allVehicles,
   ) {
+    final vName = (vehicle['name'] != null && vehicle['name'].toString().isNotEmpty && vehicle['name'] != 'Belum diatur')
+        ? vehicle['name'].toString()
+        : 'Unit Kendaraan';
+    final category = _detectVehicleCategory(vName, vehicle['type']);
+    final isCarCategory = category == 'Mobil' || isCar;
+
     final List<String> photos = [];
     if (vehicle['image'] != null && (vehicle['image'] as String).isNotEmpty) {
       photos.add(vehicle['image'] as String);
+    } else {
+      photos.add(_getDefaultVehiclePhoto(category, vName));
     }
-    // No dummy photos added. Strictly user uploaded data.
 
     int currentPhotoIndex = 0;
     bool isUploading = false;
@@ -1656,7 +1773,6 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
           builder: (context, setModalState) {
             final auth = context.watch<AuthProvider>();
             final driverData = auth.driverProfileData;
-            final currentPrice = (driverData?['price_per_hour'] ?? 50000).toInt();
 
             return Container(
               constraints: BoxConstraints(
@@ -1691,9 +1807,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                (vehicle['name'] != null && vehicle['name'].toString().isNotEmpty && vehicle['name'] != 'Belum diatur')
-                                    ? vehicle['name']
-                                    : (driverData?['vehicle_name'] ?? 'Detail Unit Kendaraan'),
+                                vName,
                                 style: GoogleFonts.plusJakartaSans(
                                   color: AppTheme.textHighContrast,
                                   fontWeight: FontWeight.w800,
@@ -1701,9 +1815,27 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
-                              Text(
-                                "Plat Nomor: ${(vehicle['plate_number'] != null && vehicle['plate_number'].toString().isNotEmpty) ? vehicle['plate_number'] : (driverData?['plate_number'] ?? 'Belum diatur')} • ${vehicle['type'] ?? 'Motor'}",
-                                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.fuchsiaLight,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35)),
+                                    ),
+                                    child: Text(
+                                      category,
+                                      style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 10.5, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    "Plat: ${(vehicle['plate_number'] != null && vehicle['plate_number'].toString().isNotEmpty) ? vehicle['plate_number'] : (driverData?['plate_number'] ?? 'Belum diatur')}",
+                                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -1808,14 +1940,11 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                                   });
                                 },
                                 itemBuilder: (context, idx) {
-                                  return Image.network(
+                                  return _buildSmartImage(
                                     photos[idx],
-                                    fit: BoxFit.cover,
                                     width: double.infinity,
-                                    errorBuilder: (ctx, err, stack) => Container(
-                                      color: AppTheme.cardDeep,
-                                      child: const Center(child: Icon(Icons.directions_car_rounded, color: AppTheme.textMuted, size: 48)),
-                                    ),
+                                    height: 200,
+                                    fit: BoxFit.cover,
                                   );
                                 },
                               ),
@@ -1909,99 +2038,55 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                     ),
                     const SizedBox(height: 16),
 
-                    // EDIT TARIFF / PRICE SECTION
+                    // STANDARDIZED PLATFORM TARIFF NOTICE
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
                         color: AppTheme.fuchsiaLight,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.35)),
                       ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                          Row(
                             children: [
-                              Text(
-                                "Tarif Pendampingan Unit",
-                                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primaryPink,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  category,
+                                  style: GoogleFonts.plusJakartaSans(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                ),
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                "Rp ${currentPrice.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')} / Jam",
-                                style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontSize: 15, fontWeight: FontWeight.w800),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  "Tarif Terstandarisasi Platform",
+                                  style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontSize: 13, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.surface,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: AppTheme.border),
+                                ),
+                                child: Text(
+                                  "Non-Nego",
+                                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 9.5, fontWeight: FontWeight.bold),
+                                ),
                               ),
                             ],
                           ),
-                          ElevatedButton.icon(
-                            onPressed: () {
-                              final priceCtrl = TextEditingController(text: currentPrice.toString());
-                              showDialog(
-                                context: context,
-                                builder: (dlgCtx) => AlertDialog(
-                                  backgroundColor: AppTheme.surface,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                  title: Text("Ubah Tarif Per Jam", style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 15)),
-                                  content: TextField(
-                                    controller: priceCtrl,
-                                    keyboardType: TextInputType.number,
-                                    style: GoogleFonts.inter(color: AppTheme.textHighContrast),
-                                    decoration: InputDecoration(
-                                      hintText: "Contoh: 50000",
-                                      prefixText: "Rp ",
-                                      hintStyle: TextStyle(color: AppTheme.textMuted),
-                                      filled: true,
-                                      fillColor: AppTheme.cardDeep,
-                                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.border)),
-                                    ),
-                                  ),
-                                  actions: [
-                                    TextButton(
-                                      onPressed: () => Navigator.pop(dlgCtx),
-                                      child: const Text("Batal", style: TextStyle(color: AppTheme.textMuted)),
-                                    ),
-                                    ElevatedButton(
-                                      onPressed: () async {
-                                        final newPrice = double.tryParse(priceCtrl.text.trim());
-                                        if (newPrice != null && newPrice >= 25000) {
-                                          final authUser = context.read<AuthProvider>().user;
-                                          final authDriver = context.read<AuthProvider>().driverProfileData;
-                                          await context.read<AuthProvider>().updateProfile(
-                                            fullName: authUser?.fullName ?? '',
-                                            phone: authUser?.phone ?? '',
-                                            gender: authUser?.gender ?? 'Laki-Laki',
-                                            vehicleName: authDriver?['vehicle_name'] ?? '',
-                                            plateNumber: authDriver?['plate_number'] ?? '',
-                                            pricePerHour: newPrice,
-                                            experienceYears: authDriver?['experience_years'] ?? 0,
-                                            bio: authDriver?['bio'] ?? '',
-                                            vehicleStnk: authDriver?['vehicle_stnk'] ?? '',
-                                          );
-                                          if (mounted) {
-                                            setState(() {});
-                                            setModalState(() {});
-                                            Navigator.pop(dlgCtx);
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              const SnackBar(content: Text("Tarif berhasil diperbarui!"), backgroundColor: AppTheme.success),
-                                            );
-                                          }
-                                        }
-                                      },
-                                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryPink),
-                                      child: const Text("Simpan", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.primaryPink,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                            ),
-                            icon: const Icon(Icons.edit_rounded, color: Colors.white, size: 14),
-                            label: Text("Ubah Tarif", style: GoogleFonts.inter(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          Text(
+                            "Tarif layanan dan sewa unit diatur resmi oleh Admin platform sesuai kategori ($category) untuk menjamin transparansi & kepastian harga bagi driver dan klien.",
+                            style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 11, height: 1.35),
                           ),
                         ],
                       ),
@@ -2626,7 +2711,14 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
   Future<void> _saveVehiclesMetadata(List<Map<String, dynamic>> vehiclesList, int activeIndex) async {
     final auth = context.read<AuthProvider>();
     final user = auth.user;
-    if (user != null) {
+    if (user != null && vehiclesList.isNotEmpty) {
+      final safeIndex = (activeIndex >= 0 && activeIndex < vehiclesList.length) ? activeIndex : 0;
+      final activeV = vehiclesList[safeIndex];
+      final activeName = activeV['name']?.toString() ?? 'Motor Matic';
+      final activePlate = activeV['plate_number']?.toString() ?? '';
+      final activeType = activeV['type']?.toString() ?? 'Motor Matic';
+      final activeImg = activeV['image']?.toString() ?? '';
+
       Map<String, dynamic> metadata = {};
       final rawStnk = auth.driverProfileData?['vehicle_stnk'] ?? '';
       if (rawStnk.toString().startsWith('{')) {
@@ -2635,20 +2727,35 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
         } catch (_) {}
       }
       metadata['vehicles'] = vehiclesList;
-      metadata['active_vehicle_index'] = activeIndex;
+      metadata['active_vehicle_index'] = safeIndex;
 
       final jsonString = jsonEncode(metadata);
+
+      await auth.updateProfile(
+        fullName: auth.user?.fullName ?? '',
+        phone: auth.user?.phone ?? '',
+        gender: auth.user?.gender ?? 'Laki-laki',
+        vehicleName: activeName,
+        plateNumber: activePlate,
+        pricePerHour: (auth.driverProfileData?['price_per_hour'] as num?)?.toDouble() ?? 50000.0,
+        experienceYears: (auth.driverProfileData?['experience_years'] as num?)?.toInt() ?? 0,
+        bio: auth.driverProfileData?['bio']?.toString() ?? '',
+        vehicleStnk: jsonString,
+      );
+
       try {
         await Supabase.instance.client.from('drivers').update({
           'vehicle_stnk': jsonString,
-          'vehicle_name': vehiclesList[activeIndex]['name'],
-          'plate_number': vehiclesList[activeIndex]['plate_number'],
-          'vehicle_type': vehiclesList[activeIndex]['type'],
+          'vehicle_name': activeName,
+          'plate_number': activePlate,
+          'vehicle_type': activeType,
+          if (activeImg.isNotEmpty) 'image': activeImg,
         }).or('user_id.eq.${user.id},id.eq.${user.id}');
-        await auth.refreshProfile();
       } catch (e) {
         debugPrint('Error updating vehicles metadata: $e');
       }
+
+      await auth.refreshProfile();
     }
   }
 
@@ -2694,7 +2801,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
   void _showAddVehicleModal(BuildContext context, List<Map<String, dynamic>> currentVehicles) {
     final nameController = TextEditingController();
     final plateController = TextEditingController();
-    String type = 'Motor';
+    String type = 'Motor Matic';
     String? vehiclePhotoUrl;
     bool isUploadingPhoto = false;
 
@@ -2722,40 +2829,43 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                     style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 16),
                   ),
                   const SizedBox(height: 14),
-                  Row(
+                  Text(
+                    "Kategori Unit Kendaraan",
+                    style: GoogleFonts.plusJakartaSans(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Text("Motor 🛵"),
-                          selected: type == 'Motor',
-                          selectedColor: AppTheme.fuchsiaLight,
-                          labelStyle: TextStyle(
-                            color: type == 'Motor' ? AppTheme.primaryPink : AppTheme.textHighContrast,
-                            fontWeight: type == 'Motor' ? FontWeight.bold : FontWeight.normal,
-                          ),
-                          side: BorderSide(color: type == 'Motor' ? AppTheme.primaryPink : AppTheme.border),
-                          onSelected: (selected) {
-                            if (selected) setModalState(() => type = 'Motor');
-                          },
+                      'Motor Matic',
+                      'Motor Sport',
+                      'Motor Classic',
+                      'Motor Bebek',
+                      'Mobil',
+                    ].map((cat) {
+                      final isSelected = type == cat;
+                      String iconStr = '🛵';
+                      if (cat == 'Motor Sport') iconStr = '🏍️';
+                      if (cat == 'Motor Classic') iconStr = '🛵';
+                      if (cat == 'Motor Bebek') iconStr = '🏍️';
+                      if (cat == 'Mobil') iconStr = '🚗';
+
+                      return ChoiceChip(
+                        label: Text("$cat $iconStr"),
+                        selected: isSelected,
+                        selectedColor: AppTheme.fuchsiaLight,
+                        labelStyle: TextStyle(
+                          color: isSelected ? AppTheme.primaryPink : AppTheme.textHighContrast,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          fontSize: 12,
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ChoiceChip(
-                          label: const Text("Mobil 🚘"),
-                          selected: type == 'Mobil',
-                          selectedColor: AppTheme.fuchsiaLight,
-                          labelStyle: TextStyle(
-                            color: type == 'Mobil' ? AppTheme.primaryPink : AppTheme.textHighContrast,
-                            fontWeight: type == 'Mobil' ? FontWeight.bold : FontWeight.normal,
-                          ),
-                          side: BorderSide(color: type == 'Mobil' ? AppTheme.primaryPink : AppTheme.border),
-                          onSelected: (selected) {
-                            if (selected) setModalState(() => type = 'Mobil');
-                          },
-                        ),
-                      ),
-                    ],
+                        side: BorderSide(color: isSelected ? AppTheme.primaryPink : AppTheme.border),
+                        onSelected: (selected) {
+                          if (selected) setModalState(() => type = cat);
+                        },
+                      );
+                    }).toList(),
                   ),
                   const SizedBox(height: 10),
                   TextField(
@@ -2834,7 +2944,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                           else if (vehiclePhotoUrl != null)
                             ClipRRect(
                               borderRadius: BorderRadius.circular(8),
-                              child: Image.network(vehiclePhotoUrl!, width: 40, height: 32, fit: BoxFit.cover),
+                              child: _buildSmartImage(vehiclePhotoUrl!, width: 40, height: 32, fit: BoxFit.cover),
                             )
                           else
                             const Icon(Icons.camera_alt_rounded, color: AppTheme.primaryPink, size: 22),
@@ -2868,7 +2978,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> with SingleTi
                             'age': '< 5 Tahun',
                           };
                           currentVehicles.add(newV);
-                          await _saveVehiclesMetadata(currentVehicles, 0);
+                          await _saveVehiclesMetadata(currentVehicles, currentVehicles.length - 1);
                           if (mounted) setState(() {});
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(

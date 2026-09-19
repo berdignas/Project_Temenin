@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'user_model.dart';
 import '../../core/utils/booking_date_helper.dart';
 
@@ -82,15 +83,22 @@ class BookingModel {
   }
 
   factory BookingModel.fromJson(Map<String, dynamic> json) {
-    final addDetails = json['additional_details'] is Map<String, dynamic>
-        ? json['additional_details'] as Map<String, dynamic>
-        : (json['additionalDetails'] is Map<String, dynamic>
-            ? json['additionalDetails'] as Map<String, dynamic>
-            : (json['additional_details'] != null
-                ? Map<String, dynamic>.from(json['additional_details'])
-                : (json['additionalDetails'] != null
-                    ? Map<String, dynamic>.from(json['additionalDetails'])
-                    : null)));
+    Map<String, dynamic>? addDetails;
+    if (json['additional_details'] is Map) {
+      addDetails = Map<String, dynamic>.from(json['additional_details'] as Map);
+    } else if (json['additionalDetails'] is Map) {
+      addDetails = Map<String, dynamic>.from(json['additionalDetails'] as Map);
+    } else if (json['additional_details'] is String) {
+      try {
+        final decoded = jsonDecode(json['additional_details'] as String);
+        if (decoded is Map) addDetails = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    } else if (json['additionalDetails'] is String) {
+      try {
+        final decoded = jsonDecode(json['additionalDetails'] as String);
+        if (decoded is Map) addDetails = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
 
     final rawStatus = json['status']?.toString() ?? 'pending';
     final subStatus = addDetails?['sub_status']?.toString();

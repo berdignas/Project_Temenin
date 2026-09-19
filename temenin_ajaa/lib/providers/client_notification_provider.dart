@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/constants/api_constants.dart';
+import '../core/services/auth_service.dart';
 import '../core/services/notification_sound_service.dart';
 import '../modules/clients/pages/notifications_page.dart';
 
 class ClientNotificationProvider extends ChangeNotifier {
+  final AuthService _authService = AuthService();
   List<NotificationModel> _notifications = [];
   StreamSubscription<List<Map<String, dynamic>>>? _bookingSubscription;
   StreamSubscription<List<Map<String, dynamic>>>? _chatSubscription;
@@ -78,9 +82,12 @@ class ClientNotificationProvider extends ChangeNotifier {
     }
   }
 
+  Timer? _notificationPollingTimer;
+
   /// Listen to Supabase Realtime booking changes for current client
   void _listenToBookingUpdates(String userId) {
     _bookingSubscription?.cancel();
+    _notificationPollingTimer?.cancel();
     try {
       _bookingSubscription = Supabase.instance.client
           .from('bookings')
@@ -89,11 +96,39 @@ class ClientNotificationProvider extends ChangeNotifier {
           .listen((List<Map<String, dynamic>> data) {
             _processBookingEvents(data);
           }, onError: (err) {
-            debugPrint('❌ Client Notification Booking Realtime Error: $err');
+            debugPrint('❌ Client Notification Booking Realtime Error: $err -> Fallback Polling');
+            _startNotificationPolling(userId);
           });
     } catch (e) {
-      debugPrint('❌ Client Notification Booking Realtime Exception: $e');
+      debugPrint('❌ Client Notification Booking Realtime Exception: $e -> Fallback Polling');
+      _startNotificationPolling(userId);
     }
+  }
+
+  void _startNotificationPolling(String userId) {
+    _notificationPollingTimer?.cancel();
+    _notificationPollingTimer = Timer.periodic(const Duration(seconds: 7), (_) async {
+      try {
+        final token = await _authService.getToken();
+        if (token == null) return;
+        final url = Uri.parse('${ApiConstants.baseUrl}/api/bookings');
+        final response = await http.get(
+          url,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        );
+        if (response.statusCode == 200) {
+          final resData = jsonDecode(response.body);
+          final List<dynamic> rawList = resData['data'] ?? [];
+          final List<Map<String, dynamic>> list = rawList.cast<Map<String, dynamic>>();
+          _processBookingEvents(list);
+        }
+      } catch (e) {
+        debugPrint('ℹ️ Notification polling notice: $e');
+      }
+    });
   }
 
   /// Process incoming booking updates and trigger notifications with sound
@@ -146,6 +181,16 @@ class ClientNotificationProvider extends ChangeNotifier {
       } else if (isNegot && driverOfferPrice != null) {
         title = '💬 Penawaran Harga Baru!';
         message = 'Driver menawarkan harga Rp $driverOfferPrice untuk pesanan Anda.';
+      } else if (addDetails['early_start_request'] == 'pending' && !_hasNotifForKey('early-req-$bookingId-${addDetails['early_start_requested_at']}')) {
+        _seenStatusKeys.add('early-req-$bookingId-${addDetails['early_start_requested_at']}');
+        title = '⚡ Permintaan Keberangkatan (OTW)';
+        message = 'Driver meminta persetujuan untuk mengakhiri waktu persiapan dan berangkat OTW sekarang.';
+        type = 'booking';
+      } else if (addDetails['early_start_request'] == 'approved' && !_hasNotifForKey('early-appr-$bookingId-${addDetails['early_start_approved_at']}')) {
+        _seenStatusKeys.add('early-appr-$bookingId-${addDetails['early_start_approved_at']}');
+        title = '✅ Persetujuan Keberangkatan';
+        message = 'Anda telah menyetujui driver untuk mengakhiri persiapan & berangkat OTW.';
+        type = 'booking';
       } else if (addDetails['dp_paid'] == true && !_hasNotifForKey('dp-$bookingId')) {
         title = '💳 Uang Muka (DP) Berhasil';
         message = 'Pembayaran DP untuk pesanan Anda berhasil diproses.';
@@ -179,35 +224,38 @@ class ClientNotificationProvider extends ChangeNotifier {
       _chatSubscription = Supabase.instance.client
           .from('booking_messages')
           .stream(primaryKey: ['id'])
-          .listen((List<Map<String, dynamic>> messages) {
-            for (final msg in messages) {
-              final senderRole = msg['sender_role']?.toString();
-              final senderId = msg['sender_id']?.toString() ?? '';
-              final msgId = msg['id']?.toString() ?? '';
+          .listen(
+            (List<Map<String, dynamic>> messages) {
+              for (final msg in messages) {
+                final senderRole = msg['sender_role']?.toString();
+                final senderId = msg['sender_id']?.toString() ?? '';
+                final msgId = msg['id']?.toString() ?? '';
 
-              if (senderRole == 'driver' && senderId != userId) {
-                final key = 'chat-msg-$msgId';
-                if (!_seenStatusKeys.contains(key)) {
-                  _seenStatusKeys.add(key);
+                if (senderRole == 'driver' && senderId != userId) {
+                  final key = 'chat-msg-$msgId';
+                  if (!_seenStatusKeys.contains(key)) {
+                    _seenStatusKeys.add(key);
 
-                  final content = msg['message']?.toString() ?? 'Pesan baru masuk';
-                  final bookingId = msg['booking_id']?.toString();
+                    final content = msg['message']?.toString() ?? 'Pesan baru masuk';
+                    final bookingId = msg['booking_id']?.toString();
 
-                  _addNotificationAndPlaySound(
-                    title: '💬 Pesan Baru dari Driver',
-                    message: content,
-                    type: 'chat',
-                    data: {
-                      'bookingId': bookingId,
-                      'senderId': senderId,
-                    },
-                  );
+                    _addNotificationAndPlaySound(
+                      title: '💬 Pesan Baru dari Driver',
+                      message: content,
+                      type: 'chat',
+                      data: {
+                        'bookingId': bookingId,
+                        'senderId': senderId,
+                      },
+                    );
+                  }
                 }
               }
-            }
-          }, onError: (err) {
-            debugPrint('❌ Client Notification Chat Realtime Error: $err');
-          });
+            },
+            onError: (err) {
+              debugPrint("Chat stream Realtime error: $err");
+            },
+          );
     } catch (e) {
       debugPrint('❌ Client Notification Chat Realtime Exception: $e');
     }

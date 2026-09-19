@@ -8,8 +8,6 @@ import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/modules/auth/onboarding/screens/onboarding_screen.dart';
 import 'package:temenin_ajaa/modules/auth/screens/login_screen.dart';
 import 'package:temenin_ajaa/modules/clients/screens/home_loggedin_screen.dart';
-import 'package:temenin_ajaa/modules/auth/screens/setup_account_screen.dart';
-import 'package:temenin_ajaa/modules/auth/screens/verify_email_waiting_screen.dart';
 import 'package:temenin_ajaa/core/widgets/offline_banner_widget.dart';
 import 'providers/auth_provider.dart';
 import 'providers/driver_provider.dart';
@@ -37,14 +35,19 @@ void main() async {
   
   // Initialize Supabase
   try {
-    final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? 
-        const String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://wdjjaevfuxqrephhdacp.supabase.co');
-    final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'] ?? 
-        const String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+    const defaultAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkamphZXZmdXhxcmVwaGhkYWNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyOTI0NDEsImV4cCI6MjEwMzg2ODQ0MX0.BGAHOeNX6XHaBOT7N4-yfEy9G8sw04VpSH4gVyiEzDs';
+    final envAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
+    final supabaseUrl = (dotenv.env['SUPABASE_URL'] != null && dotenv.env['SUPABASE_URL']!.isNotEmpty)
+        ? dotenv.env['SUPABASE_URL']!
+        : const String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://wdjjaevfuxqrephhdacp.supabase.co');
+        
+    final supabaseAnonKey = (envAnonKey != null && envAnonKey.isNotEmpty)
+        ? envAnonKey
+        : const String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: defaultAnonKey);
 
     await Supabase.initialize(
       url: supabaseUrl,
-      anonKey: supabaseAnonKey,
+      anonKey: supabaseAnonKey.isNotEmpty ? supabaseAnonKey : defaultAnonKey,
     );
     print('✅ Supabase initialized successfully');
   } catch (e) {

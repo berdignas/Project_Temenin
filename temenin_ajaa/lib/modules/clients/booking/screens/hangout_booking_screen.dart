@@ -470,13 +470,16 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
           ),
         ),
         const SizedBox(width: 8),
-        Text(
-          title,
-          style: GoogleFonts.inter(
-            color: AppTheme.textMuted,
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.6,
+        Expanded(
+          child: Text(
+            title,
+            style: GoogleFonts.inter(
+              color: AppTheme.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+            ),
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       ],
@@ -1058,13 +1061,16 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
                         children: [
                           Row(
                             children: [
-                                Text(
-                                "PILIH DI PETA MAPBOX",
-                                style: GoogleFonts.inter(
-                                  color: AppTheme.primaryPink,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 0.5,
+                              Expanded(
+                                child: Text(
+                                  "PILIH DI PETA MAPBOX",
+                                  style: GoogleFonts.inter(
+                                    color: AppTheme.primaryPink,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.5,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               const SizedBox(width: 6),
@@ -1348,34 +1354,41 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      _isCalculatingDistance
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryPink),
-                            )
-                          : const Icon(Icons.route_rounded, color: AppTheme.primaryPink, size: 16),
-                      const SizedBox(width: 6),
-                      Text(
-                        "Jarak Riil: ${_estimatedDistanceKm.toStringAsFixed(1)} km",
-                        style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11.5, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(4),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        _isCalculatingDistance
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryPink),
+                              )
+                            : const Icon(Icons.route_rounded, color: AppTheme.primaryPink, size: 16),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            "Jarak Riil: ${_estimatedDistanceKm.toStringAsFixed(1)} km",
+                            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11.5, fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        child: Text(
-                          _routeSource,
-                          style: GoogleFonts.inter(color: const Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold),
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            _routeSource,
+                            style: GoogleFonts.inter(color: const Color(0xFF10B981), fontSize: 9, fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 6),
                   Text(
                     "+${fmt(prices['transportFee'])}",
                     style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 13, fontWeight: FontWeight.w800),
@@ -1714,6 +1727,7 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
           Positioned(
             bottom: 10,
             left: 12,
+            right: 12,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
@@ -1721,20 +1735,24 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
                 borderRadius: BorderRadius.circular(999),
                 border: Border.all(color: AppTheme.border),
               ),
-              child: Row(
-                children: [
-                  Text("$_estimatedDistanceKm km", style: GoogleFonts.inter(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 11)),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 5),
-                    child: Text("•", style: TextStyle(color: AppTheme.textMuted)),
-                  ),
-                  Text("15 mnt", style: GoogleFonts.inter(color: AppTheme.success, fontWeight: FontWeight.bold, fontSize: 11)),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 5),
-                    child: Text("•", style: TextStyle(color: AppTheme.textMuted)),
-                  ),
-                  Text("Rute Hangout Active", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 11)),
-                ],
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    Text("$_estimatedDistanceKm km", style: GoogleFonts.inter(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 11)),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 5),
+                      child: Text("•", style: TextStyle(color: AppTheme.textMuted)),
+                    ),
+                    Text("15 mnt", style: GoogleFonts.inter(color: AppTheme.success, fontWeight: FontWeight.bold, fontSize: 11)),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 5),
+                      child: Text("•", style: TextStyle(color: AppTheme.textMuted)),
+                    ),
+                    Text("Rute Hangout Active", style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 11)),
+                  ],
+                ),
               ),
             ),
           ),

@@ -9,6 +9,6 @@
   "gaming_buddy_per_match_price": 10000,
   "commission_rate": 10,
   "allow_negotiation_flexible_only": true,
-  "updated_at": "2026-09-18T01:56:29.256Z",
+  "updated_at": "2026-09-18T01:56:29.256+00:00",
   "id": "pricing_config"
 }

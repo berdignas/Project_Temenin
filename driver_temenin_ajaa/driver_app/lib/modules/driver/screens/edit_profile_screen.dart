@@ -1,8 +1,12 @@
+import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
 import '../../../providers/auth_provider.dart';
 import 'driver_addons_screen.dart';
 
@@ -89,6 +93,29 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
     'Bahasa Minang',
     'Bahasa Bali',
   ];
+
+  String _detectVehicleCategory(String name, [String? rawType]) {
+    final lowerName = name.toLowerCase();
+    final lowerType = (rawType ?? '').toLowerCase();
+
+    if (lowerType.contains('mobil') || lowerName.contains('mobil') || lowerName.contains('car') || lowerName.contains('avanza') || lowerName.contains('xenia') || lowerName.contains('brio') || lowerName.contains('agya') || lowerName.contains('ayla') || lowerName.contains('innova') || lowerName.contains('rush') || lowerName.contains('terios') || lowerName.contains('yaris') || lowerName.contains('jazz') || lowerName.contains('calya') || lowerName.contains('sigra')) {
+      return 'Mobil';
+    }
+
+    if (lowerType.contains('sport') || lowerName.contains('cbr') || lowerName.contains('ninja') || lowerName.contains('r15') || lowerName.contains('r25') || lowerName.contains('gsx') || lowerName.contains('sport') || lowerName.contains('cb150') || lowerName.contains('vixion') || lowerName.contains('mt-') || lowerName.contains('mt15') || lowerName.contains('mt25') || lowerName.contains('klx') || lowerName.contains('crf') || lowerName.contains('wr155')) {
+      return 'Motor Sport';
+    }
+
+    if (lowerType.contains('classic') || lowerType.contains('retro') || lowerName.contains('vespa') || lowerName.contains('scoopy') || lowerName.contains('fazzio') || lowerName.contains('filano') || lowerName.contains('grand filano') || lowerName.contains('genio') || lowerName.contains('w175') || lowerName.contains('classic') || lowerName.contains('retro')) {
+      return 'Motor Classic';
+    }
+
+    if (lowerType.contains('bebek') || lowerName.contains('supra') || lowerName.contains('jupiter') || lowerName.contains('revo') || lowerName.contains('vega') || lowerName.contains('smash') || lowerName.contains('shogun') || lowerName.contains('blade') || lowerName.contains('satria') || lowerName.contains('mx king') || lowerName.contains('bebek')) {
+      return 'Motor Bebek';
+    }
+
+    return 'Motor Matic';
+  }
 
   @override
   void didChangeDependencies() {
@@ -424,20 +451,41 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      v['name'] ?? '',
-                                      style: GoogleFonts.poppins(
-                                        color: AppTheme.textHighContrast,
-                                        fontWeight: isCurrentActive ? FontWeight.bold : FontWeight.normal,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    Text(
-                                      "${v['plate_number'] ?? ''} • Usia: ${v['age'] ?? '< 5 tahun'}",
-                                      style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                                    )
-                                  ],
+                                   children: [
+                                     Text(
+                                       v['name'] ?? '',
+                                       style: GoogleFonts.poppins(
+                                         color: AppTheme.textHighContrast,
+                                         fontWeight: isCurrentActive ? FontWeight.bold : FontWeight.normal,
+                                         fontSize: 13,
+                                       ),
+                                     ),
+                                     const SizedBox(height: 3),
+                                     Row(
+                                       children: [
+                                         Container(
+                                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                           decoration: BoxDecoration(
+                                             color: AppTheme.fuchsiaLight,
+                                             borderRadius: BorderRadius.circular(4),
+                                             border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
+                                           ),
+                                           child: Text(
+                                             _detectVehicleCategory(v['name'] ?? '', v['type']),
+                                             style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 9.5, fontWeight: FontWeight.bold),
+                                           ),
+                                         ),
+                                         const SizedBox(width: 6),
+                                         Expanded(
+                                           child: Text(
+                                             "${v['plate_number'] ?? ''} • Usia: ${v['age'] ?? '< 5 tahun'}",
+                                             style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                             overflow: TextOverflow.ellipsis,
+                                           ),
+                                         ),
+                                       ],
+                                     ),
+                                   ],
                                 ),
                               ),
                               if (_vehicles.length > 1)
@@ -936,8 +984,10 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
   }
 
   void _showAddVehicleDialog(BuildContext context) {
-    String type = 'Motor';
+    String type = 'Motor Matic';
     String age = '< 5 Tahun';
+    String? vehiclePhotoUrl;
+    bool isUploadingPhoto = false;
     final nameCtrl = TextEditingController();
     final plateCtrl = TextEditingController();
 
@@ -950,7 +1000,7 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
               backgroundColor: AppTheme.surface,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               title: Text(
-                "Tambah Kendaraan Baru",
+                "Tambah Unit Kendaraan",
                 style: GoogleFonts.poppins(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 16),
               ),
               content: SingleChildScrollView(
@@ -959,27 +1009,42 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "Tipe Kendaraan",
+                      "Kategori Kendaraan",
                       style: GoogleFonts.poppins(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.bold),
                     ),
-                    Row(
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: [
-                        Radio<String>(
-                          value: 'Motor',
-                          groupValue: type,
-                          activeColor: AppTheme.primaryPink,
-                          onChanged: (val) => setDialogState(() => type = val!),
-                        ),
-                        const Text("Motor", style: TextStyle(color: AppTheme.textHighContrast, fontSize: 13)),
-                        const SizedBox(width: 20),
-                        Radio<String>(
-                          value: 'Mobil',
-                          groupValue: type,
-                          activeColor: AppTheme.primaryPink,
-                          onChanged: (val) => setDialogState(() => type = val!),
-                        ),
-                        const Text("Mobil", style: TextStyle(color: AppTheme.textHighContrast, fontSize: 13)),
-                      ],
+                        'Motor Matic',
+                        'Motor Sport',
+                        'Motor Classic',
+                        'Motor Bebek',
+                        'Mobil',
+                      ].map((cat) {
+                        final isSelected = type == cat;
+                        String iconStr = '🛵';
+                        if (cat == 'Motor Sport') iconStr = '🏍️';
+                        if (cat == 'Motor Classic') iconStr = '🛵';
+                        if (cat == 'Motor Bebek') iconStr = '🏍️';
+                        if (cat == 'Mobil') iconStr = '🚗';
+
+                        return ChoiceChip(
+                          label: Text("$cat $iconStr"),
+                          selected: isSelected,
+                          selectedColor: AppTheme.primaryPink.withOpacity(0.15),
+                          labelStyle: TextStyle(
+                            color: isSelected ? AppTheme.primaryPink : AppTheme.textHighContrast,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 11,
+                          ),
+                          side: BorderSide(color: isSelected ? AppTheme.primaryPink : AppTheme.border),
+                          onSelected: (selected) {
+                            if (selected) setDialogState(() => type = cat);
+                          },
+                        );
+                      }).toList(),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -991,7 +1056,7 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                       controller: nameCtrl,
                       style: const TextStyle(color: AppTheme.textHighContrast, fontSize: 13),
                       decoration: InputDecoration(
-                        hintText: "Yamaha NMAX 2024",
+                        hintText: "cth: Honda Vario 160",
                         hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
                         filled: true,
                         fillColor: AppTheme.cardDeep,
@@ -1008,7 +1073,7 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                       controller: plateCtrl,
                       style: const TextStyle(color: AppTheme.textHighContrast, fontSize: 13),
                       decoration: InputDecoration(
-                        hintText: "B 1234 XYZ",
+                        hintText: "cth: B 1234 TAA",
                         hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
                         filled: true,
                         fillColor: AppTheme.cardDeep,
@@ -1035,6 +1100,72 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                           .toList(),
                       onChanged: (val) => setDialogState(() => age = val!),
                     ),
+                    const SizedBox(height: 14),
+                    Text(
+                      "Foto Kendaraan (Opsional)",
+                      style: GoogleFonts.poppins(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    GestureDetector(
+                      onTap: () async {
+                        final picker = ImagePicker();
+                        final photo = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+                        if (photo != null) {
+                          setDialogState(() => isUploadingPhoto = true);
+                          String finalPhotoPath = photo.path;
+                          try {
+                            final cropped = await ImageCropper().cropImage(
+                              sourcePath: photo.path,
+                              uiSettings: [
+                                AndroidUiSettings(
+                                  toolbarTitle: 'Potong Foto Kendaraan',
+                                  toolbarColor: AppTheme.surface,
+                                  toolbarWidgetColor: AppTheme.textHighContrast,
+                                  activeControlsWidgetColor: AppTheme.primaryPink,
+                                ),
+                                IOSUiSettings(title: 'Potong Foto Kendaraan'),
+                              ],
+                            );
+                            if (cropped != null) finalPhotoPath = cropped.path;
+                          } catch (_) {}
+
+                          final uploaded = await context.read<AuthProvider>().uploadImageFile(File(finalPhotoPath), folder: 'vehicles');
+                          setDialogState(() {
+                            vehiclePhotoUrl = uploaded;
+                            isUploadingPhoto = false;
+                          });
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.cardDeep,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: vehiclePhotoUrl != null ? AppTheme.primaryPink : AppTheme.border),
+                        ),
+                        child: Row(
+                          children: [
+                            if (isUploadingPhoto)
+                              const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryPink))
+                            else if (vehiclePhotoUrl != null)
+                              const Icon(Icons.check_circle_rounded, color: AppTheme.primaryPink, size: 20)
+                            else
+                              const Icon(Icons.camera_alt_rounded, color: AppTheme.primaryPink, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                vehiclePhotoUrl != null ? "Foto Terpilih ✔" : "Unggah Foto Unit 📸",
+                                style: GoogleFonts.inter(
+                                  color: vehiclePhotoUrl != null ? AppTheme.primaryPink : AppTheme.textMuted,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1045,20 +1176,26 @@ class _EditDriverProfileScreenState extends State<EditDriverProfileScreen> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    if (nameCtrl.text.trim().isNotEmpty && plateCtrl.text.trim().isNotEmpty) {
+                    final name = nameCtrl.text.trim();
+                    final plate = plateCtrl.text.toUpperCase().trim();
+                    if (name.isNotEmpty && plate.isNotEmpty) {
                       setState(() {
                         _vehicles.add({
                           'type': type,
-                          'name': nameCtrl.text.trim(),
-                          'plate_number': plateCtrl.text.toUpperCase().trim(),
+                          'name': name,
+                          'plate_number': plate,
+                          'image': vehiclePhotoUrl,
                           'age': age,
                         });
+                        _activeVehicleIndex = _vehicles.length - 1;
+                        _vehicleNameController.text = name;
+                        _plateNumberController.text = plate;
                       });
                       Navigator.pop(ctx);
                     }
                   },
                   style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryPink),
-                  child: const Text("Tambah", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: const Text("Tambah & Pilih Unit", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
               ],
             );

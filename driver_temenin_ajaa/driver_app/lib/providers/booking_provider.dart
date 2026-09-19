@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/services/booking_service.dart';
@@ -783,7 +784,32 @@ class BookingProvider extends ChangeNotifier {
       dbStatus = 'completed';
     }
 
-    final updatedDetails = Map<String, dynamic>.from(_activeBooking?.additionalDetails ?? {});
+    Map<String, dynamic> updatedDetails = Map<String, dynamic>.from(_activeBooking?.additionalDetails ?? {});
+    try {
+      final dynamic queryId = int.tryParse(bId) ?? bId;
+      final currentRec = await Supabase.instance.client
+          .from('bookings')
+          .select('additional_details')
+          .eq('id', queryId)
+          .maybeSingle();
+      if (currentRec != null) {
+        Map<String, dynamic> dbAdd = {};
+        if (currentRec['additional_details'] is Map) {
+          dbAdd = Map<String, dynamic>.from(currentRec['additional_details'] as Map);
+        } else if (currentRec['additional_details'] is String) {
+          try {
+            final dec = jsonDecode(currentRec['additional_details'] as String);
+            if (dec is Map) dbAdd = Map<String, dynamic>.from(dec);
+          } catch (_) {}
+        }
+        dbAdd.forEach((key, val) {
+          if (!updatedDetails.containsKey(key)) {
+            updatedDetails[key] = val;
+          }
+        });
+      }
+    } catch (_) {}
+
     updatedDetails['sub_status'] = status;
     if (status == 'dp_paid') {
       updatedDetails['dp_paid'] = true;

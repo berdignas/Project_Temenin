@@ -202,6 +202,8 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     );
   }
 
+  bool _isShowingEarlyRequestDialog = false;
+
   void _checkStatusAndNavigate(Map<String, dynamic> row) {
     if (!mounted || _isNavigating) return;
 
@@ -209,6 +211,14 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     final add = _parseMap(row['additional_details']) ?? _parseMap(row['additionalDetails']);
     final subStatus = add?['sub_status']?.toString().toLowerCase();
     final isCountdownEnded = add?['countdown_ended'] == true || add?['countdown_ended'] == 'true';
+    final earlyReq = add?['early_start_request']?.toString();
+
+    // Check if driver sent an early start request ('pending')
+    if (earlyReq == 'pending' && !_isShowingEarlyRequestDialog && !_isNavigating) {
+      _isShowingEarlyRequestDialog = true;
+      _showEarlyStartRequestDialog(row);
+      return;
+    }
 
     // If still waiting for schedule (dp_paid) and countdown has not ended, stay on countdown!
     if (!isCountdownEnded && (subStatus == 'dp_paid' || status == 'dp_paid' || (subStatus == null && status == 'accepted'))) {
@@ -240,16 +250,176 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
         debugPrint("Error playing notification sound: $e");
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("🚀 Driver telah memulai perjalanan (OTW) menuju lokasi Anda!"),
-          backgroundColor: Colors.green,
-        ),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("🚀 Driver telah memulai perjalanan (OTW) menuju lokasi Anda!"), backgroundColor: Colors.green,)); } });
 
       final nextStatus = (subStatus != null && subStatus.isNotEmpty) ? subStatus : (status == 'ongoing' ? 'on_the_way' : status ?? 'on_the_way');
       _navigateToTracking(nextStatus: nextStatus);
     }
+  }
+
+  Future<void> _showEarlyStartRequestDialog(Map<String, dynamic> row) async {
+    if (!mounted) return;
+    try {
+      NotificationSoundService().playNotificationSound();
+    } catch (_) {}
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return AlertDialog(
+          backgroundColor: AppTheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: const BorderSide(color: AppTheme.primaryPink, width: 1.5),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryPink.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.hail_rounded, color: AppTheme.primaryPink, size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "Permintaan Keberangkatan",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.textHighContrast,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            "Mitra Driver meminta persetujuan untuk mengakhiri waktu tunggu persiapan dan langsung berangkat (OTW) ke lokasi Anda sekarang. Apakah Anda setuju?",
+            style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 13, height: 1.4),
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () async {
+                Navigator.pop(dialogCtx);
+                _isShowingEarlyRequestDialog = false;
+
+                final bId = widget.bookingId ?? _currentDetails['id']?.toString();
+                if (bId != null) {
+                  final String strId = bId.toString();
+                  final dynamic numId = int.tryParse(strId);
+                  final existingAdd = _parseMap(row['additional_details']) ??
+                      _parseMap(row['additionalDetails']) ??
+                      <String, dynamic>{};
+                  existingAdd['early_start_request'] = 'rejected';
+                  existingAdd['early_start_rejected_at'] = DateTime.now().toIso8601String();
+
+                  try {
+                    await Supabase.instance.client
+                        .from('bookings')
+                        .update({'additional_details': existingAdd})
+                        .eq('id', strId);
+                  } catch (_) {}
+                  if (numId != null) {
+                    try {
+                      await Supabase.instance.client
+                          .from('bookings')
+                          .update({'additional_details': existingAdd})
+                          .eq('id', numId);
+                    } catch (_) {}
+                  }
+                }
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("❌ Permintaan Driver ditolak. Waktu persiapan berlanjut."),
+                      backgroundColor: Colors.redAccent,
+                    ),
+                  );
+                }
+              },
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: AppTheme.border),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(
+                "TOLAK",
+                style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(dialogCtx);
+                _isShowingEarlyRequestDialog = false;
+                _countdownTimer?.cancel();
+                _pollingTimer?.cancel();
+                setState(() {
+                  _remainingSeconds = 0;
+                  _isCountdownFinished = true;
+                });
+
+                final bId = widget.bookingId ?? _currentDetails['id']?.toString();
+                if (bId != null) {
+                  final String strId = bId.toString();
+                  final dynamic numId = int.tryParse(strId);
+                  final existingAdd = _parseMap(row['additional_details']) ??
+                      _parseMap(row['additionalDetails']) ??
+                      <String, dynamic>{};
+                  existingAdd['early_start_request'] = 'approved';
+                  existingAdd['countdown_ended'] = true;
+                  existingAdd['sub_status'] = 'on_the_way';
+                  existingAdd['early_start_approved_at'] = DateTime.now().toIso8601String();
+
+                  try {
+                    await Supabase.instance.client
+                        .from('bookings')
+                        .update({
+                          'status': 'ongoing',
+                          'additional_details': existingAdd,
+                        })
+                        .eq('id', strId);
+                  } catch (_) {}
+                  if (numId != null) {
+                    try {
+                      await Supabase.instance.client
+                          .from('bookings')
+                          .update({
+                            'status': 'ongoing',
+                            'additional_details': existingAdd,
+                          })
+                          .eq('id', numId);
+                    } catch (_) {}
+                  }
+                }
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("🚀 Disetujui! Driver sedang OTW menuju lokasi Anda."),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  _navigateToTracking(nextStatus: 'on_the_way');
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryPink,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(
+                "YA, SETUJU (OTW)",
+                style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        );
+      },
+    ).then((_) {
+      _isShowingEarlyRequestDialog = false;
+    });
   }
 
   void _subscribeToStatusUpdates() {
@@ -296,18 +466,31 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     if (bId == null || bId.isEmpty) return;
 
     try {
-      final dynamic queryId = int.tryParse(bId) ?? bId;
+      final String strId = bId.toString();
+      final dynamic numId = int.tryParse(strId);
       final existingAdd = _currentDetails['additional_details'] is Map
           ? Map<String, dynamic>.from(_currentDetails['additional_details'])
           : (_currentDetails['additionalDetails'] is Map
               ? Map<String, dynamic>.from(_currentDetails['additionalDetails'])
               : <String, dynamic>{});
       existingAdd['otp'] = pin;
+      existingAdd['security_pin'] = pin;
 
-      await Supabase.instance.client
-          .from('bookings')
-          .update({'additional_details': existingAdd})
-          .eq('id', queryId);
+      try {
+        await Supabase.instance.client
+            .from('bookings')
+            .update({'additional_details': existingAdd})
+            .eq('id', strId);
+      } catch (_) {}
+
+      if (numId != null) {
+        try {
+          await Supabase.instance.client
+              .from('bookings')
+              .update({'additional_details': existingAdd})
+              .eq('id', numId);
+        } catch (_) {}
+      }
     } catch (e) {
       debugPrint("Error saving PIN to Supabase: $e");
     }
@@ -331,167 +514,127 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
   }
 
   Future<void> _showEarlyEndPinDialog() async {
-    final pinController = TextEditingController();
+    if (!mounted) return;
 
     showDialog(
       context: context,
       builder: (dialogCtx) {
-        String? errorText;
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return AlertDialog(
-              backgroundColor: AppTheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-                side: const BorderSide(color: AppTheme.primaryPink, width: 1.5),
+        return AlertDialog(
+          backgroundColor: AppTheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: const BorderSide(color: AppTheme.primaryPink, width: 1.5),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryPink.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.rocket_launch_rounded, color: AppTheme.primaryPink, size: 20),
               ),
-              title: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryPink.withOpacity(0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.shield_rounded, color: AppTheme.primaryPink, size: 20),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      "Konfirmasi PIN Keamanan",
-                      style: GoogleFonts.plusJakartaSans(
-                        color: AppTheme.textHighContrast,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Masukkan 4-digit PIN keamanan Anda untuk mengakhiri waktu tunggu dan meminta penjemputan sekarang:",
-                    style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 12, height: 1.4),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: pinController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 4,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: AppTheme.textHighContrast,
-                      fontSize: 24,
-                      letterSpacing: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: "••••",
-                      hintStyle: const TextStyle(color: AppTheme.textMuted, letterSpacing: 10),
-                      filled: true,
-                      fillColor: AppTheme.cardDeep,
-                      counterText: "",
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: AppTheme.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: AppTheme.primaryPink, width: 2),
-                      ),
-                    ),
-                  ),
-                  if (errorText != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      errorText!,
-                      style: GoogleFonts.inter(color: AppTheme.danger, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogCtx),
-                  child: Text(
-                    "BATAL",
-                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.bold),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "Konfirmasi Keberangkatan",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.textHighContrast,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final entered = pinController.text.trim();
-                    if (entered.length != 4) {
-                      setModalState(() {
-                        errorText = "Masukkan 4 digit PIN dengan lengkap.";
-                      });
-                      return;
+              ),
+            ],
+          ),
+          content: Text(
+            "Apakah Anda ingin mengakhiri waktu tunggu persiapan sekarang dan meminta Driver untuk langsung berangkat (OTW)?",
+            style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 13, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: Text(
+                "BATAL",
+                style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(dialogCtx);
+                _countdownTimer?.cancel();
+                _pollingTimer?.cancel();
+                setState(() {
+                  _remainingSeconds = 0;
+                  _isCountdownFinished = true;
+                });
+
+                // Notify Supabase countdown ended and trip on the way
+                final bId = widget.bookingId ?? _currentDetails['id']?.toString();
+                if (bId != null) {
+                  try {
+                    final String strId = bId.toString();
+                    final dynamic numId = int.tryParse(strId);
+                    final existingAdd = _parseMap(_currentDetails['additional_details']) ??
+                        _parseMap(_currentDetails['additionalDetails']) ??
+                        <String, dynamic>{};
+                    existingAdd['countdown_ended'] = true;
+                    existingAdd['countdown_ended_at'] = DateTime.now().toIso8601String();
+                    existingAdd['sub_status'] = 'on_the_way';
+                    
+                    try {
+                      await Supabase.instance.client
+                          .from('bookings')
+                          .update({
+                            'status': 'ongoing',
+                            'additional_details': existingAdd,
+                          })
+                          .eq('id', strId);
+                    } catch (_) {}
+
+                    if (numId != null) {
+                      try {
+                        await Supabase.instance.client
+                            .from('bookings')
+                            .update({
+                              'status': 'ongoing',
+                              'additional_details': existingAdd,
+                            })
+                            .eq('id', numId);
+                      } catch (_) {}
                     }
+                  } catch (e) {
+                    debugPrint("Error updating countdown_ended: $e");
+                  }
+                }
 
-                    if (entered == _securityPin) {
-                      Navigator.pop(dialogCtx);
-                      _countdownTimer?.cancel();
-                      _pollingTimer?.cancel();
-                      setState(() {
-                        _remainingSeconds = 0;
-                        _isCountdownFinished = true;
-                      });
+                try {
+                  NotificationSoundService().playNotificationSound();
+                } catch (_) {}
 
-                      // Notify Supabase countdown ended and trip on the way
-                      final bId = widget.bookingId ?? _currentDetails['id']?.toString();
-                      if (bId != null) {
-                        try {
-                          final dynamic queryId = int.tryParse(bId) ?? bId;
-                          final existingAdd = _parseMap(_currentDetails['additional_details']) ??
-                              _parseMap(_currentDetails['additionalDetails']) ??
-                              <String, dynamic>{};
-                          existingAdd['countdown_ended'] = true;
-                          existingAdd['countdown_ended_at'] = DateTime.now().toIso8601String();
-                          existingAdd['sub_status'] = 'on_the_way';
-                          await Supabase.instance.client
-                              .from('bookings')
-                              .update({
-                                'status': 'ongoing',
-                                'additional_details': existingAdd,
-                              })
-                              .eq('id', queryId);
-                        } catch (e) {
-                          debugPrint("Error updating countdown_ended: $e");
-                        }
-                      }
-
-                      NotificationSoundService().playNotificationSound();
-
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text("✅ PIN Berhasil Diverifikasi! Waktu tunggu berakhir, melanjutkan ke pelacakan."),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                        _navigateToTracking(nextStatus: 'on_the_way');
-                      }
-                    } else {
-                      setModalState(() {
-                        errorText = "PIN tidak cocok! Masukkan PIN yang tampil di kartu keamanan layar ini.";
-                      });
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryPink,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text(
-                    "KONFIRMASI PIN",
-                    style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            );
-          },
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("🚀 Konfirmasi Berhasil! Melanjutkan ke pelacakan keberangkatan Driver."),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                    _navigateToTracking(nextStatus: 'on_the_way');
+                  }
+                });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryPink,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(
+                "YA, MINTA DRIVER OTW",
+                style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
         );
       },
     );
@@ -692,7 +835,7 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                         onPressed: _showEarlyEndPinDialog,
                         icon: const Icon(Icons.flash_on_rounded, color: Colors.amber, size: 16),
                         label: Text(
-                          "⚡ Akhiri Waktu Tunggu Lebih Awal (Gunakan PIN)",
+                          "⚡ Minta Driver Berangkat Sekarang (OTW)",
                           style: GoogleFonts.plusJakartaSans(
                             color: Colors.amber,
                             fontSize: 11,
@@ -734,10 +877,10 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.lock_outline_rounded, color: AppTheme.primaryPink, size: 18),
+                        const Icon(Icons.verified_user_rounded, color: AppTheme.primaryPink, size: 18),
                         const SizedBox(width: 8),
                         Text(
-                          "PIN KEAMANAN PESANAN",
+                          "STATUS PERSIAPAN LAYANAN",
                           style: GoogleFonts.plusJakartaSans(
                             color: AppTheme.primaryPink,
                             fontSize: 12,
@@ -749,70 +892,13 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                     ),
                     const SizedBox(height: 14),
 
-                    // 4-Digit Boxes
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: _securityPin.padLeft(4, '0').split('').map((digit) {
-                        return Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 6),
-                          width: 52,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: AppTheme.cardDeep,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            digit,
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 26,
-                              fontWeight: FontWeight.w900,
-                              color: AppTheme.textHighContrast,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-
-                    const SizedBox(height: 12),
                     Text(
-                      "Gunakan PIN ini untuk mengakhiri waktu tunggu lebih awal, atau berikan kepada Driver saat penjemputan.",
+                      "Driver Anda sedang bersiap untuk penjemputan. Anda dapat menekan tombol di bawah untuk meminta keberangkatan lebih awal.",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.inter(
                         color: AppTheme.textMuted,
-                        fontSize: 11,
+                        fontSize: 12,
                         height: 1.4,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    InkWell(
-                      onTap: () {
-                        Clipboard.setData(ClipboardData(text: _securityPin));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text("PIN disalin ke clipboard!"),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.copy_rounded, color: AppTheme.primaryPink, size: 14),
-                            const SizedBox(width: 4),
-                            Text(
-                              "Salin PIN",
-                              style: GoogleFonts.inter(
-                                color: AppTheme.primaryPink,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
                       ),
                     ),
                   ],

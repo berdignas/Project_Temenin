@@ -15,6 +15,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'payment_method_screen.dart';
 import '../../screens/home_loggedin_screen.dart';
 import '../../../../providers/client_booking_provider.dart';
+import '../widgets/live_driver_tracking_map.dart';
 
 class TrackingDriverScreen extends StatefulWidget {
   final Map<String, dynamic>? bookingData;
@@ -44,8 +45,8 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   String _estimatedTime = "Arriving in 4 mins";
   String _countdownTimer = "00:04:00";
   
-  // Overtime detail
-  int _overtimeHours = 1;
+  // Overtime detail (default 0, dihitung hanya jika ada overtime nyata)
+  int _overtimeHours = 0;
   int _overtimeCost = 0;
   int _finalDueAmount = 0;
 
@@ -61,12 +62,14 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   Timer? _pollingTimer;
   bool _isCompletionModalShowing = false;
   bool _isPelunasanModalShowing = false;
+  Map<String, dynamic>? _fetchedDriverProfile;
 
   @override
   void initState() {
     super.initState();
     _currentBookingId = widget.bookingId;
     _bookingDetails = widget.bookingData;
+    _fetchDriverDetailsIfNeeded();
 
     final initDetails = widget.bookingData;
     final addDetails = initDetails?['additional_details'] is Map
@@ -105,6 +108,48 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       default:
         _overtimeCost = 50000;
     }
+
+    final rawInitTotal = widget.bookingData?['totalPayment'] ?? widget.bookingData?['total_price'] ?? 130000;
+    final initTotal = rawInitTotal is num ? rawInitTotal.toInt() : (int.tryParse(rawInitTotal.toString()) ?? 130000);
+    final rawInitDp = widget.bookingData?['dp'];
+    final int initDp = rawInitDp is num 
+        ? rawInitDp.toInt() 
+        : (int.tryParse(rawInitDp?.toString() ?? '') ?? (initTotal * 0.5).toInt());
+    final otFromInit = int.tryParse(addDetails?['overtime_hours']?.toString() ?? addDetails?['overtimeHours']?.toString() ?? '0') ?? 0;
+    _overtimeHours = otFromInit;
+    _finalDueAmount = (initTotal - initDp) + (_overtimeHours * _overtimeCost);
+  }
+
+  Future<void> _fetchDriverDetailsIfNeeded() async {
+    final details = _bookingDetails ?? widget.bookingData ?? {};
+    final addDetails = details['additional_details'] is Map
+        ? details['additional_details'] as Map
+        : (details['additionalDetails'] is Map ? details['additionalDetails'] as Map : null);
+
+    final driverId = details['driver_id'] ??
+        details['driverId'] ??
+        addDetails?['driver_id'] ??
+        addDetails?['driverId'] ??
+        (details['driver'] is Map ? details['driver']['id'] : null);
+
+    if (driverId != null && driverId.toString().isNotEmpty) {
+      try {
+        final queryId = driverId.toString();
+        final res = await Supabase.instance.client
+            .from('drivers')
+            .select('*, users(*)')
+            .or('id.eq.$queryId,user_id.eq.$queryId')
+            .maybeSingle();
+
+        if (res != null && mounted) {
+          setState(() {
+            _fetchedDriverProfile = res;
+          });
+        }
+      } catch (e) {
+        debugPrint("Error fetching driver profile in tracking: $e");
+      }
+    }
   }
 
   void _listenToActiveDrivers() {
@@ -112,14 +157,19 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       _driversSubscription = Supabase.instance.client
           .from('drivers')
           .stream(primaryKey: ['id'])
-          .listen((List<Map<String, dynamic>> data) {
-            if (mounted) {
-              final active = data.where((d) => d['is_available'] == true).toList();
-              setState(() {
-                _detectedDrivers = active;
-              });
-            }
-          });
+          .listen(
+            (List<Map<String, dynamic>> data) {
+              if (mounted) {
+                final active = data.where((d) => d['is_available'] == true).toList();
+                setState(() {
+                  _detectedDrivers = active;
+                });
+              }
+            },
+            onError: (err) {
+              debugPrint("Active drivers stream Realtime error: $err");
+            },
+          );
     } catch (e) {
       debugPrint("Error streaming active drivers: $e");
     }
@@ -161,56 +211,60 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     }
     debugPrint('⚡ Supabase Booking status update: $status (db: $dbStatus, sub: $subStatus, isDpPaid: $isDpPaid)');
     
-    setState(() {
-      _bookingDetails = data;
-      _simulationState = status;
-      if (status == 'pending') {
-        _estimatedTime = "Menunggu Driver...";
-      } else if (status == 'accepted') {
-        _isWaitingForDriverApproval = false;
-      } else if (status == 'dp_paid') {
-        _estimatedTime = "Driver Sedang Bersiap...";
-      } else if (status == 'on_the_way') {
-        _estimatedTime = "Menuju Lokasi Anda";
-        _countdownTimer = "00:03:45";
-      } else if (status == 'arrived') {
-        _estimatedTime = "Driver Telah Tiba!";
-      } else if (status == 'started' || status == 'ongoing') {
-        final durationHours = int.tryParse(addDetails?['duration']?.toString() ?? widget.bookingData?['duration']?.toString() ?? '3') ?? 3;
-        if (_remainingSeconds <= 240) {
-          _remainingSeconds = durationHours * 3600;
-        }
-        int hours = _remainingSeconds ~/ 3600;
-        int minutes = (_remainingSeconds % 3600) ~/ 60;
-        int seconds = _remainingSeconds % 60;
-        _countdownTimer = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
-        _estimatedTime = "Sesi Berjalan: $_countdownTimer";
-        _startTimer();
-      } else if (status == 'completion_requested') {
-        _estimatedTime = "Menunggu Konfirmasi Anda...";
-        WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _bookingDetails = data;
+        _simulationState = status;
+        _ensureRealOtpExists();
+        if (status == 'pending') {
+          _estimatedTime = "Menunggu Driver...";
+        } else if (status == 'accepted') {
+          _isWaitingForDriverApproval = false;
+        } else if (status == 'dp_paid') {
+          _estimatedTime = "Driver Sedang Bersiap...";
+        } else if (status == 'on_the_way') {
+          _estimatedTime = "Menuju Lokasi Anda";
+          _countdownTimer = "00:03:45";
+        } else if (status == 'arrived') {
+          _estimatedTime = "Driver Telah Tiba!";
+          _ensureRealOtpExists();
+        } else if (status == 'started' || status == 'ongoing') {
+          final durationHours = int.tryParse(addDetails?['duration']?.toString() ?? widget.bookingData?['duration']?.toString() ?? '3') ?? 3;
+          if (_remainingSeconds <= 240) {
+            _remainingSeconds = durationHours * 3600;
+          }
+          int hours = _remainingSeconds ~/ 3600;
+          int minutes = (_remainingSeconds % 3600) ~/ 60;
+          int seconds = _remainingSeconds % 60;
+          _countdownTimer = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
+          _estimatedTime = "Sesi Berjalan: $_countdownTimer";
+        } else if (status == 'completion_requested') {
+          _estimatedTime = "Menunggu Konfirmasi Anda...";
           _showClientCompletionConfirmationDialog();
-        });
-      } else if (status == 'completed') {
-        _estimatedTime = "Layanan Selesai";
-        final totalEstimasi = widget.bookingData?['totalPayment'] ?? (data['total_price'] as num?)?.toInt() ?? 130000;
-        final dpPaid = widget.bookingData?['dp'] ?? (totalEstimasi * 0.5).toInt();
-        _finalDueAmount = (totalEstimasi - dpPaid) + (_overtimeHours * _overtimeCost);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
+        } else if (status == 'completed') {
+          _estimatedTime = "Layanan Selesai";
+          final totalEstimasi = widget.bookingData?['totalPayment'] ?? (data['total_price'] as num?)?.toInt() ?? 130000;
+          final dpPaid = widget.bookingData?['dp'] ?? (totalEstimasi * 0.5).toInt();
+          final otHours = int.tryParse(addDetails?['overtime_hours']?.toString() ?? addDetails?['overtimeHours']?.toString() ?? '0') ?? 0;
+          _overtimeHours = otHours;
+          _finalDueAmount = (totalEstimasi - dpPaid) + (_overtimeHours * _overtimeCost);
           _showPelunasanModal();
-        });
-      } else if (status == 'paid') {
-        _simulationState = 'paid';
-        _pollingTimer?.cancel();
-      } else if (status == 'cancelled') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Order pendampingan Anda dibatalkan oleh driver."),
-            backgroundColor: Colors.red,
-          ),
-        );
-        Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
-      }
+        } else if (status == 'paid') {
+          _simulationState = 'paid';
+          _pollingTimer?.cancel();
+        } else if (status == 'cancelled') {
+          try {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Order pendampingan Anda dibatalkan oleh driver."),
+                backgroundColor: Colors.red,
+              ),
+            );
+          } catch (_) {}
+          Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+        }
+      });
     });
   }
 
@@ -407,16 +461,29 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
 
   String? _extractOtp(dynamic data) {
     if (data == null) return null;
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) return trimmed;
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map) return _extractOtp(decoded);
+      } catch (_) {}
+      return null;
+    }
     if (data is Map) {
-      final direct = data['otp']?.toString().trim();
+      final direct = data['otp']?.toString().trim() ??
+          data['security_pin']?.toString().trim() ??
+          data['pin']?.toString().trim() ??
+          data['start_otp']?.toString().trim() ??
+          data['startOtp']?.toString().trim();
       if (direct != null && direct.isNotEmpty && direct != 'null') {
         return direct;
       }
-      if (data['additional_details'] is Map) {
+      if (data['additional_details'] != null) {
         final sub = _extractOtp(data['additional_details']);
         if (sub != null) return sub;
       }
-      if (data['additionalDetails'] is Map) {
+      if (data['additionalDetails'] != null) {
         final sub = _extractOtp(data['additionalDetails']);
         if (sub != null) return sub;
       }
@@ -426,16 +493,28 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
 
   String? _extractCompletionOtp(dynamic data) {
     if (data == null) return null;
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) return trimmed;
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map) return _extractCompletionOtp(decoded);
+      } catch (_) {}
+      return null;
+    }
     if (data is Map) {
-      final direct = data['completion_otp']?.toString().trim() ?? data['end_otp']?.toString().trim();
+      final direct = data['completion_otp']?.toString().trim() ??
+          data['completionOtp']?.toString().trim() ??
+          data['end_otp']?.toString().trim() ??
+          data['endOtp']?.toString().trim();
       if (direct != null && direct.isNotEmpty && direct != 'null') {
         return direct;
       }
-      if (data['additional_details'] is Map) {
+      if (data['additional_details'] != null) {
         final sub = _extractCompletionOtp(data['additional_details']);
         if (sub != null) return sub;
       }
-      if (data['additionalDetails'] is Map) {
+      if (data['additionalDetails'] != null) {
         final sub = _extractCompletionOtp(data['additionalDetails']);
         if (sub != null) return sub;
       }
@@ -444,64 +523,86 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   }
 
   Future<void> _ensureRealOtpExists() async {
-    final details = _bookingDetails ?? widget.bookingData;
-    String? existingStartOtp = _extractOtp(_bookingDetails) ?? _extractOtp(widget.bookingData);
-    String? existingCompOtp = _extractCompletionOtp(_bookingDetails) ?? _extractCompletionOtp(widget.bookingData);
     final bookingId = _currentBookingId ?? widget.bookingId;
+    if (bookingId == null || bookingId.startsWith('mock')) return;
 
-    if (bookingId != null && !bookingId.startsWith('mock')) {
+    try {
+      final dynamic queryId = int.tryParse(bookingId) ?? bookingId;
+      final currentRec = await Supabase.instance.client
+          .from('bookings')
+          .select('additional_details')
+          .eq('id', queryId)
+          .maybeSingle();
+
+      Map<String, dynamic> dbDetails = {};
+      if (currentRec != null && currentRec['additional_details'] is Map) {
+        dbDetails = Map<String, dynamic>.from(currentRec['additional_details'] as Map);
+      } else if (currentRec != null && currentRec['additional_details'] is String) {
+        try {
+          final decoded = jsonDecode(currentRec['additional_details'] as String);
+          if (decoded is Map) dbDetails = Map<String, dynamic>.from(decoded);
+        } catch (_) {}
+      }
+
+      // Check existing OTPs in DB directly - do NOT fall back to stale memory from old bookings
+      String? startOtp = _extractOtp(dbDetails);
+      String? compOtp = _extractCompletionOtp(dbDetails);
+
       final random = Random();
       bool needsUpdate = false;
 
-      String startOtp = existingStartOtp ?? '';
-      if (startOtp.isEmpty) {
+      if (startOtp == null || startOtp.isEmpty || startOtp == '1234') {
         startOtp = (random.nextInt(9000) + 1000).toString();
         needsUpdate = true;
       }
 
-      String compOtp = existingCompOtp ?? '';
-      if (compOtp.isEmpty || compOtp == startOtp) {
+      if (compOtp == null || compOtp.isEmpty || compOtp == '1234' || compOtp == startOtp) {
         do {
           compOtp = (random.nextInt(9000) + 1000).toString();
         } while (compOtp == startOtp);
         needsUpdate = true;
       }
 
-      if (needsUpdate) {
-        try {
-          final dynamic queryId = int.tryParse(bookingId) ?? bookingId;
-          final currentRec = await Supabase.instance.client
-              .from('bookings')
-              .select('additional_details')
-              .eq('id', queryId)
-              .maybeSingle();
-
-          final updatedDetails = currentRec != null && currentRec['additional_details'] is Map
-              ? Map<String, dynamic>.from(currentRec['additional_details'] as Map)
-              : Map<String, dynamic>.from(details ?? {});
-
-          updatedDetails['otp'] = startOtp;
-          updatedDetails['completion_otp'] = compOtp;
-
-          await Supabase.instance.client
-              .from('bookings')
-              .update({'additional_details': updatedDetails})
-              .eq('id', queryId);
-
-          if (mounted) {
-            setState(() {
-              if (_bookingDetails != null) {
-                _bookingDetails!['additional_details'] = updatedDetails;
-                _bookingDetails!['otp'] = startOtp;
-                _bookingDetails!['completion_otp'] = compOtp;
-              }
-            });
-          }
-          debugPrint("✅ Saved Start PIN $startOtp & Completion PIN $compOtp for booking $bookingId to Supabase");
-        } catch (e) {
-          debugPrint("Error saving generated OTPs to DB: $e");
-        }
+      final details = _bookingDetails ?? widget.bookingData;
+      final updatedDetails = Map<String, dynamic>.from(dbDetails);
+      if (details != null) {
+        details.forEach((k, v) {
+          if (!updatedDetails.containsKey(k)) updatedDetails[k.toString()] = v;
+        });
       }
+      updatedDetails['otp'] = startOtp;
+      updatedDetails['security_pin'] = startOtp;
+      updatedDetails['start_otp'] = startOtp;
+      updatedDetails['completion_otp'] = compOtp;
+
+      if (needsUpdate || dbDetails['otp'] == null || dbDetails['security_pin'] == null) {
+        await Supabase.instance.client
+            .from('bookings')
+            .update({'additional_details': updatedDetails})
+            .eq('id', queryId);
+        debugPrint("✅ Saved FRESH Start PIN $startOtp & Completion PIN $compOtp for booking $bookingId to Supabase");
+      }
+
+      if (mounted) {
+        setState(() {
+          if (_bookingDetails != null) {
+            _bookingDetails!['additional_details'] = updatedDetails;
+            _bookingDetails!['otp'] = startOtp;
+            _bookingDetails!['security_pin'] = startOtp;
+            _bookingDetails!['completion_otp'] = compOtp;
+          } else {
+            _bookingDetails = {
+              'id': bookingId,
+              'additional_details': updatedDetails,
+              'otp': startOtp,
+              'security_pin': startOtp,
+              'completion_otp': compOtp,
+            };
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Error in _ensureRealOtpExists: $e");
     }
   }
 
@@ -521,11 +622,16 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('id', queryId)
-          .listen((List<Map<String, dynamic>> data) {
-            if (data.isNotEmpty) {
-              _handleBookingStatusUpdate(data.first);
-            }
-          });
+          .listen(
+            (List<Map<String, dynamic>> data) {
+              if (data.isNotEmpty) {
+                _handleBookingStatusUpdate(data.first);
+              }
+            },
+            onError: (err) {
+              debugPrint("Booking status stream Realtime error: $err");
+            },
+          );
     } catch (e) {
       debugPrint('❌ Supabase subscription error: $e');
     }
@@ -724,26 +830,66 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       } catch (_) {}
     }
 
-    final driverName = currentDriver?['name'] ?? details['driverName'] ?? "Mitra Driver";
-    final driverImage = currentDriver?['image'] ?? details['driverImage'] ?? '';
-    final driverRating = currentDriver?['rating'] ?? details['driverRating'] ?? "-";
-    final vehicle = currentDriver?['vehicle'] ?? details['vehicle'] ?? "-";
-    final plateNumber = details['plateNumber'] ?? "-";
-    final pickupLocation = details['pickup'] ?? "-";
-    final destinationLocation = details['destination'] ?? "-";
-    final totalPayment = details['totalPayment'] ?? 130000;
-    final dp = details['dp'] ?? 65000;
-    final remainingPayment = details['remainingPayment'] ?? 65000;
+    final userMap = _fetchedDriverProfile?['users'] is Map ? _fetchedDriverProfile!['users'] as Map : null;
+
+    final driverName = userMap?['full_name'] ??
+        userMap?['name'] ??
+        _fetchedDriverProfile?['full_name'] ??
+        _fetchedDriverProfile?['name'] ??
+        currentDriver?['name'] ??
+        details['driverName'] ??
+        details['driver_name'] ??
+        "Budi Santoso (Mitra Driver)";
+
+    final driverImage = userMap?['avatar_url'] ??
+        userMap?['profile_image'] ??
+        _fetchedDriverProfile?['avatar_url'] ??
+        _fetchedDriverProfile?['profile_image'] ??
+        currentDriver?['image'] ??
+        details['driverImage'] ??
+        details['avatar_url'] ??
+        '';
+
+    final driverRating = (_fetchedDriverProfile?['rating'] ?? _fetchedDriverProfile?['rating_avg'] ?? currentDriver?['rating'] ?? details['driverRating'] ?? "4.9").toString();
+    final vehicle = _fetchedDriverProfile?['vehicle_type'] ?? _fetchedDriverProfile?['vehicle_name'] ?? currentDriver?['vehicle'] ?? details['vehicle'] ?? details['vehicle_type'] ?? "Motor (Honda Vario 125cc)";
+    final plateNumber = _fetchedDriverProfile?['plate_number'] ?? _fetchedDriverProfile?['vehicle_plate'] ?? currentDriver?['plate_number'] ?? details['plateNumber'] ?? details['plate_number'] ?? "B 4912 SJK";
+
+    String resolveAddress(List<dynamic> candidates, String fallback) {
+      for (var c in candidates) {
+        if (c != null && c.toString().trim().isNotEmpty && c.toString() != 'Lokasi Penjemputan' && c.toString() != 'Lokasi Tujuan' && c.toString() != '-') {
+          return c.toString();
+        }
+      }
+      return fallback;
+    }
+
+    final pickupLocation = resolveAddress([
+      details['pickup'], details['pickupLocation'], details['pickup_location'], details['pickupAddress'], details['pickup_address'],
+      widget.bookingData?['pickup'], widget.bookingData?['pickupLocation'], widget.bookingData?['pickup_location'],
+    ], 'Senayan City Mall, Lobby Selatan (Titik Penjemputan Utama)');
+
+    final destinationLocation = resolveAddress([
+      details['destination'], details['dropoff'], details['dropoffLocation'], details['dropoff_location'], details['dropoffAddress'], details['dropoff_address'],
+      widget.bookingData?['destination'], widget.bookingData?['dropoff'], widget.bookingData?['dropoffLocation'], widget.bookingData?['dropoff_location'],
+    ], 'Grand Indonesia Mall, West Mall Lobby (Destinasi Tujuan)');
+
+    final totalPayment = details['totalPayment'] ?? details['total_price'] ?? 130000;
+    final dp = details['dp'] ?? (totalPayment is num ? (totalPayment * 0.5).toInt() : 65000);
+    final remainingPayment = (totalPayment is num && dp is num) ? (totalPayment - dp).toInt() : 65000;
     final paymentMethod = widget.paymentMethod ?? "BCA Virtual Account";
     final serviceType = details['serviceType'] ?? 'antar_jemput';
     final rawOtp = _extractOtp(_bookingDetails) ?? _extractOtp(widget.bookingData) ?? _extractOtp(details);
     final rawCompOtp = _extractCompletionOtp(_bookingDetails) ?? _extractCompletionOtp(widget.bookingData) ?? _extractCompletionOtp(details);
 
-    final startPin = (rawOtp != null && rawOtp.isNotEmpty) ? rawOtp : "1234";
-    final compPin = (rawCompOtp != null && rawCompOtp.isNotEmpty) ? rawCompOtp : "5678";
+    final startPin = (rawOtp != null && rawOtp.isNotEmpty) ? rawOtp : "••••";
+    final compPin = (rawCompOtp != null && rawCompOtp.isNotEmpty) ? rawCompOtp : "••••";
 
-    final isOngoingSession = _simulationState == 'started' || _simulationState == 'ongoing';
-    final otpPin = isOngoingSession ? compPin : startPin;
+    final addSub = (details['additional_details'] is Map ? details['additional_details']['sub_status'] : null) ??
+                   (details['additionalDetails'] is Map ? details['additionalDetails']['sub_status'] : null) ??
+                   (_bookingDetails?['sub_status']);
+    final isOngoingSession = (_simulationState == 'started' || _simulationState == 'ongoing' || _simulationState == 'completion_requested') ||
+                             (addSub == 'started' || addSub == 'ongoing' || addSub == 'completion_requested');
+    final otpPin = isOngoingSession ? (compPin.isNotEmpty && compPin != '••••' ? compPin : startPin) : startPin;
 
     String formatCurrency(int amount) {
       return "Rp ${amount.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
@@ -760,7 +906,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       final dpAmount = (totalEst * 0.5).toInt();
 
       return Scaffold(
-        backgroundColor: const Color(0xFF0D0C11),
+        backgroundColor: AppTheme.background,
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24.0),
@@ -780,9 +926,9 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                 ).animate().scale(duration: 500.ms, curve: Curves.elasticOut),
                 const SizedBox(height: 24),
                 Text(
-                  "Driver Menyetujui Orderan! 🎉",
+                  "Driver Menyetujui Orderan!",
                   style: GoogleFonts.plusJakartaSans(
-                    color: AppTheme.textHighContrast,
+                    color: Colors.white,
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
                   ),
@@ -856,95 +1002,103 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D0C11),
-      body: Stack(
-        children: [
-          _buildMapBackground(),
-          if (_alarmTriggered)
-            IgnorePointer(
-              child: Container(
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.red.withOpacity(0.5), width: 8),
-                  color: Colors.red.withOpacity(0.04),
-                ),
-              ),
-            ),
-          SafeArea(
-            child: Column(
-              children: [
-                _buildHeader(),
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 10),
-                        
-                        const SizedBox(height: 10),
-                        
-                        if (_simulationState == 'pending') ...[
-                          _buildWaitingForDriverCard(),
-                          const SizedBox(height: 15),
-                        ],
+    void handleClientBackNavigation() {
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      } else {
+        Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+      }
+    }
 
-                        _buildArrivingCard(
-                          driverName: driverName,
-                          driverImage: driverImage,
-                          driverRating: driverRating,
-                          vehicle: vehicle,
-                          plateNumber: plateNumber,
-                          estimatedTime: _estimatedTime,
-                          countdownTimer: _countdownTimer,
-                          serviceType: serviceType,
-                          otpPin: otpPin,
-                        ),
-                        const SizedBox(height: 15),
-
-                        // Prominent PIN Security Card
-                        if (_simulationState == 'accepted' || 
-                            _simulationState == 'dp_paid' || 
-                            _simulationState == 'on_the_way' || 
-                            _simulationState == 'arrived' ||
-                            _simulationState == 'started' ||
-                            _simulationState == 'ongoing') ...[
-                          _buildSecurityPinCard(otpPin, isCompletion: isOngoingSession),
-                          const SizedBox(height: 15),
-                        ],
-                        
-                        _buildBookingStatusCard(),
-                        const SizedBox(height: 15),
-                        
-                        _buildLocationCard(pickupLocation, destinationLocation),
-                        const SizedBox(height: 15),
-                        
-                        if (_simulationState == 'completed' || _simulationState == 'paid')
-                          _buildFinalInvoiceCard(totalPayment, dp, formatCurrency)
-                        else
-                          _buildPaymentSummaryCard(
-                            totalPayment: totalPayment,
-                            remainingPayment: remainingPayment,
-                            paymentMethod: paymentMethod,
-                            formatCurrency: formatCurrency,
-                          ),
-                        const SizedBox(height: 120),
-                      ],
-                    ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          handleClientBackNavigation();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        body: Stack(
+          children: [
+            _buildMapBackground(),
+            if (_alarmTriggered)
+              IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.red.withOpacity(0.5), width: 8),
+                    color: Colors.red.withOpacity(0.04),
                   ),
                 ),
-              ],
+              ),
+            SafeArea(
+              child: Column(
+                children: [
+                  _buildHeader(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Column(
+                        children: [
+                          const SizedBox(height: 10),
+                          
+                          const SizedBox(height: 10),
+                          
+                          if (_simulationState == 'pending') ...[
+                            _buildWaitingForDriverCard(),
+                            const SizedBox(height: 15),
+                          ],
+
+                          _buildArrivingCard(
+                            driverName: driverName,
+                            driverImage: driverImage,
+                            driverRating: driverRating,
+                            vehicle: vehicle,
+                            plateNumber: plateNumber,
+                            estimatedTime: _estimatedTime,
+                            countdownTimer: _countdownTimer,
+                            serviceType: serviceType,
+                            otpPin: otpPin,
+                          ),
+                          const SizedBox(height: 15),
+
+
+                          
+                          _buildBookingStatusCard(),
+                          const SizedBox(height: 15),
+                          
+                          _buildLocationCard(pickupLocation, destinationLocation),
+                          const SizedBox(height: 15),
+                          
+                          _buildServiceDetailsCard(details, serviceType),
+                          const SizedBox(height: 15),
+                          
+                          if (_simulationState == 'completed' || _simulationState == 'paid')
+                            _buildFinalInvoiceCard(totalPayment, dp, formatCurrency)
+                          else
+                            _buildPaymentSummaryCard(
+                              totalPayment: totalPayment,
+                              remainingPayment: remainingPayment,
+                              paymentMethod: paymentMethod,
+                              formatCurrency: formatCurrency,
+                            ),
+                          const SizedBox(height: 120),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildMapBackground() {
-    return Positioned.fill(
-      child: SimulatedMapWidget(status: _simulationState),
-    );
+    return const SizedBox.shrink();
   }
 
   Widget _buildHeader() {
@@ -955,7 +1109,11 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
         children: [
           GestureDetector(
             onTap: () {
-              Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+              if (Navigator.canPop(context)) {
+                Navigator.pop(context);
+              } else {
+                Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+              }
             },
             child: Container(
               padding: const EdgeInsets.all(8),
@@ -1707,6 +1865,96 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     );
   }
 
+  Widget _buildServiceDetailsCard(dynamic detailsRaw, String type) {
+    final details = detailsRaw is Map<String, dynamic> ? detailsRaw : {};
+    final serviceType = details['serviceType'] ?? type;
+
+    List<Widget> infoItems = [];
+
+    String serviceLabel = "Antar Jemput";
+    if (serviceType == 'hangout') {
+      serviceLabel = "Hangout";
+    } else if (serviceType == 'freedom' || serviceType == 'freedom_request') {
+      serviceLabel = "Freedom Request";
+    }
+    
+    infoItems.add(_infoItem("Jenis Layanan", serviceLabel));
+    
+    if (serviceType == 'antar_jemput') {
+      final useCar = details['useCar'] == true;
+      final rentHelmet = details['rentHelmet'] == true;
+      final pulangPergi = details['pulangPergi'] == true;
+      final differentArea = details['differentArea'] == true;
+      
+      infoItems.add(_infoItem("Pilihan Transport", useCar ? "Mobil" : "Motor"));
+      if (pulangPergi) infoItems.add(_infoItem("Tipe Perjalanan", "Pulang Pergi (PP)"));
+      if (rentHelmet) infoItems.add(_infoItem("Sewa Helm Extra", "Ya"));
+      if (differentArea) infoItems.add(_infoItem("Luar Area Utama", "Ya"));
+    } else if (serviceType == 'hangout') {
+      final activity = details['activity'] ?? details['hangoutActivity'] ?? 'Ngopi / Jalan-Jalan';
+      final duration = details['duration'] ?? '3';
+      infoItems.add(_infoItem("Aktivitas Hangout", activity));
+      infoItems.add(_infoItem("Durasi Layanan", "$duration Jam"));
+    } else if (serviceType == 'freedom' || serviceType == 'freedom_request') {
+      final desc = details['description'] ?? "Sesuai kesepakatan";
+      final duration = details['duration'] ?? '3';
+      infoItems.add(_infoItem("Durasi Layanan", "$duration Jam"));
+      infoItems.add(_infoItem("Instruksi Khusus", desc));
+    }
+
+    final rawExtra = details['additionalServices'] ?? details['additional_services'];
+    List<String> extraServices = [];
+    if (rawExtra is List) {
+      for (var item in rawExtra) {
+        if (item is Map && item['name'] != null) {
+          extraServices.add(item['name'].toString());
+        }
+      }
+    }
+    if (extraServices.isNotEmpty) {
+      infoItems.add(_infoItem("Add-ons", extraServices.join(", ")));
+    }
+
+    final notes = details['notes'] ?? "-";
+    if (notes != "-") {
+      infoItems.add(_infoItem("Catatan Klien", notes));
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppTheme.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "RINCIAN LAYANAN & ADD-ONS",
+            style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+          ),
+          const SizedBox(height: 15),
+          ...infoItems,
+        ],
+      ),
+    );
+  }
+
+  Widget _infoItem(String label, String val) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: Text(label, style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12.5))),
+          Expanded(child: Text(val, textAlign: TextAlign.right, style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12.5, fontWeight: FontWeight.w600))),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPaymentSummaryCard({
     required int totalPayment,
     required int remainingPayment,
@@ -1758,6 +2006,10 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   }
 
   Widget _buildFinalInvoiceCard(int totalPayment, int dpPaid, String Function(int) formatCurrency) {
+    final currentDue = _finalDueAmount > 0 
+        ? _finalDueAmount 
+        : ((totalPayment - dpPaid) + (_overtimeHours * _overtimeCost));
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -1775,7 +2027,10 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
           const Divider(color: AppTheme.border, height: 20),
           _invoiceRow("Total Estimasi", formatCurrency(totalPayment)),
           _invoiceRow("DP Dibayar (50%)", "- ${formatCurrency(dpPaid)}"),
-          _invoiceRow("Overtime (${_overtimeHours} Jam)", formatCurrency(_overtimeHours * _overtimeCost)),
+          if (_overtimeHours > 0)
+            _invoiceRow("Overtime ($_overtimeHours Jam)", formatCurrency(_overtimeHours * _overtimeCost))
+          else
+            _invoiceRow("Overtime", "Rp 0"),
           const Divider(color: AppTheme.border, height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1785,7 +2040,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                 style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 14),
               ),
               Text(
-                formatCurrency(_finalDueAmount),
+                formatCurrency(currentDue),
                 style: GoogleFonts.inter(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 17),
               ),
             ],
@@ -1815,7 +2070,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                   elevation: 0,
                 ),
                 child: Text(
-                  "BAYAR PELUNASAN SEKARANG (${formatCurrency(_finalDueAmount)})",
+                  "BAYAR PELUNASAN SEKARANG (${formatCurrency(currentDue)})",
                   style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),

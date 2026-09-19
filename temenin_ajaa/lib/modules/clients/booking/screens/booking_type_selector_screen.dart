@@ -179,9 +179,24 @@ class _BookingTypeSelectorScreenState extends State<BookingTypeSelectorScreen> w
         );
         break;
       case 103:
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const GamingBuddyBookingScreen()),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF6366F1),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            content: Row(
+              children: [
+                const Icon(Icons.engineering_rounded, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    "Fitur Gaming Buddy (Mabar) sedang dalam tahap pengembangan!",
+                    style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
         break;
       case 201:

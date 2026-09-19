@@ -1,4 +1,6 @@
 // lib/data/models/booking_model.dart
+import 'dart:convert';
+
 class BookingModel {
   final String id;
   final String userId;
@@ -154,9 +156,22 @@ class BookingModel {
       (additionalDetails?['call_duration_minutes'] as num?)?.toInt() ?? duration;
 
   factory BookingModel.fromJson(Map<String, dynamic> json) {
-    final rawDetails = json['additional_details'] is Map 
-        ? Map<String, dynamic>.from(json['additional_details']) 
-        : (json['additionalDetails'] is Map ? Map<String, dynamic>.from(json['additionalDetails']) : null);
+    Map<String, dynamic>? rawDetails;
+    if (json['additional_details'] is Map) {
+      rawDetails = Map<String, dynamic>.from(json['additional_details'] as Map);
+    } else if (json['additionalDetails'] is Map) {
+      rawDetails = Map<String, dynamic>.from(json['additionalDetails'] as Map);
+    } else if (json['additional_details'] is String) {
+      try {
+        final decoded = jsonDecode(json['additional_details'] as String);
+        if (decoded is Map) rawDetails = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    } else if (json['additionalDetails'] is String) {
+      try {
+        final decoded = jsonDecode(json['additionalDetails'] as String);
+        if (decoded is Map) rawDetails = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
 
     // Parse driver from drivers (*, users(*)), driver, or fallback to additional_details
     DriverModel? parsedDriver;

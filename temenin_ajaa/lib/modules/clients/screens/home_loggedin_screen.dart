@@ -1,10 +1,7 @@
-import 'dart:math';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/providers/auth_provider.dart';
 import 'package:temenin_ajaa/providers/driver_provider.dart';
@@ -20,7 +17,6 @@ import 'package:temenin_ajaa/modules/clients/chat/screens/chat_list_screen.dart'
 import 'package:temenin_ajaa/modules/clients/booking/screens/booking_type_selector_screen.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/virtual_call_booking_screen.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/sleep_call_booking_screen.dart';
-import 'package:temenin_ajaa/modules/clients/booking/screens/gaming_buddy_booking_screen.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/call_lobby_screen.dart';
 import 'package:temenin_ajaa/modules/clients/booking/screens/call_room_screen.dart';
 import 'package:temenin_ajaa/core/utils/booking_date_helper.dart';
@@ -38,17 +34,19 @@ import 'package:temenin_ajaa/modules/clients/driver/screens/partner_profile_scre
 import 'package:temenin_ajaa/modules/clients/pages/help_center_page.dart';
 import 'package:temenin_ajaa/modules/clients/events/screens/event_detail_screen.dart';
 import 'package:temenin_ajaa/core/services/location_service.dart';
+import 'package:temenin_ajaa/modules/clients/widgets/bottom_nav_bar.dart';
 
 // ============================================================
 // 02 - Color System (Clean Modern Fuchsia + Putih + Abu-abu Terang)
 // ============================================================
 class AppColors {
-  // Core Palette - Clean Fuchsia Light Mode
-  static const Color deepVoid = Color(0xFFFAFAFA);     // Clean Light Background
+  // Core Palette - Warm Fuchsia & Soft Rose Blush (Nyaman di mata, anti silau putih)
+  static const Color deepVoid = Color(0xFFF9EFF5);     // Warm Rose/Fuchsia Blush Background
   static const Color obsidian = Color(0xFFFFFFFF);     // White Card Surface
-  static const Color elevatedDark = Color(0xFFF5EBF2); // Soft Blush Container
+  static const Color elevatedDark = Color(0xFFF3E2EE); // Soft Fuchsia Container
   static const Color electricPink = Color(0xFFEC4899); // Fuchsia Primary
   static const Color roseGold = Color(0xFFDB2777);     // Deep Fuchsia Secondary
+  static const Color borderCard = Color(0xFFE5C8DC);   // Distinct Rose Border
 
   // Status Colors
   static const Color success = Color(0xFF10B981);
@@ -56,9 +54,10 @@ class AppColors {
   static const Color danger = Color(0xFFEF4444);
   static const Color info = Color(0xFF3B82F6);
 
-  // Text
-  static const Color textMain = Color(0xFF1E1B2E); // Deep Plum
-  static const Color textMuted = Color(0xFF9B8A9D); // Muted Plum
+  // Text: HITAM PEKAT & JELAS (Sesuai request: tulisannya hitam saja biar jelas)
+  static const Color textMain = Color(0xFF0F172A);      // Jet Black (100% Tajam & Jelas)
+  static const Color textSecondary = Color(0xFF1E293B); // Dark Slate Charcoal
+  static const Color textMuted = Color(0xFF475569);     // Slate Dark Muted (Tegas & Terbaca)
 
   // Gradients
   static const LinearGradient brandGradient = LinearGradient(
@@ -68,16 +67,26 @@ class AppColors {
   );
 
   static const LinearGradient glassGradient = LinearGradient(
-    colors: [Color(0x1AEC4899), Color(0x0DEC4899)],
+    colors: [Color(0x26EC4899), Color(0x14EC4899)],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  static const LinearGradient headerGradient = LinearGradient(
+    colors: [
+      Color(0xFFFDF2F8),
+      Color(0xFFFCE7F3),
+      Color(0xFFFDF2F8),
+    ],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static const LinearGradient darkBgGradient = LinearGradient(
     colors: [
-      Color(0xFFFAFAFA),
-      Color(0xFFFDF2F8),
-      Color(0xFFFAFAFA),
+      Color(0xFFFCE7F3), // Warm Fuchsia Glow at Top
+      Color(0xFFF9EFF5), // Warm Blush Body
+      Color(0xFFFDF2F8), // Soft Petal at Bottom
     ],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
@@ -170,13 +179,13 @@ class HomeLoggedInScreen extends StatefulWidget {
 }
 
 class _HomeLoggedInScreenState extends State<HomeLoggedInScreen> {
-  int _selectedIndex = 0;
+  int _selectedIndex = 2;
   final bool _isBookingActive = true; // Set to true by default for simulation
 
   final List<Widget> _pages = [
-    const HomeContent(),
     const CommunityFeedScreen(),
     const BookingHistoryPage(),
+    const HomeContent(),
     const ChatListScreen(),
     const ProfileTab(),
   ];
@@ -311,74 +320,43 @@ class _HomeLoggedInScreenState extends State<HomeLoggedInScreen> {
   }
 
   Widget _buildBottomNav() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 16,
-            offset: const Offset(0, -2),
-          ),
-        ],
-        border: const Border(
-          top: BorderSide(
-            color: AppColors.elevatedDark,
-            width: 1.0,
-          ),
+    return FluidCurvedNavBar(
+      selectedIndex: _selectedIndex,
+      onItemSelected: (index) {
+        setState(() => _selectedIndex = index);
+      },
+      backgroundColor: Colors.white,
+      activeColor: AppColors.roseGold,
+      inactiveColor: const Color(0xFF64748B),
+      borderColor: AppColors.borderCard.withOpacity(0.55),
+      shadowColor: AppColors.roseGold,
+      items: const [
+        FluidCurvedNavBarItem(
+          icon: Icons.explore_outlined,
+          selectedIcon: Icons.explore_rounded,
+          label: 'Komunitas',
         ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(Icons.home_rounded, 'Beranda', 0),
-              _buildNavItem(Icons.explore_rounded, 'Komunitas', 1),
-              _buildNavItem(Icons.assignment_rounded, 'Aktivitas', 2),
-              _buildNavItem(Icons.chat_bubble_rounded, 'Chat', 3),
-              _buildNavItem(Icons.person_rounded, 'Profil', 4),
-            ],
-          ),
+        FluidCurvedNavBarItem(
+          icon: Icons.assignment_outlined,
+          selectedIcon: Icons.assignment_rounded,
+          label: 'Aktivitas',
         ),
-      ),
-    );
-  }
-
-  Widget _buildNavItem(IconData icon, String label, int index) {
-    final isSelected = _selectedIndex == index;
-    return GestureDetector(
-      onTap: () => setState(() => _selectedIndex = index),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeInOut,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: isSelected ? BoxDecoration(
-          color: AppColors.electricPink.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(16),
-        ) : null,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              color: isSelected ? AppColors.electricPink : AppColors.textMuted,
-              size: 22,
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 9,
-                color: isSelected ? AppColors.electricPink : AppColors.textMuted,
-                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              ),
-            ),
-          ],
+        FluidCurvedNavBarItem(
+          icon: Icons.home_outlined,
+          selectedIcon: Icons.home_rounded,
+          label: 'Beranda',
         ),
-      ),
+        FluidCurvedNavBarItem(
+          icon: Icons.chat_bubble_outline_rounded,
+          selectedIcon: Icons.chat_bubble_rounded,
+          label: 'Chat',
+        ),
+        FluidCurvedNavBarItem(
+          icon: Icons.person_outline_rounded,
+          selectedIcon: Icons.person_rounded,
+          label: 'Profil',
+        ),
+      ],
     );
   }
 }
@@ -781,7 +759,7 @@ class _HomeContentState extends State<HomeContent> {
         decoration: BoxDecoration(
           color: const Color(0xFFFDF2F8),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFF0E4EC)),
+          border: Border.all(color: AppColors.borderCard, width: 1.2),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -841,19 +819,39 @@ class _HomeContentState extends State<HomeContent> {
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
               SliverAppBar(
-                backgroundColor: AppColors.deepVoid,
+                backgroundColor: Colors.transparent,
                 elevation: 0,
-                floating: true,
-                pinned: false,
-                snap: true,
+                floating: false,
+                pinned: true,
                 automaticallyImplyLeading: false,
-                flexibleSpace: FlexibleSpaceBar(
-                  background: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                    child: _buildHeader(context, user, isLoggedIn),
+                toolbarHeight: 88,
+                collapsedHeight: 88,
+                flexibleSpace: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFDF2F8),
+                    border: Border(
+                      bottom: BorderSide(
+                        color: AppColors.electricPink.withOpacity(0.35),
+                        width: 1.5,
+                      ),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.electricPink.withOpacity(0.14),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                      child: _buildHeader(context, user, isLoggedIn),
+                    ),
                   ),
                 ),
-                expandedHeight: 84, // Perbesar tinggi header navigasi atas
+                expandedHeight: 88,
               ),
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -1184,6 +1182,7 @@ class _HomeContentState extends State<HomeContent> {
   Widget _buildHeader(BuildContext context, UserModel? user, bool isLoggedIn) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         GestureDetector(
           onTap: () {
@@ -1193,7 +1192,7 @@ class _HomeContentState extends State<HomeContent> {
                 builder: (context) => Scaffold(
                   backgroundColor: AppColors.deepVoid,
                   appBar: AppBar(
-                    backgroundColor: AppColors.deepVoid,
+                    backgroundColor: const Color(0xFFFDF2F8),
                     elevation: 0,
                     leading: IconButton(
                       icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textMain),
@@ -1215,14 +1214,21 @@ class _HomeContentState extends State<HomeContent> {
           child: Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(2.5),
-                decoration: const BoxDecoration(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
                   gradient: AppColors.brandGradient,
                   shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.electricPink.withOpacity(0.35),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
                 ),
                 child: CircleAvatar(
-                  radius: 26, // Sedikit perbesar avatar
-                  backgroundColor: AppColors.elevatedDark,
+                  radius: 24,
+                  backgroundColor: Colors.white,
                   backgroundImage: user?.avatarUrl != null
                       ? NetworkImage(user!.avatarUrl!)
                       : const NetworkImage('https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80') as ImageProvider,
@@ -1231,24 +1237,34 @@ class _HomeContentState extends State<HomeContent> {
                   },
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    _getTimeGreeting(),
-                    style: GoogleFonts.inter(
-                      color: AppColors.textMuted,
-                      fontSize: 13,
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.electricPink.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      _getTimeGreeting(),
+                      style: GoogleFonts.inter(
+                        color: AppColors.roseGold,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.3,
+                      ),
                     ),
                   ),
+                  const SizedBox(height: 3),
                   Text(
                     isLoggedIn ? (user?.fullName ?? 'Faizun A.') : 'Faizun A.',
                     style: GoogleFonts.plusJakartaSans(
                       color: AppColors.textMain,
                       fontSize: 18,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
                 ],
@@ -1256,7 +1272,7 @@ class _HomeContentState extends State<HomeContent> {
             ],
           ),
         ),
-        // Navigasi Atas: Notifikasi
+        // Navigasi Atas: Notifikasi dengan Border Fuchsia Tegas & Kontras Tinggi
         Builder(
           builder: (context) {
             final unreadCount = context.watch<ClientNotificationProvider>().unreadCount;
@@ -1268,17 +1284,17 @@ class _HomeContentState extends State<HomeContent> {
                 );
               },
               child: Container(
-                width: 48,
-                height: 48,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
                   color: Colors.white,
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFF0E4EC), width: 1.2),
+                  border: Border.all(color: AppColors.electricPink, width: 1.6),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2),
+                      color: AppColors.electricPink.withOpacity(0.25),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
                     ),
                   ],
                 ),
@@ -1286,20 +1302,20 @@ class _HomeContentState extends State<HomeContent> {
                   alignment: Alignment.center,
                   children: [
                     const Icon(
-                      Icons.notifications_none_rounded,
-                      color: AppColors.textMain,
-                      size: 26,
+                      Icons.notifications_active_rounded,
+                      color: AppColors.electricPink,
+                      size: 24,
                     ),
                     if (unreadCount > 0)
                       Positioned(
-                        top: 6,
-                        right: 6,
+                        top: 4,
+                        right: 4,
                         child: Container(
-                          padding: const EdgeInsets.all(3),
+                          padding: const EdgeInsets.all(3.5),
                           decoration: BoxDecoration(
-                            color: AppColors.electricPink,
+                            color: AppColors.roseGold,
                             shape: BoxShape.circle,
-                            border: Border.all(color: AppColors.obsidian, width: 1.5),
+                            border: Border.all(color: Colors.white, width: 1.5),
                           ),
                           constraints: const BoxConstraints(
                             minWidth: 16,
@@ -1358,18 +1374,18 @@ class _HomeContentState extends State<HomeContent> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: AppColors.electricPink.withOpacity(0.12),
-          width: 1.0,
+          color: AppColors.electricPink.withOpacity(0.30),
+          width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: AppColors.electricPink.withOpacity(0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
+            color: AppColors.electricPink.withOpacity(0.12),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
           ),
           BoxShadow(
             color: Colors.black.withOpacity(0.04),
-            blurRadius: 12,
+            blurRadius: 10,
             offset: const Offset(0, 2),
           ),
         ],
@@ -1386,14 +1402,14 @@ class _HomeContentState extends State<HomeContent> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.account_balance_wallet_rounded, color: AppColors.electricPink, size: 14),
+                        const Icon(Icons.account_balance_wallet_rounded, color: AppColors.electricPink, size: 16),
                         const SizedBox(width: 6),
                         Text(
                           'SALDO TEMENIN',
                           style: GoogleFonts.plusJakartaSans(
-                            color: AppColors.textMuted,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
+                            color: AppColors.textMain,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w900,
                             letterSpacing: 0.8,
                           ),
                         ),
@@ -1404,21 +1420,21 @@ class _HomeContentState extends State<HomeContent> {
                       formattedBalance,
                       style: GoogleFonts.plusJakartaSans(
                         color: AppColors.textMain,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Row(
                       children: [
-                        const Icon(Icons.lock_clock_outlined, color: AppColors.warning, size: 9),
+                        const Icon(Icons.lock_clock_outlined, color: AppColors.warning, size: 11),
                         const SizedBox(width: 4),
                         Text(
                           'Hold: $formattedHold',
                           style: GoogleFonts.inter(
-                            color: AppColors.warning,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFFB45309),
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
                       ],
@@ -1429,10 +1445,10 @@ class _HomeContentState extends State<HomeContent> {
               
               // Divider
               Container(
-                height: 50,
-                width: 1,
-                color: AppColors.elevatedDark,
-                margin: const EdgeInsets.symmetric(horizontal: 12),
+                height: 52,
+                width: 1.2,
+                color: AppColors.borderCard,
+                margin: const EdgeInsets.symmetric(horizontal: 14),
               ),
 
               // Right Column: Points
@@ -1442,14 +1458,14 @@ class _HomeContentState extends State<HomeContent> {
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.stars_rounded, color: tierColor, size: 14),
+                        Icon(Icons.stars_rounded, color: tierColor, size: 16),
                         const SizedBox(width: 6),
                         Text(
                           'POIN & MEMBER',
                           style: GoogleFonts.plusJakartaSans(
-                            color: AppColors.textMuted,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
+                            color: AppColors.textMain,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w900,
                             letterSpacing: 0.8,
                           ),
                         ),
@@ -1460,22 +1476,23 @@ class _HomeContentState extends State<HomeContent> {
                       '$_totalPoints Poin',
                       style: GoogleFonts.plusJakartaSans(
                         color: AppColors.textMain,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
-                        color: tierColor.withOpacity(0.12),
+                        color: tierColor.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: tierColor.withOpacity(0.3)),
                       ),
                       child: Text(
                         '$_currentTier Tier',
                         style: GoogleFonts.inter(
                           color: tierColor,
-                          fontSize: 8,
+                          fontSize: 9,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -1488,9 +1505,9 @@ class _HomeContentState extends State<HomeContent> {
 
           // Divider
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
+            padding: const EdgeInsets.symmetric(vertical: 14),
             child: Divider(
-              color: AppColors.elevatedDark,
+              color: AppColors.borderCard,
               height: 1,
             ),
           ),
@@ -1507,15 +1524,15 @@ class _HomeContentState extends State<HomeContent> {
                     );
                   },
                   child: Container(
-                    height: 36,
+                    height: 38,
                     decoration: BoxDecoration(
-                      color: AppColors.electricPink,
-                      borderRadius: BorderRadius.circular(10),
+                      gradient: AppColors.brandGradient,
+                      borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
-                          color: AppColors.electricPink.withOpacity(0.25),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
+                          color: AppColors.electricPink.withOpacity(0.30),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
                         ),
                       ],
                     ),
@@ -1523,13 +1540,13 @@ class _HomeContentState extends State<HomeContent> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 13),
+                        const Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 14),
                         const SizedBox(width: 6),
                         Text(
                           'Topup Saldo',
                           style: GoogleFonts.plusJakartaSans(
                             color: Colors.white,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -1548,23 +1565,23 @@ class _HomeContentState extends State<HomeContent> {
                     );
                   },
                   child: Container(
-                    height: 36,
+                    height: 38,
                     decoration: BoxDecoration(
-                      color: AppColors.elevatedDark,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.elevatedDark),
+                      color: const Color(0xFFFDF2F8),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.electricPink.withOpacity(0.4), width: 1.2),
                     ),
                     alignment: Alignment.center,
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.redeem_rounded, color: AppColors.textMain, size: 13),
+                        const Icon(Icons.redeem_rounded, color: AppColors.textMain, size: 14),
                         const SizedBox(width: 6),
                         Text(
                           'Tukar Poin',
                           style: GoogleFonts.plusJakartaSans(
                             color: AppColors.textMain,
-                            fontSize: 11,
+                            fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -2004,18 +2021,24 @@ class _HomeContentState extends State<HomeContent> {
       decoration: BoxDecoration(
         color: isActive ? null : AppColors.obsidian,
         gradient: isActive 
-          ? LinearGradient(colors: [AppColors.electricPink.withOpacity(0.18), AppColors.electricPink.withOpacity(0.08)], begin: Alignment.topLeft, end: Alignment.bottomRight)
+          ? const LinearGradient(
+              colors: [AppColors.electricPink, AppColors.roseGold],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            )
           : null,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isActive ? AppColors.electricPink.withOpacity(0.5) : AppColors.elevatedDark,
-          width: isActive ? 1.2 : 1.0,
+          color: isActive ? AppColors.electricPink : AppColors.borderCard,
+          width: isActive ? 1.5 : 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: isActive ? AppColors.electricPink.withOpacity(0.12) : Colors.black.withOpacity(0.02),
+            color: isActive 
+              ? AppColors.electricPink.withOpacity(0.30) 
+              : AppColors.electricPink.withOpacity(0.06),
             blurRadius: 10,
-            offset: const Offset(0, 2),
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -2026,16 +2049,13 @@ class _HomeContentState extends State<HomeContent> {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              gradient: isActive ? AppColors.brandGradient : null,
-              color: isActive ? null : AppColors.elevatedDark,
+              color: isActive ? Colors.white.withOpacity(0.22) : const Color(0xFFFCE7F3),
               borderRadius: BorderRadius.circular(10),
-              boxShadow: isActive ? [
-                BoxShadow(color: AppColors.electricPink.withOpacity(0.3), blurRadius: 6),
-              ] : null,
+              border: isActive ? Border.all(color: Colors.white.withOpacity(0.4)) : null,
             ),
             child: Icon(
               icon,
-              color: isActive ? Colors.white : AppColors.electricPink,
+              color: isActive ? Colors.white : AppColors.roseGold,
               size: 16,
             ),
           ),
@@ -2045,9 +2065,9 @@ class _HomeContentState extends State<HomeContent> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: GoogleFonts.inter(
-              color: isActive ? AppColors.electricPink : AppColors.textMain,
+              color: isActive ? Colors.white : AppColors.textMain,
               fontSize: 10,
-              fontWeight: isActive ? FontWeight.bold : FontWeight.w600,
+              fontWeight: isActive ? FontWeight.w800 : FontWeight.w700,
             ),
           ),
         ],
@@ -2081,13 +2101,13 @@ class _HomeContentState extends State<HomeContent> {
         return Container(
           height: MediaQuery.of(context).size.height * 0.85,
           decoration: const BoxDecoration(
-            color: Colors.white,
+            color: AppColors.deepVoid,
             borderRadius: BorderRadius.only(
               topLeft: Radius.circular(28),
               topRight: Radius.circular(28),
             ),
             border: Border(
-              top: BorderSide(color: AppColors.electricPink, width: 1.5),
+              top: BorderSide(color: AppColors.electricPink, width: 2.0),
             ),
           ),
           child: Column(
@@ -2097,7 +2117,7 @@ class _HomeContentState extends State<HomeContent> {
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF0E4EC),
+                  color: AppColors.borderCard,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -2336,12 +2356,12 @@ class _HomeContentState extends State<HomeContent> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFFF0E4EC)),
+        border: Border.all(color: AppColors.borderCard, width: 1.4),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
+            color: AppColors.electricPink.withOpacity(0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -2609,12 +2629,12 @@ class _HomeContentState extends State<HomeContent> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
-            color: const Color(0xFFF0E4EC),
-            width: 1.0,
+            color: AppColors.borderCard,
+            width: 1.4,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: AppColors.electricPink.withOpacity(0.08),
               blurRadius: 16,
               offset: const Offset(0, 4),
             ),
@@ -2754,15 +2774,16 @@ class _HomeContentState extends State<HomeContent> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: AppColors.electricPink.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(4),
+        color: const Color(0xFFFDF2F8),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: AppColors.electricPink.withOpacity(0.3), width: 1.0),
       ),
       child: Text(
         text,
         style: GoogleFonts.inter(
-          color: AppColors.electricPink,
+          color: AppColors.roseGold,
           fontSize: 10,
-          fontWeight: FontWeight.bold,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -2774,10 +2795,10 @@ class _HomeContentState extends State<HomeContent> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.electricPink.withOpacity(0.12), width: 1.0),
+        border: Border.all(color: AppColors.borderCard, width: 1.4),
         boxShadow: [
           BoxShadow(
-            color: AppColors.electricPink.withOpacity(0.06),
+            color: AppColors.electricPink.withOpacity(0.08),
             blurRadius: 20,
             offset: const Offset(0, 6),
           ),
@@ -2927,11 +2948,11 @@ class _HomeContentState extends State<HomeContent> {
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFF0E4EC)),
+                  border: Border.all(color: AppColors.borderCard, width: 1.2),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 12,
+                      color: AppColors.electricPink.withOpacity(0.06),
+                      blurRadius: 14,
                       offset: const Offset(0, 3),
                     ),
                   ],
@@ -3025,11 +3046,11 @@ class _HomeContentState extends State<HomeContent> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFF0E4EC)),
+        border: Border.all(color: AppColors.borderCard, width: 1.4),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 12,
+            color: AppColors.electricPink.withOpacity(0.06),
+            blurRadius: 14,
             offset: const Offset(0, 3),
           ),
         ],

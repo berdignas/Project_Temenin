@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // TDS Colors - Signature Electric Pink + Cyberpunk Dark Obsidian
-  static const Color background = Color(0xFFFAFAFA); // Clean Light Background
-  static const Color surface = Color(0xFFFFFFFF);    // White Surface
-  static const Color card = Color(0xFFFFFFFF);       // White Card
-  static const Color cardDeep = Color(0xFFF8F0F5);   // Soft Blush Sub-surface
-  static const Color border = Color(0xFFF0E4EC);     // Soft Pink Border
-  static const Color primaryPink = Color(0xFFEC4899); // Fuchsia Primary
-  static const Color roseGold = Color(0xFFDB2777);    // Deep Fuchsia
+  // TDS Colors - Signature Electric Pink + Warm Rose/Fuchsia Blush (Eye-friendly & Anti-Blinding)
+  static const Color background = Color(0xFFF9EFF5);  // Warm Rose/Fuchsia Blush (nyaman di mata, bukan putih silau)
+  static const Color surface = Color(0xFFFFFFFF);     // Clean Surface with distinct border
+  static const Color card = Color(0xFFFFFFFF);        // White Card
+  static const Color cardDeep = Color(0xFFF3E2EE);    // Soft Fuchsia Sub-surface
+  static const Color border = Color(0xFFE5C8DC);      // Distinct Rose Border (tidak pudar)
+  static const Color primaryPink = Color(0xFFEC4899);  // Electric Fuchsia Primary
+  static const Color roseGold = Color(0xFFDB2777);     // Deep Fuchsia / Magenta
   static const Color fuchsiaLight = Color(0x33EC4899); // Subtle Fuchsia Glow
 
   // Status Colors
@@ -18,15 +18,15 @@ class AppTheme {
   static const Color danger = Color(0xFFEF4444);  // Crimson Red
   static const Color info = Color(0xFF3B82F6);    // Royal Blue
 
-  // Text Colors (Light Mode Hierarchy)
-  static const Color textHighContrast = Color(0xFF1E1B2E); // Deep Plum
-  static const Color textMediumContrast = Color(0xFF6B5B6E); // Medium Plum
-  static const Color textMuted = Color(0xFF9B8A9D); // Muted Plum
+  // Text Colors (JET-BLACK & CRISP as requested: "tulisannya pake hitam saja biar jelas")
+  static const Color textHighContrast = Color(0xFF0F172A); // Jet Black / Deep Slate (100% jelas & tajam)
+  static const Color textMediumContrast = Color(0xFF1E293B); // Dark Slate Charcoal
+  static const Color textMuted = Color(0xFF475569); // Slate Dark Muted (Tegas & mudah dibaca)
 
   // Alias Compatibility
   static const Color darkBackground = background;
   static const Color darkCard = card;
-  static const Color textSecondary = textMuted;
+  static const Color textSecondary = textMediumContrast;
   static const Color secondaryPink = roseGold;
 
   // Gradients
@@ -44,16 +44,16 @@ class AppTheme {
 
   static const LinearGradient darkBgGradient = LinearGradient(
     colors: [
-      Color(0xFFFAFAFA),
-      Color(0xFFFDF2F8),
-      Color(0xFFFAFAFA),
+      Color(0xFFFCE7F3), // Soft Rose Fuchsia Glow at Top
+      Color(0xFFF9EFF5), // Warm Blush Body
+      Color(0xFFFDF2F8), // Soft Petal at Bottom
     ],
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
   );
 
   static const LinearGradient cardGradient = LinearGradient(
-    colors: [Color(0xFFFFFFFF), Color(0xFFFDF2F8)],
+    colors: [Color(0xFFFFFFFF), Color(0xFFFCE7F3)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -85,9 +85,20 @@ class AppTheme {
         background: background,
         error: danger,
       ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        centerTitle: true,
+        iconTheme: IconThemeData(color: textHighContrast),
+        titleTextStyle: TextStyle(
+          color: textHighContrast,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xFFF5EBF2),
+        fillColor: const Color(0xFFFDF2F8),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
@@ -102,9 +113,9 @@ class AppTheme {
           borderSide: const BorderSide(color: primaryPink, width: 1.5),
         ),
         labelStyle: GoogleFonts.inter(
-          color: textMuted,
+          color: textHighContrast,
           fontSize: 12,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.bold,
         ),
         hintStyle: GoogleFonts.inter(
           color: textMuted,

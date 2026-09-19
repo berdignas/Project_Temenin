@@ -1,87 +1,32 @@
 import re
 
-with open('lib/modules/clients/booking/screens/payment_method_screen.dart', 'r', encoding='utf-8') as f:
+with open('c:/temenin_ajaa/temenin_ajaa/lib/modules/clients/booking/screens/client_waiting_countdown_screen.dart', 'r', encoding='utf-8') as f:
     content = f.read()
 
-proper_header = '''import 'package:temenin_ajaa/core/theme/app_theme.dart';
-// lib/modules/booking/screens/payment_method_screen.dart
-import 'dart:math';
-import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../../../providers/auth_provider.dart';
-import 'tracking_driver_screen.dart';
+content = re.sub(
+    r'ScaffoldMessenger\.of\(context\)\.showSnackBar\(\s*const SnackBar\(\s*content: Text\("Waktu tunggu telah habis\. Menunggu respons partner\.\.\."\),\s*backgroundColor: Colors\.orange,\s*duration: Duration\(seconds: 4\),\s*\),\s*\);',
+    r'WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Waktu tunggu telah habis. Menunggu respons partner..."), backgroundColor: Colors.orange, duration: Duration(seconds: 4))); } });',
+    content
+)
 
-class PaymentMethodScreen extends StatefulWidget {
-  final Map<String, dynamic>? bookingData;
-  
-  const PaymentMethodScreen({super.key, this.bookingData});
+content = re.sub(
+    r'ScaffoldMessenger\.of\(context\)\.showSnackBar\(\s*const SnackBar\(\s*content: Text\("[^"]+?Driver telah memulai perjalanan \(OTW\) menuju lokasi Anda!"\),\s*backgroundColor: Colors\.green,\s*\),\s*\);',
+    r'WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("?? Driver telah memulai perjalanan (OTW) menuju lokasi Anda!"), backgroundColor: Colors.green,)); } });',
+    content
+)
 
-  @override
-  State<PaymentMethodScreen> createState() => _PaymentMethodScreenState();
-}
+content = re.sub(
+    r'if \(mounted\) \{\s*ScaffoldMessenger\.of\(context\)\.showSnackBar\(\s*const SnackBar\(\s*content: Text\("[^"]+?PIN Berhasil Diverifikasi! Waktu tunggu berakhir, melanjutkan ke pelacakan\."\),\s*backgroundColor: Colors\.green,\s*\),\s*\);\s*_navigateToTracking',
+    r'WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("? PIN Berhasil Diverifikasi! Waktu tunggu berakhir, melanjutkan ke pelacakan."), backgroundColor: Colors.green,)); _navigateToTracking',
+    content
+)
 
-class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
-  String selectedMethod = "visa";
-  
-  late int totalPayment;
-  late int dpAmount;
+content = re.sub(
+    r'// Background MAP \(Disabled functionality, just visual\).*?Container\(\s*color: Colors\.black\.withOpacity\(0\.6\),\s*\),',
+    r'// Background MAP (Disabled functionality, just visual)\n          Container(color: AppTheme.background),',
+    content,
+    flags=re.DOTALL
+)
 
-  @override
-  void initState() {
-    super.initState();
-    totalPayment = widget.bookingData?['totalPayment'] ?? 250000;
-    dpAmount = widget.bookingData?['dp'] ?? 125000;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              const Color(0xFFE94057).withValues(alpha: 0.35),
-              AppTheme.background,
-            ],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              _buildHeader(),
-              Expanded(
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildTotalPaymentCard(),
-                      const SizedBox(height: 30),
-                      _buildSectionTitle("Saved Methods"),
-                      const SizedBox(height: 15),
-                      _buildPaymentTile(
-                        id: "visa",
-                        icon: Icons.credit_card_rounded,
-                        title: "Visa ending in 1234",
-                        subtitle: "Expires 12/26",
-                      ),
-                      const SizedBox(height: 12),
-                      _buildPaymentTile(
-                        id: "gopay",
-'''
-
-marker = 'id: "gopay",'
-parts = content.split(marker)
-if len(parts) >= 2:
-    new_content = proper_header + parts[1]
-    with open('lib/modules/clients/booking/screens/payment_method_screen.dart', 'w', encoding='utf-8') as f:
-        f.write(new_content)
-    print('Fixed successfully')
-else:
-    print('Marker not found')
+with open('c:/temenin_ajaa/temenin_ajaa/lib/modules/clients/booking/screens/client_waiting_countdown_screen.dart', 'w', encoding='utf-8') as f:
+    f.write(content)

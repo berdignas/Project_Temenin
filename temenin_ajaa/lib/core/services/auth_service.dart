@@ -1,3 +1,4 @@
+import 'package:http_parser/http_parser.dart';
 import 'dart:convert';
 import 'dart:io';
 

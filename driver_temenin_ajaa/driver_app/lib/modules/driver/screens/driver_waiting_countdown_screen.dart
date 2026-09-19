@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -13,6 +14,8 @@ import '../../../providers/booking_provider.dart';
 import 'active_booking_screen.dart';
 import 'chat_room_screen.dart';
 import 'driver_waiting_dp_screen.dart';
+
+import 'home_screen.dart';
 
 class DriverWaitingCountdownScreen extends StatefulWidget {
   final BookingModel bookingData;
@@ -188,44 +191,134 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
     );
   }
 
-  void _listenToBookingUpdates() {
-    try {
-      final bookingId = _currentBooking.id;
-      final dynamic queryId = int.tryParse(bookingId) ?? bookingId;
+  Timer? _pollingTimer;
+  String _earlyRequestStatus = 'none'; // 'none', 'pending', 'approved', 'rejected'
+  bool _hasTriggeredAutoOtw = false;
+
+  void _checkAndTriggerAutoOtw(Map<String, dynamic> row) {
+    if (!mounted || _hasTriggeredAutoOtw) return;
+
+    final add = row['additional_details'] is Map ? Map<String, dynamic>.from(row['additional_details']) : <String, dynamic>{};
+    final earlyReq = add['early_start_request']?.toString();
+    final status = row['status']?.toString().toLowerCase();
+    final subStatus = add['sub_status']?.toString().toLowerCase();
+    final isCountdownEnded = add['countdown_ended'] == true || add['countdown_ended'] == 'true';
+
+    final isApprovedOrStarted = earlyReq == 'approved' ||
+        isCountdownEnded ||
+        subStatus == 'on_the_way' ||
+        status == 'ongoing';
+
+    if (isApprovedOrStarted) {
+      _hasTriggeredAutoOtw = true;
+      _countdownTimer?.cancel();
+      _pollingTimer?.cancel();
       _bookingSub?.cancel();
+
+      setState(() {
+        _remainingSeconds = 0;
+        _isCountdownFinished = true;
+        _earlyRequestStatus = 'approved';
+      });
+
+      try {
+        NotificationSoundService().playOrderAlert();
+      } catch (_) {}
+
+      if (mounted) {
+        try {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("🚀 Klien telah menyetujui keberangkatan! Memulai OTW..."),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } catch (_) {}
+      }
+
+      _startTripOtw();
+    } else if (earlyReq == 'rejected' && _earlyRequestStatus == 'pending') {
+      setState(() {
+        _earlyRequestStatus = 'rejected';
+      });
+      if (mounted) {
+        try {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("❌ Klien menolak permintaan berangkat lebih awal. Silakan menunggu sesuai jadwal."),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        } catch (_) {}
+      }
+    }
+  }
+
+  void _listenToBookingUpdates() {
+    final bId = _currentBooking.id.toString();
+    final dynamic numId = int.tryParse(bId);
+
+    _bookingSub?.cancel();
+    _pollingTimer?.cancel();
+
+    // 1. Realtime Stream Listener
+    try {
       _bookingSub = Supabase.instance.client
           .from('bookings')
           .stream(primaryKey: ['id'])
-          .eq('id', queryId)
-          .listen((data) {
-            if (data.isNotEmpty && mounted) {
-              final row = data.first;
-              final add = row['additional_details'] is Map ? row['additional_details'] as Map : null;
-              if (add != null && add['countdown_ended'] == true && !_isCountdownFinished) {
-                _countdownTimer?.cancel();
-                _bookingSub?.cancel();
-                setState(() {
-                  _remainingSeconds = 0;
-                  _isCountdownFinished = true;
-                });
-                NotificationSoundService().playOrderAlert();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Waktu tunggu telah diakhiri oleh klien dengan PIN!"),
-                    backgroundColor: Colors.green,
-                  ),
-                );
+          .eq('id', numId ?? bId)
+          .listen(
+            (data) {
+              if (data.isNotEmpty && mounted) {
+                _checkAndTriggerAutoOtw(data.first);
               }
-            }
-          });
+            },
+            onError: (err) {
+              debugPrint("Driver waiting countdown stream error: $err");
+            },
+          );
     } catch (e) {
       debugPrint("Error listening to booking stream: $e");
     }
+
+    // 2. High-Frequency Polling Fallback (every 1.5s)
+    _pollingTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) async {
+      if (!mounted || _hasTriggeredAutoOtw) return;
+      try {
+        Map<String, dynamic>? res;
+        try {
+          res = await Supabase.instance.client
+              .from('bookings')
+              .select()
+              .eq('id', bId)
+              .maybeSingle();
+        } catch (_) {}
+
+        if (res == null && numId != null) {
+          try {
+            res = await Supabase.instance.client
+                .from('bookings')
+                .select()
+                .eq('id', numId)
+                .maybeSingle();
+          } catch (_) {}
+        }
+
+        if (res != null && mounted) {
+          _checkAndTriggerAutoOtw(res);
+        }
+      } catch (e) {
+        debugPrint("Error in driver polling fallback: $e");
+      }
+    });
   }
 
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _pollingTimer?.cancel();
     _bookingSub?.cancel();
     super.dispose();
   }
@@ -234,193 +327,101 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
     return BookingDateHelper.formatCountdownTime(totalSeconds);
   }
 
-  String? _extractPin(dynamic data) {
-    if (data == null) return null;
-    if (data is Map) {
-      final direct = data['otp']?.toString().trim();
-      if (direct != null && direct.isNotEmpty && direct != 'null') return direct;
-      if (data['additional_details'] is Map) {
-        final sub = _extractPin(data['additional_details']);
-        if (sub != null) return sub;
-      }
-      if (data['additionalDetails'] is Map) {
-        final sub = _extractPin(data['additionalDetails']);
-        if (sub != null) return sub;
-      }
-    }
-    return null;
-  }
-
   Future<void> _showPinVerificationDialog() async {
-    final pinController = TextEditingController();
-    String? expectedPin = _extractPin(_currentBooking.additionalDetails) ?? _extractPin(_currentBooking);
-
-    // Fetch fresh from Supabase if null
-    if (expectedPin == null || expectedPin.isEmpty) {
-      try {
-        final dynamic queryId = int.tryParse(_currentBooking.id) ?? _currentBooking.id;
-        final freshData = await Supabase.instance.client
-            .from('bookings')
-            .select('additional_details')
-            .eq('id', queryId)
-            .maybeSingle();
-        if (freshData != null) {
-          expectedPin = _extractPin(freshData['additional_details']);
-        }
-      } catch (e) {
-        debugPrint("Error fetching pin from db: $e");
-      }
-    }
-
     if (!mounted) return;
 
     showDialog(
       context: context,
       builder: (dialogCtx) {
-        String? errorMessage;
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: AppTheme.surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-                side: const BorderSide(color: AppTheme.primaryPink, width: 1.5),
+        return AlertDialog(
+          backgroundColor: AppTheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+            side: const BorderSide(color: AppTheme.primaryPink, width: 1.5),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryPink.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.send_rounded, color: AppTheme.primaryPink, size: 22),
               ),
-              title: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.withOpacity(0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.key_rounded, color: Colors.amber, size: 20),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      "Verifikasi PIN Klien",
-                      style: GoogleFonts.plusJakartaSans(
-                        color: AppTheme.textHighContrast,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Untuk mengakhiri waktu tunggu lebih cepat dan langsung berangkat OTW, masukkan 4-digit PIN keamanan dari klien:",
-                    style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 12, height: 1.4),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: pinController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 4,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: AppTheme.textHighContrast,
-                      fontSize: 24,
-                      letterSpacing: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    decoration: InputDecoration(
-                      hintText: "••••",
-                      hintStyle: const TextStyle(color: AppTheme.textMuted, letterSpacing: 10),
-                      filled: true,
-                      fillColor: AppTheme.cardDeep,
-                      counterText: "",
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: AppTheme.border),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: AppTheme.primaryPink, width: 2),
-                      ),
-                    ),
-                  ),
-                  if (errorMessage != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      errorMessage!,
-                      style: GoogleFonts.inter(color: AppTheme.danger, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogCtx),
-                  child: Text(
-                    "BATAL",
-                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.bold),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "Minta Berangkat Lebih Awal",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: AppTheme.textHighContrast,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                ElevatedButton(
-                  onPressed: () async {
-                    final entered = pinController.text.trim();
-                    if (entered.length != 4) {
-                      setDialogState(() {
-                        errorMessage = "Masukkan 4 digit PIN dengan lengkap.";
-                      });
-                      return;
-                    }
+              ),
+            ],
+          ),
+          content: Text(
+            "Kirim permintaan ke Klien untuk mengakhiri waktu tunggu persiapan dan berangkat OTW sekarang?\n\nDriver harus menunggu konfirmasi dari Klien.",
+            style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 13, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: Text(
+                "BATAL",
+                style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.bold),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(dialogCtx);
+                setState(() {
+                  _earlyRequestStatus = 'pending';
+                });
 
-                    // Compare PIN
-                    bool isMatch = false;
-                    if (expectedPin != null && expectedPin.isNotEmpty) {
-                      isMatch = (entered == expectedPin);
-                    } else {
-                      // Fallback match if pin not set
-                      isMatch = true;
-                    }
+                final String strId = _currentBooking.id.toString();
+                final dynamic numId = int.tryParse(strId);
+                final existingAdd = Map<String, dynamic>.from(_currentBooking.additionalDetails ?? {});
+                existingAdd['early_start_request'] = 'pending';
+                existingAdd['early_start_requested_at'] = DateTime.now().toIso8601String();
 
-                    if (isMatch) {
-                      Navigator.pop(dialogCtx);
-                      _countdownTimer?.cancel();
-                      _bookingSub?.cancel();
-                      setState(() {
-                        _remainingSeconds = 0;
-                        _isCountdownFinished = true;
-                      });
+                try {
+                  await Supabase.instance.client
+                      .from('bookings')
+                      .update({'additional_details': existingAdd})
+                      .eq('id', strId);
+                } catch (_) {}
 
-                      NotificationSoundService().playOrderAlert();
+                if (numId != null) {
+                  try {
+                    await Supabase.instance.client
+                        .from('bookings')
+                        .update({'additional_details': existingAdd})
+                        .eq('id', numId);
+                  } catch (_) {}
+                }
 
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text("✅ PIN Berhasil Diverifikasi! Memulai perjalanan (OTW) menuju klien..."),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      }
-
-                      // Langsung berangkat OTW ke langkah selanjutnya
-                      await _startTripOtw();
-                    } else {
-                      setDialogState(() {
-                        errorMessage = "PIN tidak cocok! Tanyakan 4-digit PIN yang tampil di aplikasi Klien.";
-                      });
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryPink,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text(
-                    "VERIFIKASI PIN",
-                    style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            );
-          },
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("⏳ Permintaan terkirim ke Klien. Menunggu konfirmasi Klien..."),
+                      backgroundColor: Colors.amber,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryPink,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text(
+                "KIRIM PERMINTAAN",
+                style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
         );
       },
     );
@@ -440,19 +441,34 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
 
     // Update status to ongoing and sub_status to on_the_way
     try {
-      final dynamic queryId = int.tryParse(_currentBooking.id) ?? _currentBooking.id;
+      final String strId = _currentBooking.id.toString();
+      final dynamic numId = int.tryParse(strId);
       final existingAdd = Map<String, dynamic>.from(_currentBooking.additionalDetails ?? {});
       existingAdd['sub_status'] = 'on_the_way';
       existingAdd['countdown_ended'] = true;
       existingAdd['otw_started_at'] = DateTime.now().toIso8601String();
 
-      await Supabase.instance.client
-          .from('bookings')
-          .update({
-            'status': 'ongoing',
-            'additional_details': existingAdd,
-          })
-          .eq('id', queryId);
+      try {
+        await Supabase.instance.client
+            .from('bookings')
+            .update({
+              'status': 'ongoing',
+              'additional_details': existingAdd,
+            })
+            .eq('id', strId);
+      } catch (_) {}
+
+      if (numId != null) {
+        try {
+          await Supabase.instance.client
+              .from('bookings')
+              .update({
+                'status': 'ongoing',
+                'additional_details': existingAdd,
+              })
+              .eq('id', numId);
+        } catch (_) {}
+      }
 
       _currentBooking = _currentBooking.copyWith(
         status: 'ongoing',
@@ -485,9 +501,27 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
 
   @override
   Widget build(BuildContext context) {
-    final clientName = _currentBooking.client?.fullName ?? 'Pelanggan';
-    final clientPhone = _currentBooking.client?.phone ?? '-';
-    final clientAvatar = _currentBooking.client?.avatarUrl ?? '';
+    final rawClientName = _currentBooking.client?.fullName ??
+        _currentBooking.additionalDetails?['userName'] ??
+        _currentBooking.additionalDetails?['user_name'] ??
+        _currentBooking.additionalDetails?['clientName'] ??
+        _currentBooking.additionalDetails?['client_name'] ??
+        _currentBooking.additionalDetails?['name'];
+    final clientName = (rawClientName != null && rawClientName.toString().trim().isNotEmpty)
+        ? rawClientName.toString().trim()
+        : 'Pelanggan Temenin Ajaa';
+    final clientPhone = _currentBooking.client?.phone ?? _currentBooking.additionalDetails?['clientPhone']?.toString() ?? '-';
+    final rawAvatar = _currentBooking.client?.avatarUrl ??
+        _currentBooking.client?.profileImage ??
+        _currentBooking.additionalDetails?['userImage'] ??
+        _currentBooking.additionalDetails?['userPhoto'] ??
+        _currentBooking.additionalDetails?['user_avatar'] ??
+        _currentBooking.additionalDetails?['avatar_url'] ??
+        _currentBooking.additionalDetails?['avatar'] ??
+        '';
+    final clientAvatar = (rawAvatar != null && rawAvatar.toString().trim().isNotEmpty)
+        ? rawAvatar.toString().trim()
+        : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(clientName)}&background=D64573&color=fff&bold=true';
     final dt = _currentBooking.bookingDate ?? _currentBooking.createdAt;
     final List<String> monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
     final String bookingDateStr = "${dt.day} ${monthNames[dt.month]} ${dt.year}";
@@ -535,23 +569,41 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
     final totalTarif = _currentBooking.totalPrice;
     final dpAmount = totalTarif * 0.5;
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
-        title: Text(
-          "Halaman Tunggu Keberangkatan",
-          style: GoogleFonts.plusJakartaSans(
-            color: AppTheme.textHighContrast,
-            fontWeight: FontWeight.w800,
-            fontSize: 16,
+    void handleDriverBackNavigation() {
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const DriverHomeScreen()),
+        );
+      }
+    }
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          handleDriverBackNavigation();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        appBar: AppBar(
+          title: Text(
+            "Halaman Tunggu Keberangkatan",
+            style: GoogleFonts.plusJakartaSans(
+              color: AppTheme.textHighContrast,
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+            ),
           ),
-        ),
-        backgroundColor: AppTheme.surface,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textHighContrast, size: 18),
-          onPressed: () => Navigator.pop(context),
-        ),
+          backgroundColor: AppTheme.surface,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textHighContrast, size: 18),
+            onPressed: handleDriverBackNavigation,
+          ),
         actions: [
           IconButton(
             icon: const Icon(Icons.chat_bubble_outline_rounded, color: AppTheme.primaryPink),
@@ -667,18 +719,26 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
                     const SizedBox(height: 16),
                     if (!_isCountdownFinished)
                       OutlinedButton.icon(
-                        onPressed: _showPinVerificationDialog,
-                        icon: const Icon(Icons.flash_on_rounded, color: Colors.amber, size: 16),
+                        onPressed: _earlyRequestStatus == 'pending' ? null : _showPinVerificationDialog,
+                        icon: Icon(
+                          _earlyRequestStatus == 'pending' ? Icons.hourglass_top_rounded : Icons.flash_on_rounded,
+                          color: _earlyRequestStatus == 'pending' ? Colors.grey : Colors.amber,
+                          size: 16,
+                        ),
                         label: Text(
-                          "⚡ Mulai Lebih Awal (Verifikasi PIN Klien)",
+                          _earlyRequestStatus == 'pending'
+                              ? "⏳ Menunggu Konfirmasi Klien..."
+                              : "⚡ Mulai Lebih Awal (Minta Persetujuan Klien)",
                           style: GoogleFonts.plusJakartaSans(
-                            color: Colors.amber,
+                            color: _earlyRequestStatus == 'pending' ? Colors.grey : Colors.amber,
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: Colors.amber.withOpacity(0.5)),
+                          side: BorderSide(
+                            color: _earlyRequestStatus == 'pending' ? Colors.grey.withOpacity(0.5) : Colors.amber.withOpacity(0.5),
+                          ),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         ),
@@ -1072,6 +1132,7 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+ }
 }

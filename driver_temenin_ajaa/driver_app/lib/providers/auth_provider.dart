@@ -204,8 +204,16 @@ class AuthProvider extends ChangeNotifier {
         if (result['user'] != null) {
           _user = result['user'];
         }
+        if (_driverProfileData != null) {
+          _driverProfileData!['vehicle_name'] = vehicleName;
+          _driverProfileData!['plate_number'] = plateNumber;
+          _driverProfileData!['price_per_hour'] = pricePerHour;
+          _driverProfileData!['experience_years'] = experienceYears;
+          _driverProfileData!['bio'] = bio;
+          if (vehicleStnk != null) _driverProfileData!['vehicle_stnk'] = vehicleStnk;
+        }
         if (result['driverData'] != null) {
-          _driverProfileData = result['driverData'];
+          _driverProfileData = Map<String, dynamic>.from(result['driverData']);
         } else {
           await refreshProfile();
         }

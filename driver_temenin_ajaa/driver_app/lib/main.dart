@@ -14,8 +14,10 @@ void main() async {
   
   // Initialize Supabase (matching client configurations)
   try {
+    const defaultAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndkamphZXZmdXhxcmVwaGhkYWNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgyOTI0NDEsImV4cCI6MjEwMzg2ODQ0MX0.BGAHOeNX6XHaBOT7N4-yfEy9G8sw04VpSH4gVyiEzDs';
     const supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: 'https://wdjjaevfuxqrephhdacp.supabase.co');
-    const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+    const fromEnvAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: defaultAnonKey);
+    final supabaseAnonKey = fromEnvAnonKey.isNotEmpty ? fromEnvAnonKey : defaultAnonKey;
 
     await Supabase.initialize(
       url: supabaseUrl,

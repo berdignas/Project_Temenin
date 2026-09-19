@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,10 +24,16 @@ class ClientBookingProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get activeBookings => List.unmodifiable(_activeBookings);
   List<dynamic> get negotiations => _negotiations;
 
+  Timer? _pollingTimer;
+
   /// Subscribe to real-time updates for any booking belonging to the logged-in client
   void subscribeToClientBookings(String userId) {
     debugPrint('📡 Client Subscribing to Realtime Bookings for User ID: $userId');
     _realtimeSubscription?.cancel();
+    stopPolling();
+
+    // Initial fetch via REST API immediately
+    fetchActiveBookings();
 
     try {
       _realtimeSubscription = Supabase.instance.client
@@ -35,112 +42,149 @@ class ClientBookingProvider extends ChangeNotifier {
           .eq('user_id', userId)
           .listen((List<Map<String, dynamic>> data) async {
             debugPrint('⚡ Client Realtime: Received ${data.length} bookings for user $userId');
-            if (data.isNotEmpty) {
-              final activeList = data.where((b) {
-                final s = b['status']?.toString();
-                final addDetails = b['additional_details'] is Map ? b['additional_details'] as Map : null;
-                final sub = addDetails?['sub_status']?.toString();
-
-                if (s == 'completed' || s == 'closed' || s == 'cancelled' || s == 'paid' || s == 'selesai' ||
-                    sub == 'completed' || sub == 'closed' || sub == 'cancelled' || sub == 'paid' || sub == 'selesai' ||
-                    addDetails?['pelunasan_paid'] == true || addDetails?['final_paid'] == true || addDetails?['has_reviewed'] == true || addDetails?['review'] != null || addDetails?['payment_status'] == 'LUNAS') {
-                  return false;
-                }
-
-                return s == 'pending' ||
-                       s == 'accepted' ||
-                       s == 'confirmed' ||
-                       s == 'ongoing' ||
-                       s == 'in_progress' ||
-                       s == 'started' ||
-                       s == 'on_the_way' ||
-                       s == 'arrived' ||
-                       s == 'dp_paid' ||
-                       sub == 'dp_paid' ||
-                       sub == 'on_the_way' ||
-                       sub == 'arrived' ||
-                       sub == 'started' ||
-                       sub == 'ongoing';
-              }).toList();
-
-              _activeBookings = List<Map<String, dynamic>>.from(activeList);
-
-              if (activeList.isNotEmpty) {
-                // Prioritize which booking to display as main currentBooking:
-                // 1. Actively in trip (started, ongoing, on_the_way, arrived)
-                // 2. Confirmed & DP Paid (dp_paid == true or sub_status == 'dp_paid')
-                // 3. Accepted by driver (waiting DP)
-                // 4. Pending request
-                Map<String, dynamic>? selectedBooking;
-
-                final ongoingTrips = activeList.where((b) {
-                  final s = b['status']?.toString().toLowerCase();
-                  final add = b['additional_details'] is Map ? b['additional_details'] as Map : null;
-                  final sub = add?['sub_status']?.toString().toLowerCase();
-                  return s == 'ongoing' && (sub == 'started' || sub == 'on_the_way' || sub == 'arrived' || sub == 'ongoing');
-                }).toList();
-
-                if (ongoingTrips.isNotEmpty) {
-                  selectedBooking = ongoingTrips.first;
-                } else {
-                  final dpPaidBookings = activeList.where((b) {
-                    final s = b['status']?.toString().toLowerCase();
-                    final add = b['additional_details'] is Map ? b['additional_details'] as Map : null;
-                    final sub = add?['sub_status']?.toString().toLowerCase();
-                    return add?['dp_paid'] == true || sub == 'dp_paid' || s == 'dp_paid' || s == 'ongoing' || s == 'confirmed';
-                  }).toList();
-
-                  if (dpPaidBookings.isNotEmpty) {
-                    // Sort by earliest scheduled date
-                    dpPaidBookings.sort((a, b) {
-                      final dtA = BookingDateHelper.extractScheduledDateTime(a) ?? DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.now();
-                      final dtB = BookingDateHelper.extractScheduledDateTime(b) ?? DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime.now();
-                      return dtA.compareTo(dtB);
-                    });
-                    selectedBooking = dpPaidBookings.first;
-                  } else {
-                    final acceptedBookings = activeList.where((b) => b['status'] == 'accepted').toList();
-                    if (acceptedBookings.isNotEmpty) {
-                      selectedBooking = acceptedBookings.first;
-                    } else {
-                      selectedBooking = activeList.last;
-                    }
-                  }
-                }
-
-                final driverId = selectedBooking['driver_id'];
-                Map<String, dynamic>? driverData;
-                if (driverId != null && driverId.toString().isNotEmpty) {
-                  try {
-                    final dbDriver = await Supabase.instance.client
-                        .from('drivers')
-                        .select('*, users(*)')
-                        .eq('id', driverId)
-                        .maybeSingle();
-                    driverData = dbDriver;
-                  } catch (e) {
-                    debugPrint('Error fetching driver details for client booking: $e');
-                  }
-                }
-
-                _currentBooking = {
-                  ...selectedBooking,
-                  if (driverData != null) 'driver': driverData,
-                };
-              } else {
-                _currentBooking = null;
-              }
-              notifyListeners();
-            } else {
-              _activeBookings = [];
-              _currentBooking = null;
-              notifyListeners();
-            }
+            _processBookingData(data);
           }, onError: (err) {
-            debugPrint('❌ Client Realtime Error: $err');
+            debugPrint('❌ Client Realtime Error: $err -> Fallback to REST Polling');
+            startPollingActiveBookings();
           });
     } catch (e) {
-      debugPrint('❌ Client Realtime Exception: $e');
+      debugPrint('❌ Client Realtime Exception: $e -> Fallback to REST Polling');
+      startPollingActiveBookings();
+    }
+  }
+
+  void startPollingActiveBookings() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      fetchActiveBookings();
+    });
+  }
+
+  void stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
+
+  Future<void> fetchActiveBookings() async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) return;
+
+      final url = Uri.parse('${ApiConstants.baseUrl}/api/bookings');
+      final response = await http.get(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final resData = jsonDecode(response.body);
+        final List<dynamic> rawList = resData['data'] ?? [];
+        final List<Map<String, dynamic>> list = rawList.cast<Map<String, dynamic>>();
+        _processBookingData(list);
+      }
+    } catch (e) {
+      debugPrint('ℹ️ REST fetch active bookings error: $e');
+    }
+  }
+
+  void _processBookingData(List<Map<String, dynamic>> data) async {
+    if (data.isNotEmpty) {
+      final activeList = data.where((b) {
+        final s = b['status']?.toString();
+        final addDetails = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+        final sub = addDetails?['sub_status']?.toString();
+
+        if (s == 'completed' || s == 'closed' || s == 'cancelled' || s == 'paid' || s == 'selesai' ||
+            sub == 'completed' || sub == 'closed' || sub == 'cancelled' || sub == 'paid' || sub == 'selesai' ||
+            addDetails?['pelunasan_paid'] == true || addDetails?['final_paid'] == true || addDetails?['has_reviewed'] == true || addDetails?['review'] != null || addDetails?['payment_status'] == 'LUNAS') {
+          return false;
+        }
+
+        return s == 'pending' ||
+               s == 'accepted' ||
+               s == 'confirmed' ||
+               s == 'ongoing' ||
+               s == 'in_progress' ||
+               s == 'started' ||
+               s == 'on_the_way' ||
+               s == 'arrived' ||
+               s == 'dp_paid' ||
+               sub == 'dp_paid' ||
+               sub == 'on_the_way' ||
+               sub == 'arrived' ||
+               sub == 'started' ||
+               sub == 'ongoing';
+      }).toList();
+
+      _activeBookings = List<Map<String, dynamic>>.from(activeList);
+
+      if (activeList.isNotEmpty) {
+        Map<String, dynamic>? selectedBooking;
+
+        final ongoingTrips = activeList.where((b) {
+          final s = b['status']?.toString().toLowerCase();
+          final add = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+          final sub = add?['sub_status']?.toString().toLowerCase();
+          return s == 'ongoing' && (sub == 'started' || sub == 'on_the_way' || sub == 'arrived' || sub == 'ongoing');
+        }).toList();
+
+        if (ongoingTrips.isNotEmpty) {
+          selectedBooking = ongoingTrips.first;
+        } else {
+          final dpPaidBookings = activeList.where((b) {
+            final s = b['status']?.toString().toLowerCase();
+            final add = b['additional_details'] is Map ? b['additional_details'] as Map : null;
+            final sub = add?['sub_status']?.toString().toLowerCase();
+            return add?['dp_paid'] == true || sub == 'dp_paid' || s == 'dp_paid' || s == 'ongoing' || s == 'confirmed';
+          }).toList();
+
+          if (dpPaidBookings.isNotEmpty) {
+            dpPaidBookings.sort((a, b) {
+              final dtA = BookingDateHelper.extractScheduledDateTime(a) ?? DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime.now();
+              final dtB = BookingDateHelper.extractScheduledDateTime(b) ?? DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime.now();
+              return dtA.compareTo(dtB);
+            });
+            selectedBooking = dpPaidBookings.first;
+          } else {
+            final acceptedBookings = activeList.where((b) => b['status'] == 'accepted').toList();
+            if (acceptedBookings.isNotEmpty) {
+              selectedBooking = acceptedBookings.first;
+            } else {
+              selectedBooking = activeList.last;
+            }
+          }
+        }
+
+        final driverId = selectedBooking['driver_id'];
+        Map<String, dynamic>? driverData;
+        if (driverId != null && driverId.toString().isNotEmpty) {
+          try {
+            final dbDriver = await Supabase.instance.client
+                .from('drivers')
+                .select('*, users(*)')
+                .eq('id', driverId)
+                .maybeSingle();
+            driverData = dbDriver;
+          } catch (e) {
+            debugPrint('Error fetching driver details for client booking: $e');
+          }
+        }
+
+        _currentBooking = {
+          ...selectedBooking,
+          if (driverData != null) 'driver': driverData,
+        };
+      } else {
+        _currentBooking = null;
+      }
+      notifyListeners();
+    } else {
+      _activeBookings = [];
+      _currentBooking = null;
+      notifyListeners();
     }
   }
 
@@ -152,12 +196,14 @@ class ClientBookingProvider extends ChangeNotifier {
   void unsubscribeFromBookings() {
     _realtimeSubscription?.cancel();
     _realtimeSubscription = null;
+    stopPolling();
     _currentBooking = null;
     notifyListeners();
   }
 
   @override
   void dispose() {
+    stopPolling();
     unsubscribeFromBookings();
     super.dispose();
   }
@@ -252,6 +298,20 @@ class ClientBookingProvider extends ChangeNotifier {
       final enrichedDetails = Map<String, dynamic>.from(bookingData);
       enrichedDetails['booking_date'] = bookingDateIso;
       enrichedDetails['bookingDate'] = bookingDateIso;
+
+      // Always generate a fresh, unique 4-digit PIN for every new booking
+      final random = Random();
+      final freshOtp = (random.nextInt(9000) + 1000).toString();
+      String freshCompOtp;
+      do {
+        freshCompOtp = (random.nextInt(9000) + 1000).toString();
+      } while (freshCompOtp == freshOtp);
+
+      enrichedDetails['otp'] = freshOtp;
+      enrichedDetails['security_pin'] = freshOtp;
+      enrichedDetails['start_otp'] = freshOtp;
+      enrichedDetails['completion_otp'] = freshCompOtp;
+      debugPrint("🔑 Generated FRESH PIN for new booking: $freshOtp (Completion: $freshCompOtp)");
 
       final response = await http.post(
         url,

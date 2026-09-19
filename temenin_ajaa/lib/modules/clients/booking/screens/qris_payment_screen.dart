@@ -88,15 +88,20 @@ class _QrisPaymentScreenState extends State<QrisPaymentScreen> {
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('id', widget.bookingId)
-          .listen((List<Map<String, dynamic>> records) {
-            if (!mounted || _isPaymentConfirmed) return;
-            if (records.isNotEmpty) {
-              final b = records.first;
-              _checkIfPaidAndProceed(b);
-            }
-          });
+          .listen(
+            (List<Map<String, dynamic>> records) {
+              if (!mounted || _isPaymentConfirmed) return;
+              if (records.isNotEmpty) {
+                final b = records.first;
+                _checkIfPaidAndProceed(b);
+              }
+            },
+            onError: (err) {
+              debugPrint('Realtime booking stream error: $err');
+            },
+          );
     } catch (e) {
-      debugPrint('Realtime booking stream error: $e');
+      debugPrint('Realtime booking stream exception: $e');
     }
 
     // 2. Fallback polling every 4 seconds
@@ -135,13 +140,16 @@ class _QrisPaymentScreenState extends State<QrisPaymentScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('🎉 Pembayaran QRIS berhasil diverifikasi!'),
-          backgroundColor: Color(0xFF10B981),
-          duration: Duration(seconds: 3),
-        ),
-      );
+      try {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🎉 Pembayaran QRIS berhasil diverifikasi!'),
+            backgroundColor: Color(0xFF10B981),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } catch (_) {}
 
       final isVirtual = widget.bookingData['service_category'] == 'VIRTUAL' ||
           widget.bookingData['call_type'] != null ||

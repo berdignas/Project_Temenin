@@ -20,6 +20,7 @@ import 'driver_community_screen.dart';
 import 'driver_orders_screen.dart';
 import 'driver_waiting_countdown_screen.dart';
 import 'driver_waiting_dp_screen.dart';
+import 'driver_order_detail_screen.dart';
 import '../../../data/models/driver_notification_model.dart';
 import '../../../core/utils/booking_date_helper.dart';
 
@@ -56,6 +57,20 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final booking = context.watch<BookingProvider>();
+
+    if (booking.incomingBooking != null && !_isDialogOpen) {
+      _isDialogOpen = true;
+      final req = booking.incomingBooking;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (req != null) {
+          _showIncomingRequestDialog(req).then((_) {
+            _isDialogOpen = false;
+          });
+        } else {
+          _isDialogOpen = false;
+        }
+      });
+    }
 
     // List of screens to display in bottom navigation
     final List<Widget> screens = [
@@ -190,7 +205,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         );
                       }
                     } else if (targetBooking != null) {
-                      _showIncomingRequestDialog(targetBooking);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => DriverOrderDetailScreen(bookingData: targetBooking),
+                        ),
+                      );
                     } else {
                       Navigator.push(
                         context,
@@ -243,99 +263,200 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
 
     final hasActiveOrUpcoming = booking.isCurrentlyOnTrip || booking.upcomingBookings.isNotEmpty;
 
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.black, // Changed to black
-        border: Border(
-          top: BorderSide(
-            color: AppTheme.border,
-            width: 1,
-          ),
-        ),
-      ),
-      padding: const EdgeInsets.only(top: 8, bottom: 12),
-      child: SafeArea(
-        top: false,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: List.generate(navItems.length, (index) {
-            final isSelected = _currentIndex == index;
-            final item = navItems[index];
-            final isChat = index == 2;
-            final isOrders = index == 1;
-
-            return GestureDetector(
-              onTap: () {
-                setState(() {
-                  _currentIndex = index;
-                });
-                if (index == 0 || index == 3 || index == 4) {
-                  final authProv = Provider.of<AuthProvider>(context, listen: false);
-                  final bookProv = Provider.of<BookingProvider>(context, listen: false);
-                  authProv.refreshProfile();
-                  bookProv.loadEarnings('daily');
-                }
-              },
-              behavior: HitTestBehavior.opaque,
-              child: Container( // Changed from AnimatedContainer to Container to remove delay
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.primaryPink.withOpacity(0.12) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
+      color: Colors.transparent,
+      padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding > 0 ? bottomPadding : 12),
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
+        children: [
+          // Background Curved Floating Dock
+          Container(
+            height: 64,
+            decoration: BoxDecoration(
+              color: const Color(0xFF161420),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: AppTheme.primaryPink.withOpacity(0.25),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primaryPink.withOpacity(0.18),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                  spreadRadius: 0,
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Icon(
-                          item['icon'] as IconData,
-                          color: isSelected ? AppTheme.primaryPink : AppTheme.textMuted,
-                          size: 22,
-                        ),
-                        if (isChat && hasUnreadChatNotif)
-                          Positioned(
-                            top: -2,
-                            right: -2,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: AppTheme.primaryPink,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                        if (isOrders && hasActiveOrUpcoming)
-                          Positioned(
-                            top: -2,
-                            right: -2,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF10B981),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      item['label'] as String,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 10,
-                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-                        color: isSelected ? AppTheme.primaryPink : AppTheme.textMuted,
-                      ),
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.4),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildDriverNavItem(navItems[0], 0),
+                _buildDriverNavItem(navItems[1], 1, hasBadge: hasActiveOrUpcoming, badgeColor: const Color(0xFF10B981)),
+                const SizedBox(width: 54), // Reserved space for center circle
+                _buildDriverNavItem(navItems[3], 3),
+                _buildDriverNavItem(navItems[4], 4),
+              ],
+            ),
+          ),
+
+          // Elevated Center Circle for Chat (index 2)
+          Positioned(
+            top: -12,
+            child: _buildDriverCenterCircleItem(navItems[2], hasUnreadChatNotif),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDriverCenterCircleItem(Map<String, dynamic> item, bool hasBadge) {
+    final isSelected = _currentIndex == 2;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentIndex = 2;
+        });
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutBack,
+                width: isSelected ? 54 : 50,
+                height: isSelected ? 54 : 50,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: isSelected
+                        ? [const Color(0xFFE11D48), const Color(0xFFC026D3)]
+                        : [const Color(0xFF9D174D), const Color(0xFF701A75)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  border: Border.all(
+                    color: const Color(0xFF161420),
+                    width: 3.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isSelected
+                          ? const Color(0xFFC026D3).withOpacity(0.55)
+                          : const Color(0xFF9D174D).withOpacity(0.35),
+                      blurRadius: isSelected ? 16 : 10,
+                      offset: const Offset(0, 5),
+                      spreadRadius: isSelected ? 1 : 0,
                     ),
                   ],
                 ),
+                child: Center(
+                  child: Icon(
+                    item['icon'] as IconData,
+                    color: Colors.white,
+                    size: isSelected ? 26 : 23,
+                  ),
+                ),
               ),
-            );
-          }),
+              if (hasBadge)
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryPink,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF161420), width: 2),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          AnimatedDefaultTextStyle(
+            duration: const Duration(milliseconds: 200),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 10,
+              color: isSelected ? AppTheme.primaryPink : AppTheme.textMuted,
+              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            ),
+            child: Text(item['label'] as String),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDriverNavItem(Map<String, dynamic> item, int index, {bool hasBadge = false, Color badgeColor = AppTheme.primaryPink}) {
+    final isSelected = _currentIndex == index;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _currentIndex = index;
+        });
+        if (index == 0 || index == 3 || index == 4) {
+          final authProv = Provider.of<AuthProvider>(context, listen: false);
+          final bookProv = Provider.of<BookingProvider>(context, listen: false);
+          authProv.refreshProfile();
+          bookProv.loadEarnings('daily');
+        }
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected ? AppTheme.primaryPink.withOpacity(0.14) : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(
+                  item['icon'] as IconData,
+                  color: isSelected ? AppTheme.primaryPink : AppTheme.textMuted,
+                  size: 22,
+                ),
+                if (hasBadge)
+                  Positioned(
+                    top: -2,
+                    right: -2,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: badgeColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 3),
+            Text(
+              item['label'] as String,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
+                color: isSelected ? AppTheme.primaryPink : AppTheme.textMuted,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -759,7 +880,12 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                       price: "Rp ${offer.totalPrice.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
                       statusTag: "TERSEDIA",
                       isCompleted: false,
-                      onTap: () => _showIncomingRequestDialog(offer),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => DriverOrderDetailScreen(bookingData: offer),
+                        ),
+                      ),
                     );
                   }),
                 ] else if (booking.completedBookings.isNotEmpty) ...[
@@ -1623,679 +1749,15 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   // ============================================================
-  // INCOMING REQUEST ALERT DIALOG (Preserved Logic + Clean Fuchsia)
+  // INCOMING REQUEST FULL PAGE NAVIGATION (No Popup / No Auto Accept)
   // ============================================================
-  Future<void> _showIncomingRequestDialog(BookingModel request) {
-    final bookingProvider = Provider.of<BookingProvider>(context, listen: false);
-    final String clientName = request.client?.fullName ?? 'Pelanggan';
-    final String clientPhone = request.client?.phone ?? '-';
-    final dt = request.bookingDate ?? request.createdAt;
-    final List<String> monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
-    final String bookingDate = "${dt.day} ${monthNames[dt.month]} ${dt.year}";
-    final String bookingTime = "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')} WIB";
-
-    return showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) {
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: AppTheme.primaryPink.withOpacity(0.4), width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.12),
-                  blurRadius: 25,
-                  spreadRadius: 2,
-                ),
-                BoxShadow(
-                  color: AppTheme.primaryPink.withOpacity(0.12),
-                  blurRadius: 30,
-                  offset: const Offset(0, 8),
-                )
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(22),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header Badge
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryPink.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.notifications_active_rounded, color: AppTheme.primaryPink, size: 14),
-                              const SizedBox(width: 6),
-                              Text(
-                                "PESANAN BARU MASUK",
-                                style: GoogleFonts.inter(
-                                  color: AppTheme.primaryPink,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppTheme.cardDeep,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppTheme.border),
-                          ),
-                          child: const Text("MENUNGGU RESPON", style: TextStyle(color: AppTheme.textMuted, fontSize: 9, fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Customer Profile Card
-                    GestureDetector(
-                      onTap: () {
-                        _showCustomerDetailSummaryModal(context, request);
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: AppTheme.cardDeep,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: AppTheme.border),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Stack(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 24,
-                                      backgroundColor: AppTheme.border,
-                                      backgroundImage: (request.client?.avatarUrl != null && request.client!.avatarUrl!.isNotEmpty)
-                                          ? NetworkImage(_resolveImageUrl(request.client!.avatarUrl!))
-                                          : null,
-                                      child: (request.client?.avatarUrl == null || request.client!.avatarUrl!.isEmpty)
-                                          ? const Icon(Icons.person, color: AppTheme.textMuted, size: 22)
-                                          : null,
-                                    ),
-                                    Positioned(
-                                      bottom: 0,
-                                      right: 0,
-                                      child: Container(
-                                        padding: const EdgeInsets.all(2),
-                                        decoration: const BoxDecoration(
-                                          color: Colors.blueAccent,
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: const Icon(Icons.check_rounded, color: Colors.white, size: 10),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: Text(
-                                              clientName,
-                                              style: GoogleFonts.plusJakartaSans(
-                                                color: AppTheme.textHighContrast,
-                                                fontSize: 15,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: Colors.green.withOpacity(0.15),
-                                              borderRadius: BorderRadius.circular(6),
-                                              border: Border.all(color: Colors.green.withOpacity(0.3)),
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                const Icon(Icons.verified_user_rounded, color: Colors.green, size: 11),
-                                                const SizedBox(width: 4),
-                                                Text(
-                                                  "Pelanggan Baru",
-                                                  style: GoogleFonts.inter(
-                                                    color: Colors.green,
-                                                    fontSize: 9,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        clientPhone,
-                                        style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const Icon(Icons.chevron_right_rounded, color: AppTheme.primaryPink, size: 20),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            const Divider(color: AppTheme.border, height: 1),
-                            const SizedBox(height: 8),
-
-                            // Real Client Notes / Clean Status
-                            Builder(
-                              builder: (context) {
-                                final clientNotes = request.additionalDetails?['notes']?.toString() ??
-                                    request.additionalDetails?['clientNotes']?.toString() ??
-                                    request.additionalDetails?['specialRequests']?.toString() ??
-                                    request.additionalDetails?['additionalAntarJemputNotes']?.toString() ??
-                                    '';
-                                if (clientNotes.isNotEmpty) {
-                                  return Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.surface,
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: AppTheme.border),
-                                    ),
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        const Icon(Icons.edit_note_rounded, color: AppTheme.primaryPink, size: 16),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Text(
-                                            "Catatan Klien: \"$clientNotes\"",
-                                            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11, fontStyle: FontStyle.italic),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }
-                                return Container(
-                                  width: double.infinity,
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.surface,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: AppTheme.border),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      const Icon(Icons.info_outline_rounded, color: AppTheme.textMuted, size: 14),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        "Klien Baru • Belum ada catatan khusus",
-                                        style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Scheduled Booking Slot Info Card
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppTheme.fuchsiaLight,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.primaryPink.withOpacity(0.2)),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.calendar_month_rounded, color: AppTheme.primaryPink, size: 18),
-                              const SizedBox(width: 8),
-                              Text(
-                                "JADWAL BOOKING TERJADWAL",
-                                style: GoogleFonts.plusJakartaSans(
-                                  color: AppTheme.textHighContrast,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.event_available_rounded, color: AppTheme.textMuted, size: 14),
-                                  const SizedBox(width: 6),
-                                  Text("Tanggal:", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12)),
-                                ],
-                              ),
-                              Text(bookingDate, style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.access_time_rounded, color: AppTheme.textMuted, size: 14),
-                                  const SizedBox(width: 6),
-                                  Text("Waktu:", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 12)),
-                                ],
-                              ),
-                              Text(bookingTime, style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 12, fontWeight: FontWeight.bold)),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: AppTheme.border),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.lock_clock_rounded, color: Colors.amber, size: 14),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    "Persetujuan Anda akan otomatis mengunci slot jam & tanggal ini agar tidak bentrok.",
-                                    style: GoogleFonts.inter(color: AppTheme.textMediumContrast, fontSize: 10),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Detail Layanan Utama & Multi-Layanan
-                    Builder(
-                      builder: (context) {
-                        final rawService = request.additionalDetails?['serviceType']?.toString() ??
-                            request.additionalDetails?['service_type']?.toString() ??
-                            'antar_jemput';
-                        String serviceLabel = 'Antar Jemput';
-                        IconData serviceIcon = Icons.directions_bike_rounded;
-                        if (rawService.contains('hangout')) {
-                          serviceLabel = 'Hangout & Teman Jalan';
-                          serviceIcon = Icons.coffee_rounded;
-                        } else if (rawService.contains('freedom')) {
-                          serviceLabel = 'Freedom Request';
-                          serviceIcon = Icons.explore_rounded;
-                        } else if (rawService.contains('sleep')) {
-                          serviceLabel = 'Sleep Call';
-                          serviceIcon = Icons.bedtime_rounded;
-                        } else if (rawService.contains('virtual') || rawService.contains('telepon')) {
-                          serviceLabel = 'Virtual Call';
-                          serviceIcon = Icons.video_call_rounded;
-                        } else if (rawService.contains('gaming') || rawService.contains('mabar')) {
-                          serviceLabel = 'Gaming Buddy';
-                          serviceIcon = Icons.sports_esports_rounded;
-                        }
-
-                        final vehicleType = request.additionalDetails?['vehicleType']?.toString() ??
-                            request.additionalDetails?['vehicle_type']?.toString() ?? '';
-                        final dynamic rawExtra = request.additionalDetails?['additionalServices'] ??
-                            request.additionalDetails?['services'];
-                        List<Map<String, dynamic>> extraServices = [];
-                        if (rawExtra is List) {
-                          for (var item in rawExtra) {
-                            if (item is Map) extraServices.add(Map<String, dynamic>.from(item));
-                          }
-                        }
-
-                        return Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: AppTheme.cardDeep,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: AppTheme.border),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(serviceIcon, color: AppTheme.primaryPink, size: 16),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      "$serviceLabel ${vehicleType.isNotEmpty ? '($vehicleType)' : ''}",
-                                      style: GoogleFonts.plusJakartaSans(
-                                        color: AppTheme.textHighContrast,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: AppTheme.primaryPink.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      "${request.duration} Jam",
-                                      style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 9, fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (extraServices.isNotEmpty) ...[
-                                const SizedBox(height: 8),
-                                const Divider(color: AppTheme.border, height: 1),
-                                const SizedBox(height: 6),
-                                Text(
-                                  "Layanan Tambahan (+${extraServices.length}):",
-                                  style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 10, fontWeight: FontWeight.w600),
-                                ),
-                                const SizedBox(height: 4),
-                                ...extraServices.map((extra) {
-                                  final title = extra['title'] ?? extra['name'] ?? extra['type'] ?? 'Layanan Ekstra';
-                                  final price = extra['price'] ?? extra['fee'] ?? 0;
-                                  return Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 2),
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.add_circle_outline_rounded, color: Colors.green, size: 12),
-                                        const SizedBox(width: 6),
-                                        Expanded(
-                                          child: Text(
-                                            title.toString(),
-                                            style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        Text(
-                                          "+Rp ${(price as num).toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
-                                          style: GoogleFonts.inter(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 10),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Route Details Card
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.cardDeep,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppTheme.border),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.location_on_rounded, color: AppTheme.success, size: 16),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  request.pickupLocation,
-                                  style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Row(
-                            children: [
-                              const Icon(Icons.flag_rounded, color: AppTheme.primaryPink, size: 16),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  request.dropoffLocation,
-                                  style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 14),
-
-                    // Total Payment Summary & DP
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surface,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppTheme.border),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text("DP Wajib (50% Masuk Saldo):", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11)),
-                              Text(
-                                "Rp ${(request.totalPrice * 0.5).toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
-                                style: GoogleFonts.inter(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text("Sisa Pelunasan Akhir:", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11)),
-                              Text(
-                                "Rp ${(request.totalPrice * 0.5).toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
-                                style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.w600, fontSize: 12),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          const Divider(color: AppTheme.border, height: 1),
-                          const SizedBox(height: 6),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text("Total Est. Pendapatan:", style: GoogleFonts.plusJakartaSans(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 12)),
-                              Text(
-                                "Rp ${(request.totalPrice).toStringAsFixed(0).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
-                                style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          if (!request.isFlexible)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: AppTheme.cardDeep,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppTheme.border),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.lock_rounded, color: AppTheme.primaryPink, size: 13),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    "Tarif Pas Resmi (Ditetapkan Admin • Non-Nego)",
-                                    style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.w600),
-                                  ),
-                                ],
-                              ),
-                            )
-                          else
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryPink.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: AppTheme.primaryPink.withOpacity(0.3)),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  const Icon(Icons.auto_awesome_rounded, color: AppTheme.primaryPink, size: 13),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    "Layanan Fleksibel (Negosiasi / Tawar Diizinkan)",
-                                    style: GoogleFonts.inter(color: AppTheme.primaryPink, fontSize: 11, fontWeight: FontWeight.w700),
-                                  ),
-                                ],
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    // Action Buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () {
-                              bookingProvider.rejectBooking(request.id);
-                              if (dialogContext.mounted) {
-                                Navigator.pop(dialogContext);
-                              }
-                            },
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: AppTheme.danger),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                            ),
-                            child: Text("TOLAK", style: GoogleFonts.plusJakartaSans(color: AppTheme.danger, fontWeight: FontWeight.bold, fontSize: 12)),
-                          ),
-                        ),
-                        // Tombol TAWAR HANYA muncul untuk Layanan Fleksibel (Freedom Request)
-                        if (request.isFlexible) ...[
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {
-                                if (dialogContext.mounted) {
-                                  Navigator.pop(dialogContext);
-                                }
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => DriverNegotiationScreen(bookingData: request),
-                                  ),
-                                );
-                              },
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: AppTheme.primaryPink),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                              ),
-                              child: Text("TAWAR", style: GoogleFonts.plusJakartaSans(color: AppTheme.primaryPink, fontWeight: FontWeight.bold, fontSize: 12)),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(width: 8),
-                        Expanded(
-                          flex: 2,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              gradient: AppTheme.primaryGradient,
-                              borderRadius: BorderRadius.circular(14),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppTheme.primaryPink.withOpacity(0.3),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                )
-                              ],
-                            ),
-                            child: ElevatedButton(
-                              onPressed: () async {
-                                final success = await bookingProvider.acceptBooking(request.id);
-                                if (success && mounted) {
-                                  if (dialogContext.mounted) {
-                                    Navigator.pop(dialogContext);
-                                  }
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => DriverWaitingDpScreen(bookingData: request),
-                                    ),
-                                  );
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.transparent,
-                                shadowColor: Colors.transparent,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                padding: const EdgeInsets.symmetric(vertical: 14),
-                              ),
-                              child: Text(
-                                "SETUJUI & KUNCI ➔",
-                                style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+  Future<void> _showIncomingRequestDialog(BookingModel request) async {
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DriverOrderDetailScreen(bookingData: request),
+      ),
     );
   }
 

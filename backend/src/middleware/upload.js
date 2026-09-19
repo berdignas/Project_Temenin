@@ -37,7 +37,7 @@ const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const allowedExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
 
-  if (allowedMimeTypes.includes(file.mimetype) && allowedExt.includes(ext)) {
+  if ((allowedMimeTypes.includes(file.mimetype) || file.mimetype === 'application/octet-stream') && allowedExt.includes(ext)) {
     console.log('✅ File accepted');
     return cb(null, true);
   } else {

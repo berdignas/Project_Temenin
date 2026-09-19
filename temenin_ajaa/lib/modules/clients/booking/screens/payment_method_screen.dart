@@ -400,11 +400,14 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                 final bookingDetails = Map<String, dynamic>.from(widget.bookingData ?? {});
                 final existingOtp = bookingDetails['otp'] ?? 
                                    (bookingDetails['additional_details'] is Map ? bookingDetails['additional_details']['otp'] : null);
-                if (existingOtp != null && existingOtp.toString().isNotEmpty) {
+                if (widget.isPelunasan && existingOtp != null && existingOtp.toString().isNotEmpty) {
                   bookingDetails['otp'] = existingOtp.toString();
                 } else {
                   final random = Random();
-                  bookingDetails['otp'] = (random.nextInt(9000) + 1000).toString();
+                  final freshOtp = (random.nextInt(9000) + 1000).toString();
+                  bookingDetails['otp'] = freshOtp;
+                  bookingDetails['security_pin'] = freshOtp;
+                  bookingDetails['start_otp'] = freshOtp;
                 }
 
                 String? currentBookingId = widget.bookingId;

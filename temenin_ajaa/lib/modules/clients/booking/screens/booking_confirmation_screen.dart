@@ -1090,53 +1090,72 @@ class BookingConfirmationScreen extends StatelessWidget {
                 builder: (_) => const Center(child: CircularProgressIndicator(color: AppTheme.primaryPink)),
               );
 
-              final bookingProvider = Provider.of<ClientBookingProvider>(context, listen: false);
-              final bookingDetails = Map<String, dynamic>.from(bookingData ?? {});
-              if (bookingDetails['otp'] == null) {
+              try {
+                final bookingProvider = Provider.of<ClientBookingProvider>(context, listen: false);
+                final bookingDetails = Map<String, dynamic>.from(bookingData ?? {});
                 final random = Random();
-                bookingDetails['otp'] = (random.nextInt(9000) + 1000).toString();
-              }
+                final freshPin = (random.nextInt(9000) + 1000).toString();
+                String freshCompPin;
+                do {
+                  freshCompPin = (random.nextInt(9000) + 1000).toString();
+                } while (freshCompPin == freshPin);
+                bookingDetails['otp'] = freshPin;
+                bookingDetails['security_pin'] = freshPin;
+                bookingDetails['start_otp'] = freshPin;
+                bookingDetails['completion_otp'] = freshCompPin;
 
-              // Panggil REST API Backend via ClientBookingProvider (/api/bookings)
-              final result = await bookingProvider.createBookingRequest(bookingDetails);
+                // Panggil REST API Backend via ClientBookingProvider (/api/bookings)
+                final result = await bookingProvider.createBookingRequest(bookingDetails);
 
-              if (context.mounted) {
-                Navigator.pop(context); // close loading
+                if (context.mounted) {
+                  Navigator.of(context, rootNavigator: true).pop(); // close loading dialog
 
-                if (result['success'] == true) {
-                  final createdBooking = result['booking'] ?? result['data'];
-                  final bookingId = createdBooking?['id']?.toString();
+                  if (result['success'] == true) {
+                    final createdBooking = result['booking'] ?? result['data'];
+                    final bookingId = createdBooking?['id']?.toString();
 
-                  final isVirtual = bookingDetails['service_category'] == 'VIRTUAL' || 
-                                    bookingDetails['call_type'] != null ||
-                                    (bookingDetails['serviceType']?.toString().toLowerCase().contains('telepon') ?? false) ||
-                                    (bookingDetails['serviceType']?.toString().toLowerCase().contains('sleep') ?? false);
-                  
-                  if (isVirtual) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => CallLobbyScreen(
-                          bookingDetails: bookingDetails,
-                          bookingId: bookingId,
+                    final isVirtual = bookingDetails['service_category'] == 'VIRTUAL' || 
+                                      bookingDetails['call_type'] != null ||
+                                      (bookingDetails['serviceType']?.toString().toLowerCase().contains('telepon') ?? false) ||
+                                      (bookingDetails['serviceType']?.toString().toLowerCase().contains('sleep') ?? false);
+                    
+                    if (isVirtual) {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => CallLobbyScreen(
+                            bookingDetails: bookingDetails,
+                            bookingId: bookingId,
+                          ),
                         ),
-                      ),
-                    );
+                      );
+                    } else {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => TrackingDriverScreen(
+                            bookingData: bookingDetails,
+                            bookingId: bookingId,
+                          ),
+                        ),
+                      );
+                    }
                   } else {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => TrackingDriverScreen(
-                          bookingData: bookingDetails,
-                          bookingId: bookingId,
-                        ),
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(result['message'] ?? 'Gagal membuat pesanan'),
+                        backgroundColor: Colors.redAccent,
                       ),
                     );
                   }
-                } else {
+                }
+              } catch (e) {
+                debugPrint('❌ Exception creating booking: $e');
+                if (context.mounted) {
+                  Navigator.of(context, rootNavigator: true).pop(); // ensure loading is dismissed on error
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(result['message'] ?? 'Gagal membuat pesanan'),
+                      content: Text('Terjadi kesalahan: ${e.toString()}'),
                       backgroundColor: Colors.redAccent,
                     ),
                   );

@@ -27,9 +27,14 @@ class DriverProvider extends ChangeNotifier {
       _driversStreamSub = Supabase.instance.client
           .from('drivers')
           .stream(primaryKey: ['id'])
-          .listen((_) {
-            fetchDrivers();
-          });
+          .listen(
+            (_) {
+              fetchDrivers();
+            },
+            onError: (err) {
+              debugPrint("Drivers stream Realtime error: $err");
+            },
+          );
     } catch (e) {
       debugPrint("Error subscribing to drivers stream: $e");
     }

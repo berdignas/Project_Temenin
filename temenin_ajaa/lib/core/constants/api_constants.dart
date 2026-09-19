@@ -7,7 +7,11 @@ class ApiConstants {
       final host = Uri.base.host.isEmpty ? '127.0.0.1' : Uri.base.host;
       return 'http://$host:3002';
     }
-    return dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:3002';
+    const envUrl = String.fromEnvironment('API_BASE_URL');
+    if (envUrl.isNotEmpty) return envUrl;
+    final dotenvUrl = dotenv.env['API_BASE_URL'];
+    if (dotenvUrl != null && dotenvUrl.isNotEmpty) return dotenvUrl;
+    return 'http://192.168.1.4:3002';
   }
 
   // Auth Endpoints

@@ -71,37 +71,47 @@ class _DriverWaitingDpScreenState extends State<DriverWaitingDpScreen> with Sing
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('id', queryId)
-          .listen((data) {
-            if (data.isNotEmpty && mounted && !_isTransitioning) {
-              final row = data.first;
-              final rowAdd = row['additional_details'] is Map 
-                  ? row['additional_details'] as Map 
-                  : (row['additionalDetails'] is Map ? row['additionalDetails'] as Map : null);
-              final subStatus = rowAdd?['sub_status']?.toString();
-              final rawStatus = row['status']?.toString();
-              final isPaid = rowAdd?['dp_paid'] == true || 
-                             subStatus == 'dp_paid' || 
-                             rawStatus == 'dp_paid' ||
-                             rawStatus == 'ongoing' ||
-                             rowAdd?['countdown_ended'] == true;
+          .listen(
+            (data) {
+              if (data.isNotEmpty && mounted && !_isTransitioning) {
+                final row = data.first;
+                final rowAdd = row['additional_details'] is Map 
+                    ? row['additional_details'] as Map 
+                    : (row['additionalDetails'] is Map ? row['additionalDetails'] as Map : null);
+                final subStatus = rowAdd?['sub_status']?.toString();
+                final rawStatus = row['status']?.toString();
+                final isPaid = rowAdd?['dp_paid'] == true || 
+                               subStatus == 'dp_paid' || 
+                               rawStatus == 'dp_paid' ||
+                               rawStatus == 'ongoing' ||
+                               rowAdd?['countdown_ended'] == true;
 
-              if (rawStatus == 'cancelled') {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Pesanan telah dibatalkan oleh klien."),
-                    backgroundColor: Colors.redAccent,
-                  ),
-                );
-                Navigator.pop(context);
-                return;
-              }
+                if (rawStatus == 'cancelled') {
+                  if (mounted) {
+                    try {
+                      ScaffoldMessenger.of(context).clearSnackBars();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Pesanan telah dibatalkan oleh klien."),
+                          backgroundColor: Colors.redAccent,
+                        ),
+                      );
+                    } catch (_) {}
+                    Navigator.pop(context);
+                  }
+                  return;
+                }
 
-              if (isPaid) {
-                final updatedBooking = BookingModel.fromJson(row);
-                _proceedToCountdown(updatedBooking);
+                if (isPaid) {
+                  final updatedBooking = BookingModel.fromJson(row);
+                  _proceedToCountdown(updatedBooking);
+                }
               }
-            }
-          });
+            },
+            onError: (err) {
+              debugPrint("Driver waiting DP stream error: $err");
+            },
+          );
     } catch (e) {
       debugPrint("Error listening to DP status: $e");
     }
@@ -234,8 +244,26 @@ class _DriverWaitingDpScreenState extends State<DriverWaitingDpScreen> with Sing
   @override
   Widget build(BuildContext context) {
     final client = _currentBooking.client;
-    final clientName = client?.fullName ?? 'Klien Temenin';
-    final clientImage = client?.avatarUrl ?? client?.profileImage ?? '';
+    final rawClientName = client?.fullName ??
+        _currentBooking.additionalDetails?['userName'] ??
+        _currentBooking.additionalDetails?['user_name'] ??
+        _currentBooking.additionalDetails?['clientName'] ??
+        _currentBooking.additionalDetails?['client_name'] ??
+        _currentBooking.additionalDetails?['name'];
+    final clientName = (rawClientName != null && rawClientName.toString().trim().isNotEmpty)
+        ? rawClientName.toString().trim()
+        : 'Klien Temenin';
+
+    final rawClientPhoto = client?.avatarUrl ??
+        client?.profileImage ??
+        _currentBooking.additionalDetails?['userImage'] ??
+        _currentBooking.additionalDetails?['userPhoto'] ??
+        _currentBooking.additionalDetails?['user_avatar'] ??
+        _currentBooking.additionalDetails?['avatar'] ??
+        '';
+    final clientImage = (rawClientPhoto != null && rawClientPhoto.toString().trim().isNotEmpty)
+        ? rawClientPhoto.toString().trim()
+        : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(clientName)}&background=D64573&color=fff&bold=true';
     final clientPhone = client?.phone ?? _currentBooking.additionalDetails?['clientPhone']?.toString() ?? '-';
 
     final totalVal = _currentBooking.totalPrice > 0 
@@ -251,9 +279,9 @@ class _DriverWaitingDpScreenState extends State<DriverWaitingDpScreen> with Sing
     final serviceType = _currentBooking.additionalDetails?['serviceType']?.toString().toUpperCase() ?? 'PENDAMPINGAN';
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D0C11),
+      backgroundColor: AppTheme.background,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0D0C11),
+        backgroundColor: AppTheme.surface,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textHighContrast, size: 20),
@@ -279,9 +307,9 @@ class _DriverWaitingDpScreenState extends State<DriverWaitingDpScreen> with Sing
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.amber.withOpacity(0.12),
+                  color: AppTheme.primaryPink.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.amber.withOpacity(0.4)),
+                  border: Border.all(color: AppTheme.primaryPink.withOpacity(0.4)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -290,18 +318,21 @@ class _DriverWaitingDpScreenState extends State<DriverWaitingDpScreen> with Sing
                       width: 8,
                       height: 8,
                       decoration: const BoxDecoration(
-                        color: Colors.amber,
+                        color: AppTheme.primaryPink,
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      "STATUS: ORDER DITERIMA • MENUNGGU DP",
-                      style: GoogleFonts.plusJakartaSans(
-                        color: Colors.amber,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
+                    Flexible(
+                      child: Text(
+                        "STATUS: ORDER DITERIMA • MENUNGGU DP",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: AppTheme.primaryPink,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -423,11 +454,8 @@ class _DriverWaitingDpScreenState extends State<DriverWaitingDpScreen> with Sing
                       children: [
                         CircleAvatar(
                           radius: 22,
-                          backgroundColor: AppTheme.primaryPink.withOpacity(0.2),
-                          backgroundImage: clientImage.isNotEmpty ? NetworkImage(clientImage) : null,
-                          child: clientImage.isEmpty
-                              ? const Icon(Icons.person, color: AppTheme.primaryPink)
-                              : null,
+                          backgroundColor: AppTheme.fuchsiaLight,
+                          backgroundImage: NetworkImage(clientImage),
                         ),
                         const SizedBox(width: 12),
                         Expanded(

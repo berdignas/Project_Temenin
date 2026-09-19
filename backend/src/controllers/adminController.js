@@ -628,46 +628,6 @@ exports.getTransactions = async (req, res) => {
       };
     });
 
-    // Also include any active bookings that don't have a transaction record yet as virtual DP entries
-    if (!type || type === 'DP') {
-      const { data: allBookings } = await supabaseAdmin
-        .from('bookings')
-        .select('*, users(full_name), drivers(users(full_name))')
-        .order('created_at', { ascending: false });
-
-      (allBookings || []).forEach(b => {
-        const hasTrx = formattedList.some(t => t.booking_id === b.id && t.type === 'DP');
-        if (!hasTrx) {
-          const totPrice = parseFloat(b.total_price || 0);
-          const dpAmt = b.dp_amount ? parseFloat(b.dp_amount) : Math.round(totPrice * 0.3);
-          const isOngoing = b.status === 'ongoing' || b.status === 'completed';
-          const isCancelled = b.status === 'cancelled';
-
-          formattedList.push({
-            id: 'trx-dp-' + b.id,
-            booking_id: b.id,
-            user_name: b.users?.full_name || 'Client Pemesan',
-            user_role: 'CLIENT',
-            driver_name: b.drivers?.users?.full_name || 'Driver / Mitra',
-            type: 'DP',
-            amount: dpAmt,
-            unique_code: 247,
-            total_payable: dpAmt + 247,
-            status: isOngoing ? 'HELD_IN_ESCROW' : isCancelled ? 'FORFEITED' : 'PENDING',
-            booking_status: isCancelled ? 'CANCELLED_BY_CLIENT' : b.status,
-            bank_name: 'Bank BCA',
-            account_number: '8820491823',
-            account_name: b.users?.full_name || 'Client Pemesan',
-            proof_url: 'https://images.unsplash.com/photo-1554224155-8d04cb21cd6c?q=80&w=600&auto=format&fit=crop',
-            ocr_match_score: 98,
-            sla_deadline: new Date(Date.now() + 18 * 3600 * 1000).toISOString(),
-            created_at: b.created_at || new Date().toISOString(),
-            processed_at: null
-          });
-        }
-      });
-    }
-
     if (search) {
       const q = search.toLowerCase();
       formattedList = formattedList.filter(t => 
@@ -694,23 +654,20 @@ exports.approveTransaction = async (req, res) => {
     const { id } = req.params;
     const { notes } = req.body;
 
-    let trx = null;
-    if (!id.startsWith('trx-dp-')) {
-      const { data, error } = await supabaseAdmin
-        .from('payment_transactions')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (error || !data) {
-        return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
-      }
-      trx = data;
+    const { data: trx, error } = await supabaseAdmin
+      .from('payment_transactions')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !trx) {
+      return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
     }
 
     // =========================================================================
     // 🛡️ PENANGANAN KHUSUS TRANSAKSI TIPE TOPUP
     // =========================================================================
-    if (trx && trx.type === 'TOPUP') {
+    if (trx.type === 'TOPUP') {
       if (trx.status !== 'PENDING') {
         return res.status(400).json({ 
           success: false, 
@@ -797,7 +754,7 @@ exports.approveTransaction = async (req, res) => {
     // =========================================================================
     // PENANGANAN TRANSAKSI PEMBAYARAN DP PESANAN (BOOKINGS)
     // =========================================================================
-    const bookingId = trx ? trx.booking_id : id.replace('trx-dp-', '');
+    const bookingId = trx.booking_id;
     if (!bookingId) {
       return res.status(400).json({ success: false, message: 'booking_id tidak valid untuk transaksi pembayaran pemesanan' });
     }
@@ -812,7 +769,7 @@ exports.approveTransaction = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
     }
 
-    const dpAmount = trx ? parseFloat(trx.amount) : (booking.dp_amount ? parseFloat(booking.dp_amount) : Math.round(parseFloat(booking.total_price || 0) * 0.3));
+    const dpAmount = parseFloat(trx.amount || 0);
 
     // 1. Hold DP payment in Escrow Vault
     const updatedBooking = await escrowService.holdPaymentInEscrow({
@@ -866,20 +823,17 @@ exports.settlePelunasanSplit = async (req, res) => {
     const { id } = req.params;
     const { notes } = req.body;
 
-    let trx = null;
-    if (!id.startsWith('trx-pel-')) {
-      const { data, error } = await supabaseAdmin
-        .from('payment_transactions')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (error || !data) {
-        return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
-      }
-      trx = data;
+    const { data: trx, error } = await supabaseAdmin
+      .from('payment_transactions')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !trx) {
+      return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' });
     }
 
-    const bookingId = trx ? trx.booking_id : id.replace('trx-pel-', '');
+    const bookingId = trx.booking_id;
     const { data: booking, error: bErr } = await supabaseAdmin
       .from('bookings')
       .select('*')
@@ -890,8 +844,7 @@ exports.settlePelunasanSplit = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Pesanan tidak ditemukan' });
     }
 
-    const totPrice = parseFloat(booking.total_price || 0);
-    const pelunasanAmount = trx ? parseFloat(trx.amount) : Math.max(0, totPrice - (booking.additional_details?.dp_amount || Math.round(totPrice * 0.3)));
+    const pelunasanAmount = parseFloat(trx.amount || 0);
 
     // 1. Hold Pelunasan into Escrow
     const updatedBooking = await escrowService.holdPaymentInEscrow({
