@@ -108,6 +108,7 @@ class BookingModel {
                        subStatus == 'arrived' || 
                        subStatus == 'started' || 
                        subStatus == 'ongoing' || 
+                       subStatus == 'completion_requested' || 
                        subStatus == 'completed' || 
                        subStatus == 'paid';
 

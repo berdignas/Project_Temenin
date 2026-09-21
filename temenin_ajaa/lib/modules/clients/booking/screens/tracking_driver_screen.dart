@@ -231,7 +231,6 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       setState(() {
         _bookingDetails = data;
         _simulationState = status;
-        _ensureRealOtpExists();
         if (status == 'pending') {
           _estimatedTime = "Menunggu Driver...";
         } else if (status == 'accepted') {
@@ -243,7 +242,6 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
           _countdownTimer = "00:03:45";
         } else if (status == 'arrived') {
           _estimatedTime = "Driver Telah Tiba!";
-          _ensureRealOtpExists();
         } else if (status == 'started' || status == 'ongoing') {
           final durationHours = int.tryParse(addDetails?['duration']?.toString() ?? widget.bookingData?['duration']?.toString() ?? '3') ?? 3;
           if (_remainingSeconds <= 240) {
@@ -372,6 +370,10 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     if (_isCompletionModalShowing) return;
     _isCompletionModalShowing = true;
 
+    final compPin = _extractCompletionOtp(_bookingDetails) ?? 
+                    _extractCompletionOtp(widget.bookingData) ?? 
+                    _bookingDetails?['completion_otp']?.toString() ?? "••••";
+
     showModalBottomSheet(
       context: context,
       isDismissible: false,
@@ -393,11 +395,11 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                   color: AppTheme.primaryPink.withOpacity(0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.task_alt_rounded, color: AppTheme.primaryPink, size: 40),
+                child: const Icon(Icons.verified_user_rounded, color: AppTheme.primaryPink, size: 40),
               ),
               const SizedBox(height: 16),
               Text(
-                "Konfirmasi Penyelesaian Sesi",
+                "Driver Meminta Selesai Sesi",
                 style: GoogleFonts.plusJakartaSans(
                   color: AppTheme.textHighContrast,
                   fontSize: 18,
@@ -406,11 +408,70 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                "Driver meminta konfirmasi bahwa pendampingan telah selesai. Apakah sesi Anda sudah berakhir?",
+                "Driver meminta konfirmasi untuk menyelesaikan sesi pendampingan. Berikan PIN Penyelesaian di bawah ini kepada driver Anda jika Anda setuju:",
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.fuchsiaLight,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.primaryPink.withOpacity(0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "PIN PENYELESAIAN (TOKEN 3)",
+                          style: GoogleFonts.inter(
+                            color: AppTheme.primaryPink,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          compPin,
+                          style: GoogleFonts.shareTechMono(
+                            color: AppTheme.primaryPink,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 6,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 20),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded, color: AppTheme.primaryPink),
+                      tooltip: "Salin PIN",
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: compPin));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("PIN $compPin berhasil disalin!"),
+                            backgroundColor: AppTheme.primaryPink,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                "Driver wajib memasukkan PIN ini di aplikasinya untuk menyelesaikan sesi. Jangan berikan jika sesi Anda belum selesai.",
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: Colors.amber[800], fontSize: 11, fontWeight: FontWeight.w500),
+              ),
+              const SizedBox(height: 20),
               Row(
                 children: [
                   Expanded(
@@ -419,6 +480,14 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                         Navigator.pop(context);
                         _isCompletionModalShowing = false;
                         await _updateClientBookingStatus('ongoing');
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Permintaan penyelesaian ditolak. Sesi tetap berlanjut."),
+                              backgroundColor: Colors.redAccent,
+                            ),
+                          );
+                        }
                       },
                       style: OutlinedButton.styleFrom(
                         side: const BorderSide(color: AppTheme.border),
@@ -431,20 +500,160 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () async {
+                      onPressed: () {
                         Navigator.pop(context);
                         _isCompletionModalShowing = false;
-                        await _updateClientBookingStatus('completed');
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Berikan PIN $compPin kepada driver untuk menyelesaikan pesanan."),
+                            backgroundColor: AppTheme.primaryPink,
+                          ),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.primaryPink,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: Text("Ya, Selesaikan", style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
+                      child: Text("Berikan PIN", style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showClientRequestEarlyEndDialog() {
+    final compPin = _extractCompletionOtp(_bookingDetails) ?? 
+                    _extractCompletionOtp(widget.bookingData) ?? 
+                    _bookingDetails?['completion_otp']?.toString() ?? "••••";
+
+    showModalBottomSheet(
+      context: context,
+      isDismissible: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(24),
+          decoration: const BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withOpacity(0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.timer_off_rounded, color: Colors.amber, size: 40),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                "Akhiri Sesi Lebih Awal",
+                style: GoogleFonts.plusJakartaSans(
+                  color: AppTheme.textHighContrast,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                "Ingin menyelesaikan pendampingan lebih awal? Sesi ini memerlukan persetujuan kedua belah pihak. Berikan PIN Penyelesaian berikut kepada driver Anda:",
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.fuchsiaLight,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.primaryPink.withOpacity(0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "PIN PENYELESAIAN",
+                          style: GoogleFonts.inter(
+                            color: AppTheme.primaryPink,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          compPin,
+                          style: GoogleFonts.shareTechMono(
+                            color: AppTheme.primaryPink,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 6,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 20),
+                    IconButton(
+                      icon: const Icon(Icons.copy_rounded, color: AppTheme.primaryPink),
+                      tooltip: "Salin PIN",
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: compPin));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("PIN $compPin berhasil disalin!"),
+                            backgroundColor: AppTheme.primaryPink,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                "Driver akan memasukkan PIN ini untuk mengakhiri sesi secara aman.",
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    await _updateClientBookingStatus('completion_requested');
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text("Permintaan dikirim ke Driver. Berikan PIN $compPin ke driver Anda."),
+                          backgroundColor: AppTheme.primaryPink,
+                        ),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPink,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text(
+                    "KIRIM PERMINTAAN KE DRIVER",
+                    style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ),
               ),
             ],
           ),
@@ -639,7 +848,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       updatedDetails['service_otp'] = serviceOtp;
       updatedDetails['completion_otp'] = compOtp;
 
-      if (needsUpdate || dbDetails['otp'] == null || dbDetails['security_pin'] == null || dbDetails['service_pin'] == null) {
+      if (needsUpdate) {
         await Supabase.instance.client
             .from('bookings')
             .update({'additional_details': updatedDetails})
@@ -1347,7 +1556,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
             const SizedBox(height: 10),
             _buildDurationBadge(countdownTimer),
           ],
-          if (isArrived || _simulationState == 'arrived' || _simulationState == 'on_the_way' || _simulationState == 'dp_paid') ...[
+          if (isArrived || _simulationState == 'arrived' || _simulationState == 'on_the_way' || _simulationState == 'dp_paid' || _simulationState == 'started' || _simulationState == 'ongoing' || _simulationState == 'completion_requested') ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1365,9 +1574,11 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          isArrived
-                              ? "PIN MEMULAI LAYANAN"
-                              : "PIN KEBERANGKATAN OTW",
+                          (_simulationState == 'started' || _simulationState == 'ongoing' || _simulationState == 'completion_requested')
+                              ? "PIN PENYELESAIAN / AKHIRI SESI"
+                              : (isArrived
+                                  ? "PIN MEMULAI LAYANAN"
+                                  : "PIN KEBERANGKATAN OTW"),
                           style: GoogleFonts.inter(
                             color: AppTheme.primaryPink,
                             fontSize: 10,
@@ -1377,9 +1588,11 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          isArrived
-                              ? "Berikan PIN ini ke driver Anda saat bertemu untuk memulai sesi layanan:"
-                              : "PIN konfirmasi keberangkatan driver menuju lokasi Anda:",
+                          (_simulationState == 'started' || _simulationState == 'ongoing' || _simulationState == 'completion_requested')
+                              ? "Berikan PIN ini ke driver Anda untuk menyelesaikan sesi pendampingan (termasuk selesai lebih awal):"
+                              : (isArrived
+                                  ? "Berikan PIN ini ke driver Anda saat bertemu untuk memulai sesi layanan:"
+                                  : "PIN konfirmasi keberangkatan driver menuju lokasi Anda:"),
                           style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11),
                         ),
                       ],
@@ -1463,7 +1676,33 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                 ),
               ),
             ],
-          )
+          ),
+          if (_simulationState == 'started' || _simulationState == 'ongoing' || _simulationState == 'completion_requested') ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 46,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.timer_off_outlined, color: Colors.redAccent, size: 18),
+                label: Text(
+                  "Akhiri Sesi Lebih Awal",
+                  style: GoogleFonts.inter(
+                    color: Colors.redAccent,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: Colors.redAccent.withOpacity(0.5)),
+                  backgroundColor: Colors.redAccent.withOpacity(0.06),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () {
+                  _showClientRequestEarlyEndDialog();
+                },
+              ),
+            ),
+          ],
         ],
       ),
     );
