@@ -381,12 +381,12 @@ class _BookingOrderTypeScreenState extends State<BookingOrderTypeScreen> {
                   const SizedBox(height: 10),
 
                   // LEGEND BADGES (HIJAU, ORANGE, MERAH)
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
                     children: [
                       _buildLegendBadge(const Color(0xFF10B981), "🟢 Hijau: Bebas"),
-                      const SizedBox(width: 8),
                       _buildLegendBadge(const Color(0xFFF59E0B), "🟠 Orange: Ada Order"),
-                      const SizedBox(width: 8),
                       _buildLegendBadge(const Color(0xFFEF4444), "🔴 Merah: Padat"),
                     ],
                   ),
@@ -609,14 +609,17 @@ class _BookingOrderTypeScreenState extends State<BookingOrderTypeScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.bolt_rounded, size: 18, color: _bookingMode == 'now' ? Colors.white : AppTheme.textMuted),
-                    const SizedBox(width: 6),
-                    Text(
-                      "Pesan Sekarang (OTW)",
-                      style: GoogleFonts.inter(
-                        color: _bookingMode == 'now' ? Colors.white : AppTheme.textMuted,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.bold,
+                    Icon(Icons.bolt_rounded, size: 16, color: _bookingMode == 'now' ? Colors.white : AppTheme.textMuted),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        "Pesan Sekarang",
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          color: _bookingMode == 'now' ? Colors.white : AppTheme.textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -636,14 +639,17 @@ class _BookingOrderTypeScreenState extends State<BookingOrderTypeScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.calendar_month_rounded, size: 18, color: _bookingMode == 'scheduled' ? Colors.white : AppTheme.textMuted),
-                    const SizedBox(width: 6),
-                    Text(
-                      "Booking Jadwal",
-                      style: GoogleFonts.inter(
-                        color: _bookingMode == 'scheduled' ? Colors.white : AppTheme.textMuted,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.bold,
+                    Icon(Icons.calendar_month_rounded, size: 16, color: _bookingMode == 'scheduled' ? Colors.white : AppTheme.textMuted),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        "Booking Jadwal",
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          color: _bookingMode == 'scheduled' ? Colors.white : AppTheme.textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ],
@@ -919,9 +925,12 @@ class _BookingOrderTypeScreenState extends State<BookingOrderTypeScreen> {
                     children: [
                       const Icon(Icons.lock_rounded, color: Color(0xFFEF4444), size: 14),
                       const SizedBox(width: 4),
-                      Text(
-                        "$lockedCount Jam Terkunci",
-                        style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold),
+                      Flexible(
+                        child: Text(
+                          "$lockedCount Jam Terkunci",
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ],
                   ),
@@ -941,9 +950,12 @@ class _BookingOrderTypeScreenState extends State<BookingOrderTypeScreen> {
                     children: [
                       const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF10B981), size: 14),
                       const SizedBox(width: 4),
-                      Text(
-                        "$freeCount Jam Free",
-                        style: GoogleFonts.inter(color: const Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                      Flexible(
+                        child: Text(
+                          "$freeCount Jam Free",
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(color: const Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ],
                   ),
@@ -1011,55 +1023,59 @@ class _BookingOrderTypeScreenState extends State<BookingOrderTypeScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  children: [
-                    Icon(
-                      conflict != null ? Icons.lock_clock_rounded : Icons.access_time_rounded,
-                      color: conflict != null ? const Color(0xFFEF4444) : AppTheme.primaryPink,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "JAM PENJEMPUTAN TERENCANA",
-                          style: GoogleFonts.inter(
-                            color: conflict != null ? const Color(0xFFEF4444) : AppTheme.textMuted,
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        conflict != null ? Icons.lock_clock_rounded : Icons.access_time_rounded,
+                        color: conflict != null ? const Color(0xFFEF4444) : AppTheme.primaryPink,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')} WIB",
+                              "JAM PENJEMPUTAN TERENCANA",
                               style: GoogleFonts.inter(
-                                color: conflict != null ? const Color(0xFFEF4444) : AppTheme.textHighContrast,
-                                fontSize: 14,
+                                color: conflict != null ? const Color(0xFFEF4444) : AppTheme.textMuted,
+                                fontSize: 9.5,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                            if (conflict != null) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFEF4444).withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(6),
+                            const SizedBox(height: 2),
+                            Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 8,
+                              children: [
+                                Text(
+                                  "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')} WIB",
+                                  style: GoogleFonts.inter(
+                                    color: conflict != null ? const Color(0xFFEF4444) : AppTheme.textHighContrast,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
-                                child: Text(
-                                  "TERKUNCI",
-                                  style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 9.5, fontWeight: FontWeight.w800),
-                                ),
-                              ),
-                            ],
+                                if (conflict != null)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFEF4444).withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      "TERKUNCI",
+                                      style: GoogleFonts.inter(color: const Color(0xFFEF4444), fontSize: 9.5, fontWeight: FontWeight.w800),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ],
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
                 const Icon(Icons.arrow_forward_ios_rounded, color: AppTheme.textMuted, size: 14),
               ],

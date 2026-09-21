@@ -13,7 +13,8 @@ import '../../../data/models/booking_model.dart';
 import 'chat_room_screen.dart';
 
 class DriverActiveBookingScreen extends StatefulWidget {
-  const DriverActiveBookingScreen({super.key});
+  final BookingModel? booking;
+  const DriverActiveBookingScreen({super.key, this.booking});
 
   @override
   State<DriverActiveBookingScreen> createState() => _DriverActiveBookingScreenState();
@@ -333,7 +334,23 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
   @override
   Widget build(BuildContext context) {
     final bookingProvider = context.watch<BookingProvider>();
-    final active = bookingProvider.activeBooking;
+    BookingModel? active = bookingProvider.activeBooking;
+
+    if (widget.booking != null) {
+      final targetId = widget.booking!.id;
+      if (bookingProvider.ongoingTrip?.id == targetId) {
+        active = bookingProvider.ongoingTrip;
+      } else {
+        final match = bookingProvider.bookings.where((b) => b.id == targetId).firstOrNull
+                   ?? bookingProvider.completedBookings.where((b) => b.id == targetId).firstOrNull
+                   ?? bookingProvider.upcomingBookings.where((b) => b.id == targetId).firstOrNull;
+        if (match != null) {
+          active = match;
+        } else {
+          active = widget.booking;
+        }
+      }
+    }
 
     if (active != null) {
       _lastBooking = active;
@@ -341,10 +358,10 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
 
     if (active == null) {
       final reviewBooking = bookingProvider.pendingReviewBooking ?? 
-                            (_lastBooking != null && (_lastBooking!.isCompleted || _lastBooking!.isPelunasanPaid) ? _lastBooking : null) ?? 
-                            bookingProvider.lastCompletedBooking;
+                            (_lastBooking != null && _lastBooking!.isPelunasanPaid ? _lastBooking : null) ?? 
+                            (bookingProvider.lastCompletedBooking?.isPelunasanPaid == true ? bookingProvider.lastCompletedBooking : null);
 
-      if (reviewBooking != null) {
+      if (reviewBooking != null && reviewBooking.isPelunasanPaid) {
         return DriverOrderSummaryScreen(booking: reviewBooking);
       }
 
@@ -918,7 +935,15 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
             ),
             child: CircleAvatar(
               radius: 28,
-              backgroundImage: NetworkImage(avatar),
+              backgroundColor: AppTheme.cardDeep,
+              backgroundImage: (avatar.isNotEmpty && (avatar.startsWith('http://') || avatar.startsWith('https://')))
+                  ? NetworkImage(avatar)
+                  : (avatar.isNotEmpty && avatar.startsWith('/')
+                      ? NetworkImage('http://localhost:3002$avatar')
+                      : null),
+              child: (avatar.isEmpty || (!avatar.startsWith('http') && !avatar.startsWith('/')))
+                  ? const Icon(Icons.person, color: Colors.white70, size: 28)
+                  : null,
             ),
           ),
           const SizedBox(width: 15),
@@ -1829,6 +1854,31 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                 ],
               ),
             ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  final target = active is BookingModel ? active : _lastBooking;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DriverOrderSummaryScreen(booking: target),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.receipt_long_rounded, color: Colors.white70, size: 18),
+                label: Text(
+                  "Lihat Rincian Sesi Selesai",
+                  style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppTheme.border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
           ],
         ],
       ),
@@ -2286,6 +2336,7 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
 
                           if (validCompPins.contains(entered)) {
                             Navigator.pop(dialogContext);
+                            final currentActive = provider.activeBooking ?? widget.booking;
                             final success = await provider.updateBookingProgress(
                               'completed',
                               authProvider: Provider.of<AuthProvider>(context, listen: false),
@@ -2297,12 +2348,16 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                                   backgroundColor: Colors.green,
                                 ),
                               );
-                              Navigator.pushReplacement(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => DriverOrderSummaryScreen(booking: provider.activeBooking),
-                                ),
-                              );
+                              final updatedTarget = provider.activeBooking ?? currentActive;
+                              final isPaid = updatedTarget?.isPelunasanPaid == true;
+                              if (isPaid) {
+                                Navigator.pushReplacement(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => DriverOrderSummaryScreen(booking: updatedTarget),
+                                  ),
+                                );
+                              }
                             }
                           } else {
                             setDialogState(() {

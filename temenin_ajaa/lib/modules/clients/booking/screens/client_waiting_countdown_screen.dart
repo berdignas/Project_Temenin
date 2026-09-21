@@ -904,21 +904,30 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                     ),
                     const SizedBox(height: 16),
                     if (!_isCountdownFinished)
-                      OutlinedButton.icon(
+                      OutlinedButton(
                         onPressed: _showEarlyEndPinDialog,
-                        icon: const Icon(Icons.flash_on_rounded, color: Colors.amber, size: 16),
-                        label: Text(
-                          "⚡ Minta Driver Berangkat Sekarang (OTW)",
-                          style: GoogleFonts.plusJakartaSans(
-                            color: Colors.amber,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(color: Colors.amber.withOpacity(0.5)),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.flash_on_rounded, color: Colors.amber, size: 16),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                "Minta Driver Berangkat (OTW)",
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: Colors.amber,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                   ],
@@ -1090,10 +1099,17 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                         CircleAvatar(
                           radius: 24,
                           backgroundColor: AppTheme.cardDeep,
-                          backgroundImage: driverAvatar.isNotEmpty ? NetworkImage(driverAvatar) : null,
-                          child: driverAvatar.isEmpty
-                              ? const Icon(Icons.person, color: AppTheme.textMuted, size: 24)
-                              : null,
+                          child: ClipOval(
+                            child: driverAvatar.isNotEmpty
+                                ? Image.network(
+                                    driverAvatar.startsWith('/uploads') ? 'http://localhost:3002$driverAvatar' : driverAvatar,
+                                    width: 48,
+                                    height: 48,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, color: AppTheme.textMuted, size: 24),
+                                  )
+                                : const Icon(Icons.person, color: AppTheme.textMuted, size: 24),
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(

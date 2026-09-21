@@ -1,5 +1,6 @@
 // lib/core/services/location_service.dart
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -169,10 +170,14 @@ class LocationService {
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-              await Geolocator.openLocationSettings();
+              if (!kIsWeb) {
+                try {
+                  await Geolocator.openLocationSettings();
+                } catch (_) {}
+              }
             },
             child: Text(
-              'Nyalakan GPS',
+              kIsWeb ? 'Mengerti' : 'Nyalakan GPS',
               style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
             ),
           ),
@@ -239,10 +244,20 @@ class LocationService {
             ),
             onPressed: () async {
               Navigator.pop(ctx);
-              await Geolocator.openAppSettings();
+              if (!kIsWeb) {
+                try {
+                  await Geolocator.openAppSettings();
+                } catch (_) {}
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Silakan izinkan akses lokasi pada pengaturan izin browser Anda.'),
+                  ),
+                );
+              }
             },
             child: Text(
-              'Buka Pengaturan HP',
+              kIsWeb ? 'Mengerti' : 'Buka Pengaturan HP',
               style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
             ),
           ),

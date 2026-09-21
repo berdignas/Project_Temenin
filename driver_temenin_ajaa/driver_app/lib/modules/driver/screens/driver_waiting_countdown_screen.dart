@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/notification_sound_service.dart';
 import '../../../core/utils/booking_date_helper.dart';
@@ -14,7 +15,6 @@ import '../../../providers/booking_provider.dart';
 import 'active_booking_screen.dart';
 import 'chat_room_screen.dart';
 import 'driver_waiting_dp_screen.dart';
-
 import 'home_screen.dart';
 
 class DriverWaitingCountdownScreen extends StatefulWidget {
@@ -92,7 +92,11 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
     }
 
     if (_isCountdownFinished || _remainingSeconds <= 0) {
-      _handleCountdownFinished();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _handleCountdownFinished();
+        }
+      });
       return;
     }
 
@@ -118,6 +122,7 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
   }
 
   void _handleCountdownFinished() {
+    if (!mounted) return;
     setState(() {
       _remainingSeconds = 0;
       _isCountdownFinished = true;
@@ -129,11 +134,11 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
       debugPrint("Error playing notification sound: $e");
     }
 
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surface,
         shape: RoundedRectangleBorder(
@@ -189,6 +194,7 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
         ],
       ),
     );
+  });
   }
 
   Timer? _pollingTimer;
@@ -347,6 +353,11 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
         'pin',
         'start_otp',
         'startOtp',
+        'service_pin',
+        'servicePin',
+        'service_otp',
+        'serviceOtp',
+        'start_service_pin',
         'completion_otp',
         'completionOtp',
         'end_otp',
@@ -731,7 +742,7 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (context) => const DriverActiveBookingScreen()),
+      MaterialPageRoute(builder: (context) => DriverActiveBookingScreen(booking: _currentBooking)),
     );
   }
 
@@ -755,9 +766,12 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
         _currentBooking.additionalDetails?['avatar_url'] ??
         _currentBooking.additionalDetails?['avatar'] ??
         '';
-    final clientAvatar = (rawAvatar != null && rawAvatar.toString().trim().isNotEmpty)
+    String clientAvatar = (rawAvatar != null && rawAvatar.toString().trim().isNotEmpty)
         ? rawAvatar.toString().trim()
         : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(clientName)}&background=D64573&color=fff&bold=true';
+    if (clientAvatar.startsWith('/uploads')) {
+      clientAvatar = '${ApiConstants.baseUrl}$clientAvatar';
+    }
     final dt = _currentBooking.bookingDate ?? _currentBooking.createdAt;
     final List<String> monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
     final String bookingDateStr = "${dt.day} ${monthNames[dt.month]} ${dt.year}";
@@ -916,12 +930,11 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            _isCountdownFinished ? "WAKTU PERSIAPAN SELESAI" : "HITUNG MUNDUR KEBERANGKATAN",
+                            _isCountdownFinished ? "Masa Tunggu Selesai" : "Persiapan Keberangkatan",
                             style: GoogleFonts.inter(
                               color: _isCountdownFinished ? Colors.green : AppTheme.primaryPink,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.5,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
                             ),
                           ),
                         ],
@@ -943,8 +956,8 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
                     const SizedBox(height: 8),
                     Text(
                       _isCountdownFinished
-                          ? "Waktu menunggu selesai. Silakan tekan tombol OTW di bawah!"
-                          : "Jadwal Penjemputan: ${BookingDateHelper.getScheduleDisplay(_currentBooking.additionalDetails ?? {'date': _currentBooking.bookingDate?.toIso8601String()})}",
+                          ? "Waktu tunggu selesai! Silakan mulai perjalanan (OTW)."
+                          : "Jadwal Penjemputan: $bookingDateStr • $bookingTimeStr",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.inter(
                         color: _isCountdownFinished ? Colors.green : AppTheme.primaryPink,
@@ -954,21 +967,30 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
                     ),
                     const SizedBox(height: 16),
                     if (!_isCountdownFinished)
-                      OutlinedButton.icon(
+                      OutlinedButton(
                         onPressed: _showEnterClientPinDialog,
-                        icon: const Icon(Icons.password_rounded, color: Colors.amber, size: 16),
-                        label: Text(
-                          "⚡ Mulai Lebih Awal (Masukkan PIN Klien)",
-                          style: GoogleFonts.plusJakartaSans(
-                            color: Colors.amber,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
                         style: OutlinedButton.styleFrom(
                           side: BorderSide(color: Colors.amber.withOpacity(0.6)),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.password_rounded, color: Colors.amber, size: 16),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                "Mulai Awal (Masukkan PIN)",
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: Colors.amber,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                   ],
@@ -1053,10 +1075,17 @@ class _DriverWaitingCountdownScreenState extends State<DriverWaitingCountdownScr
                         CircleAvatar(
                           radius: 24,
                           backgroundColor: AppTheme.cardDeep,
-                          backgroundImage: clientAvatar.isNotEmpty ? NetworkImage(clientAvatar) : null,
-                          child: clientAvatar.isEmpty
-                              ? const Icon(Icons.person, color: AppTheme.textMuted, size: 24)
-                              : null,
+                          child: ClipOval(
+                            child: clientAvatar.isNotEmpty
+                                ? Image.network(
+                                    clientAvatar,
+                                    width: 48,
+                                    height: 48,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, color: AppTheme.textMuted, size: 24),
+                                  )
+                                : const Icon(Icons.person, color: AppTheme.textMuted, size: 24),
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(

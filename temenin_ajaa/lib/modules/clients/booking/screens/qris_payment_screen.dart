@@ -134,7 +134,7 @@ class _QrisPaymentScreenState extends State<QrisPaymentScreen> {
 
     final isPaid = isDp
         ? (addDetails['dp_paid'] == true || status == 'ongoing' || addDetails['sub_status'] == 'dp_paid')
-        : (addDetails['pelunasan_paid'] == true || addDetails['final_paid'] == true || status == 'completed');
+        : (addDetails['pelunasan_paid'] == true || addDetails['final_paid'] == true || addDetails['sub_status'] == 'paid' || status == 'paid' || addDetails['payment_status'] == 'LUNAS');
 
     if (isPaid && !_isPaymentConfirmed) {
       _isPaymentConfirmed = true;

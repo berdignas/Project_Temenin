@@ -12,6 +12,7 @@ const {
   createBooking,
   updateBooking,
   deleteBooking,
+  bulkDeleteBookings,
   updateBookingStatus,
   topUpUserBalance,
   getTransactions,
@@ -53,6 +54,7 @@ router.get('/bookings', getBookings);
 router.post('/bookings', createBooking);
 router.put('/bookings/:id', updateBooking);
 router.delete('/bookings/:id', deleteBooking);
+router.post('/bookings/bulk-delete', bulkDeleteBookings);
 router.put('/bookings/:id/status', updateBookingStatus);
 
 // Finance & Transaction Management CMS

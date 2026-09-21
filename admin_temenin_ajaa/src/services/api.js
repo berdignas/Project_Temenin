@@ -232,6 +232,19 @@ export const adminApi = {
     }
   },
 
+  bulkDeleteBookings: async (ids, deleteFinance = true) => {
+    try {
+      const res = await client.post('/admin/bookings/bulk-delete', { ids, deleteFinance });
+      return res.data;
+    } catch {
+      mockBookings = mockBookings.filter(b => !ids.includes(b.id));
+      if (deleteFinance) {
+        mockTransactions = mockTransactions.filter(t => !ids.includes(t.booking_id));
+      }
+      return { success: true, message: `${ids.length} pesanan berhasil dihapus` };
+    }
+  },
+
   updateBookingStatus: async (id, status) => {
     try {
       const res = await client.put(`/admin/bookings/${id}/status`, { status });

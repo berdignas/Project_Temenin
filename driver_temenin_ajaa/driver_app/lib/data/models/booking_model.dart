@@ -197,20 +197,23 @@ class BookingModel {
     );
   }
 
+  bool get isPelunasanPaid {
+    final sub = additionalDetails?['sub_status']?.toString();
+    return additionalDetails?['pelunasan_paid'] == true ||
+           additionalDetails?['final_paid'] == true ||
+           sub == 'paid' ||
+           sub == 'closed' ||
+           additionalDetails?['payment_status'] == 'LUNAS' ||
+           status == 'paid';
+  }
+
   bool get isCompleted =>
       status == 'completed' ||
       status == 'paid' ||
       status == 'closed' ||
-      additionalDetails?['pelunasan_paid'] == true ||
+      additionalDetails?['sub_status'] == 'completed' ||
       additionalDetails?['sub_status'] == 'paid' ||
       additionalDetails?['sub_status'] == 'closed';
-
-  bool get isPelunasanPaid =>
-      additionalDetails?['pelunasan_paid'] == true ||
-      additionalDetails?['final_paid'] == true ||
-      additionalDetails?['sub_status'] == 'paid' ||
-      additionalDetails?['payment_status'] == 'LUNAS' ||
-      status == 'paid';
 
   bool get isCancelled =>
       status == 'cancelled' ||
@@ -223,9 +226,11 @@ class BookingModel {
            sub == 'arrived' ||
            sub == 'started' ||
            sub == 'ongoing' ||
+           sub == 'completion_requested' ||
            status == 'on_the_way' ||
            status == 'arrived' ||
-           status == 'started';
+           status == 'started' ||
+           status == 'completion_requested';
   }
 
   bool get isUpcoming =>

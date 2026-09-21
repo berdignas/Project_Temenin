@@ -398,6 +398,60 @@ exports.deleteBooking = async (req, res) => {
   }
 };
 
+exports.bulkDeleteBookings = async (req, res) => {
+  try {
+    const { ids, deleteFinance } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'Daftar ID pesanan tidak boleh kosong' });
+    }
+
+    const shouldDeleteFinance = deleteFinance !== false;
+
+    // 1. Unlock driver schedules for all bookings
+    for (const id of ids) {
+      try {
+        await unlockDriverSchedule(id);
+      } catch (_) {}
+    }
+
+    // 2. Delete related payment transactions if requested
+    if (shouldDeleteFinance) {
+      const { error: trxErr } = await supabaseAdmin
+        .from('payment_transactions')
+        .delete()
+        .in('booking_id', ids);
+
+      if (trxErr) {
+        console.warn('Warning deleting payment transactions in bulk:', trxErr.message);
+      }
+    }
+
+    // 3. Delete related booking messages
+    try {
+      await supabaseAdmin
+        .from('booking_messages')
+        .delete()
+        .in('booking_id', ids);
+    } catch (_) {}
+
+    // 4. Delete bookings
+    const { error } = await supabaseAdmin
+      .from('bookings')
+      .delete()
+      .in('id', ids);
+
+    if (error) throw error;
+
+    res.status(200).json({
+      success: true,
+      message: `${ids.length} pesanan berhasil dihapus permanen.`
+    });
+  } catch (error) {
+    console.error('Error bulk deleting bookings:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 exports.updateBookingStatus = async (req, res) => {
   try {
     const { id } = req.params;

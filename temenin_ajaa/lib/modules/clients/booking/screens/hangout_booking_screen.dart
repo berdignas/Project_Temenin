@@ -1808,7 +1808,7 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 10,
       crossAxisSpacing: 10,
-      childAspectRatio: 2.8,
+      childAspectRatio: 2.3,
       children: _durationPrices.entries.map((entry) {
         final dur = entry.key;
         final price = entry.value;
@@ -1818,7 +1818,7 @@ class _HangoutBookingScreenState extends State<HangoutBookingScreen> {
           onTap: () => setState(() => _selectedDuration = dur),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: isSelected ? AppTheme.fuchsiaLight : AppTheme.surface,
               borderRadius: BorderRadius.circular(16),

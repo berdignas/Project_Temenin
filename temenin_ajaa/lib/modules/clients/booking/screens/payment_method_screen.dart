@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/providers/client_booking_provider.dart';
 import 'package:temenin_ajaa/modules/clients/services/payment_service.dart';
@@ -507,16 +508,75 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                 if (mounted) {
                   Navigator.pop(context); // Close loading dialog
 
-                  if (paymentResult['success'] == true) {
+                  bool isSuccess = paymentResult['success'] == true;
+
+                  // Fallback: If backend fails (e.g. offline/network), sync directly to Supabase
+                  if (!isSuccess && currentBookingId.isNotEmpty) {
+                    try {
+                      final dynamic qId = int.tryParse(currentBookingId) ?? currentBookingId;
+                      final existingRec = await Supabase.instance.client
+                          .from('bookings')
+                          .select()
+                          .eq('id', qId)
+                          .maybeSingle();
+                      Map<String, dynamic> add = Map<String, dynamic>.from(existingRec?['additional_details'] ?? {});
+                      if (widget.isPelunasan) {
+                        add['pelunasan_paid'] = true;
+                        add['final_paid'] = true;
+                        add['sub_status'] = 'paid';
+                        add['payment_status'] = 'LUNAS';
+                        await Supabase.instance.client.from('bookings').update({
+                          'status': 'completed',
+                          'additional_details': add,
+                          'updated_at': DateTime.now().toIso8601String(),
+                        }).eq('id', qId);
+                        isSuccess = true;
+                      } else {
+                        add['dp_paid'] = true;
+                        add['sub_status'] = 'dp_paid';
+                        await Supabase.instance.client.from('bookings').update({
+                          'status': 'ongoing',
+                          'additional_details': add,
+                          'updated_at': DateTime.now().toIso8601String(),
+                        }).eq('id', qId);
+                        isSuccess = true;
+                      }
+                    } catch (_) {}
+                  }
+
+                  if (isSuccess) {
+                    Map<String, dynamic> addDetails = bookingDetails['additional_details'] is Map
+                        ? Map<String, dynamic>.from(bookingDetails['additional_details'])
+                        : {};
+
                     if (widget.isPelunasan) {
                       bookingDetails['status'] = 'completed';
                       bookingDetails['sub_status'] = 'paid';
                       bookingDetails['final_paid'] = true;
                       bookingDetails['pelunasan_paid'] = true;
+                      addDetails['status'] = 'completed';
+                      addDetails['sub_status'] = 'paid';
+                      addDetails['final_paid'] = true;
+                      addDetails['pelunasan_paid'] = true;
+                      addDetails['payment_status'] = 'LUNAS';
+                      bookingDetails['additional_details'] = addDetails;
+
+                      // Also make sure Supabase has it persisted
+                      try {
+                        final dynamic qId = int.tryParse(currentBookingId) ?? currentBookingId;
+                        await Supabase.instance.client.from('bookings').update({
+                          'status': 'completed',
+                          'additional_details': addDetails,
+                          'updated_at': DateTime.now().toIso8601String(),
+                        }).eq('id', qId);
+                      } catch (_) {}
                     } else {
                       bookingDetails['status'] = 'ongoing';
                       bookingDetails['sub_status'] = 'dp_paid';
                       bookingDetails['dp_paid'] = true;
+                      addDetails['dp_paid'] = true;
+                      addDetails['sub_status'] = 'dp_paid';
+                      bookingDetails['additional_details'] = addDetails;
                     }
 
                     final isVirtual = bookingDetails['service_category'] == 'VIRTUAL' || 

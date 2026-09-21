@@ -15,7 +15,20 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'payment_method_screen.dart';
 import '../../screens/home_loggedin_screen.dart';
 import '../../../../providers/client_booking_provider.dart';
+import 'package:temenin_ajaa/core/constants/api_constants.dart';
 import '../widgets/live_driver_tracking_map.dart';
+
+ImageProvider? _safeImageProvider(String? url) {
+  if (url == null || url.trim().isEmpty) return null;
+  String clean = url.trim();
+  if (clean.startsWith('/')) {
+    clean = '${ApiConstants.baseUrl}$clean';
+  }
+  if (clean.startsWith('http://') || clean.startsWith('https://')) {
+    return NetworkImage(clean);
+  }
+  return null;
+}
 
 class TrackingDriverScreen extends StatefulWidget {
   final Map<String, dynamic>? bookingData;
@@ -60,8 +73,10 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   bool _isWaitingForDriverApproval = false;
   String? _currentBookingId;
   Timer? _pollingTimer;
+  Timer? _countdownTimerInstance;
   bool _isCompletionModalShowing = false;
   bool _isPelunasanModalShowing = false;
+  bool _isNavigatingToPayment = false;
   bool _isEnsuringOtp = false;
   Map<String, dynamic>? _fetchedDriverProfile;
 
@@ -94,12 +109,33 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
             : 'dp_paid';
       }
     }
-    _simulationState = initialStatus;
+    final isPelunasanPaid = addDetails?['pelunasan_paid'] == true || 
+                           addDetails?['final_paid'] == true || 
+                           addDetails?['payment_status'] == 'LUNAS' ||
+                           subStatus == 'paid' || 
+                           initialStatus == 'paid' ||
+                           initialStatus == 'review' ||
+                           initDetails?['pelunasan_paid'] == true ||
+                           initDetails?['final_paid'] == true ||
+                           initDetails?['payment_status'] == 'LUNAS';
+    if (isPelunasanPaid) {
+      _simulationState = 'review';
+    } else {
+      _simulationState = initialStatus;
+    }
 
     _startTimer();
     _subscribeToBookingChanges();
     _listenToActiveDrivers();
     _ensureRealOtpExists();
+
+    if (_simulationState == 'completed' && !isPelunasanPaid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_isNavigatingToPayment && !_isPelunasanModalShowing) {
+          _showPelunasanModal();
+        }
+      });
+    }
     
     // Calculate overtime cost based on driver class
     final driverClass = widget.bookingData?['driverClass'] ?? 'Gold';
@@ -195,6 +231,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     _realtimeSubscription?.cancel();
     _driversSubscription?.cancel();
     _pollingTimer?.cancel();
+    _countdownTimerInstance?.cancel();
     _reviewController.dispose();
     super.dispose();
   }
@@ -252,19 +289,31 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
           int seconds = _remainingSeconds % 60;
           _countdownTimer = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
           _estimatedTime = "Sesi Berjalan: $_countdownTimer";
+          _startTimer();
         } else if (status == 'completion_requested') {
           _estimatedTime = "Menunggu Konfirmasi Anda...";
           _showClientCompletionConfirmationDialog();
         } else if (status == 'completed') {
-          _estimatedTime = "Layanan Selesai";
-          final totalEstimasi = widget.bookingData?['totalPayment'] ?? (data['total_price'] as num?)?.toInt() ?? 130000;
-          final dpPaid = widget.bookingData?['dp'] ?? (totalEstimasi * 0.5).toInt();
-          final otHours = int.tryParse(addDetails?['overtime_hours']?.toString() ?? addDetails?['overtimeHours']?.toString() ?? '0') ?? 0;
-          _overtimeHours = otHours;
-          _finalDueAmount = (totalEstimasi - dpPaid) + (_overtimeHours * _overtimeCost);
-          _showPelunasanModal();
-        } else if (status == 'paid') {
-          _simulationState = 'paid';
+          final isAlreadyPaid = addDetails?['pelunasan_paid'] == true || 
+                                addDetails?['final_paid'] == true || 
+                                addDetails?['payment_status'] == 'LUNAS' ||
+                                subStatus == 'paid';
+          if (isAlreadyPaid) {
+            _simulationState = 'review';
+            _pollingTimer?.cancel();
+          } else {
+            _estimatedTime = "Layanan Selesai";
+            final totalEstimasi = widget.bookingData?['totalPayment'] ?? (data['total_price'] as num?)?.toInt() ?? 130000;
+            final dpPaid = widget.bookingData?['dp'] ?? (totalEstimasi * 0.5).toInt();
+            final otHours = int.tryParse(addDetails?['overtime_hours']?.toString() ?? addDetails?['overtimeHours']?.toString() ?? '0') ?? 0;
+            _overtimeHours = otHours;
+            _finalDueAmount = (totalEstimasi - dpPaid) + (_overtimeHours * _overtimeCost);
+            if (!_isNavigatingToPayment && !_isPelunasanModalShowing) {
+              _showPelunasanModal();
+            }
+          }
+        } else if (status == 'paid' || addDetails?['pelunasan_paid'] == true || addDetails?['final_paid'] == true || addDetails?['payment_status'] == 'LUNAS') {
+          _simulationState = 'review';
           _pollingTimer?.cancel();
         } else if (status == 'cancelled') {
           try {
@@ -333,6 +382,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                 height: 48,
                 child: ElevatedButton(
                   onPressed: () {
+                    _isNavigatingToPayment = true;
                     Navigator.pop(context);
                     _isPelunasanModalShowing = false;
                     Navigator.push(
@@ -344,7 +394,9 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                           isPelunasan: true,
                         ),
                       ),
-                    );
+                    ).then((_) {
+                      _isNavigatingToPayment = false;
+                    });
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primaryPink,
@@ -936,8 +988,12 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   }
   
   void _startTimer() {
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
+    _countdownTimerInstance?.cancel();
+    _countdownTimerInstance = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
       if (_remainingSeconds > 0 && _simulationState == 'on_the_way') {
         setState(() {
           _remainingSeconds--;
@@ -955,8 +1011,6 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
           int minutes = (_remainingSeconds % 3600) ~/ 60;
           int seconds = _remainingSeconds % 60;
           _countdownTimer = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
-          
-          _startTimer();
         });
       } else if (_simulationState == 'started' || _simulationState == 'ongoing') {
         setState(() {
@@ -968,9 +1022,9 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
           int seconds = _remainingSeconds % 60;
           _countdownTimer = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
           _estimatedTime = "Sesi Berjalan: $_countdownTimer";
-          
-          _startTimer();
         });
+      } else {
+        timer.cancel();
       }
     });
   }
@@ -1005,10 +1059,8 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                   CircleAvatar(
                     radius: 30,
                     backgroundColor: AppTheme.primaryPink.withOpacity(0.2),
-                    backgroundImage: (driver['profile_image'] != null && driver['profile_image'].toString().isNotEmpty)
-                        ? NetworkImage(driver['profile_image'].toString())
-                        : null,
-                    child: (driver['profile_image'] == null || driver['profile_image'].toString().isEmpty)
+                    backgroundImage: _safeImageProvider(driver['profile_image']?.toString()),
+                    child: _safeImageProvider(driver['profile_image']?.toString()) == null
                         ? const Icon(Icons.person, color: AppTheme.primaryPink, size: 30)
                         : null,
                   ),
@@ -1181,7 +1233,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     final isOngoingSession = (_simulationState == 'started' || _simulationState == 'ongoing' || _simulationState == 'completion_requested') ||
                              (addSub == 'started' || addSub == 'ongoing' || addSub == 'completion_requested');
 
-    final isArrivedState = _simulationState == 'arrived' || addSub == 'arrived';
+    final isArrivedState = (_simulationState == 'arrived' || addSub == 'arrived') && !isOngoingSession;
 
     String otpPin = startPin;
     if (isArrivedState) {
@@ -1194,7 +1246,11 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       return "Rp ${amount.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
     }
 
-    if (_simulationState == 'review') {
+    final addDetailsMap = details['additional_details'] is Map
+        ? details['additional_details'] as Map
+        : (details['additionalDetails'] is Map ? details['additionalDetails'] as Map : null);
+
+    if (_simulationState == 'review' || _simulationState == 'paid' || addSub == 'paid' || addDetailsMap?['pelunasan_paid'] == true || addDetailsMap?['final_paid'] == true) {
       return _buildReviewScreen(driverName, driverImage);
     }
 
@@ -1353,6 +1409,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                             serviceType: serviceType,
                             otpPin: otpPin,
                             isArrived: isArrivedState,
+                            isOngoing: isOngoingSession,
                           ),
                           const SizedBox(height: 15),
 
@@ -1497,6 +1554,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     required String serviceType,
     String? otpPin,
     bool isArrived = false,
+    bool isOngoing = false,
   }) {
     String statusLabel = 'ON THE WAY';
     if (_simulationState == 'pending') statusLabel = 'MENUNGGU DRIVER';
@@ -1504,7 +1562,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     if (_simulationState == 'dp_paid') statusLabel = 'DP TERBAYAR - MENUNGGU OTW';
     if (_simulationState == 'on_the_way') statusLabel = 'DRIVER ON THE WAY';
     if (_simulationState == 'arrived' || isArrived) statusLabel = 'DRIVER ARRIVED';
-    if (_simulationState == 'started' || _simulationState == 'ongoing') statusLabel = 'SERVICE ONGOING';
+    if (_simulationState == 'started' || _simulationState == 'ongoing' || isOngoing) statusLabel = 'SERVICE ONGOING';
     if (_simulationState == 'completed') statusLabel = 'SERVICE COMPLETED';
     if (_simulationState == 'paid') statusLabel = 'PAID';
 
@@ -1545,11 +1603,13 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                         ? "DP Terverifikasi, Menunggu Driver OTW"
                         : (_simulationState == 'on_the_way'
                             ? estimatedTime
-                            : ((_simulationState == 'arrived' || isArrived)
-                                ? "Driver Telah Tiba!"
-                                : (_simulationState == 'completed'
-                                    ? "Layanan Selesai"
-                                    : "Selamat Menikmati Perjalanan"))))),
+                            : ((_simulationState == 'started' || _simulationState == 'ongoing' || isOngoing)
+                                ? "Sesi Pendampingan Berlangsung 🚀"
+                                : ((_simulationState == 'arrived' || isArrived)
+                                    ? "Driver Telah Tiba!"
+                                    : (_simulationState == 'completed'
+                                        ? "Layanan Selesai"
+                                        : "Selamat Menikmati Perjalanan")))))),
             style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 20, fontWeight: FontWeight.bold),
           ),
           if (_simulationState == 'on_the_way' || _simulationState == 'started' || _simulationState == 'ongoing') ...[
@@ -1762,10 +1822,13 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
         children: [
           CircleAvatar(
             radius: 25,
-            backgroundImage: NetworkImage(driverImage),
-            child: Container(
-              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppTheme.border)),
-            ),
+            backgroundColor: AppTheme.primaryPink.withOpacity(0.2),
+            backgroundImage: _safeImageProvider(driverImage),
+            child: _safeImageProvider(driverImage) == null
+                ? const Icon(Icons.person, color: Colors.white70, size: 24)
+                : Container(
+                    decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppTheme.border)),
+                  ),
           ),
           const SizedBox(width: 15),
           Expanded(
@@ -1773,10 +1836,18 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(driverName, style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 15)),
+                    Expanded(
+                      child: Text(
+                        driverName,
+                        style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontWeight: FontWeight.bold, fontSize: 15),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         const Icon(Icons.star, color: Color(0xFFF59E0B), size: 14),
                         const SizedBox(width: 4),
@@ -1785,7 +1856,13 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                     ),
                   ],
                 ),
-                Text("$vehicle • $plateNumber", style: const TextStyle(color: AppTheme.textMuted, fontSize: 12)),
+                const SizedBox(height: 4),
+                Text(
+                  "$vehicle • $plateNumber",
+                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -2397,6 +2474,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
               height: 48,
               child: ElevatedButton(
                 onPressed: () {
+                  _isNavigatingToPayment = true;
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -2406,7 +2484,9 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                         isPelunasan: true,
                       ),
                     ),
-                  );
+                  ).then((_) {
+                    _isNavigatingToPayment = false;
+                  });
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primaryPink,
@@ -2527,7 +2607,11 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                 const SizedBox(height: 24),
                 CircleAvatar(
                   radius: 36,
-                  backgroundImage: NetworkImage(image),
+                  backgroundColor: AppTheme.primaryPink.withOpacity(0.2),
+                  backgroundImage: _safeImageProvider(image),
+                  child: _safeImageProvider(image) == null
+                      ? const Icon(Icons.person, color: Colors.white70, size: 36)
+                      : null,
                 ),
                 const SizedBox(height: 10),
                 Text(
@@ -3179,7 +3263,14 @@ class _MockChatScreenState extends State<_MockChatScreen> {
         ),
         title: Row(
           children: [
-            CircleAvatar(radius: 16, backgroundImage: NetworkImage(widget.image)),
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: Colors.white24,
+              backgroundImage: _safeImageProvider(widget.image),
+              child: _safeImageProvider(widget.image) == null
+                  ? const Icon(Icons.person, size: 16, color: Colors.white)
+                  : null,
+            ),
             const SizedBox(width: 10),
             Text(widget.name, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white)),
           ],

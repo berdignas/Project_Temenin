@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   CalendarCheck, MapPin, Clock, DollarSign, RefreshCw, XCircle, CheckCircle, 
-  Plus, Edit2, Trash2, OctagonAlert, ShieldCheck, ArrowRight, CreditCard, Search
+  Plus, Edit2, Trash2, OctagonAlert, ShieldCheck, ArrowRight, CreditCard, Search,
+  CheckSquare
 } from 'lucide-react';
 import { Badge } from '../components/Badge';
 import { Modal } from '../components/Modal';
@@ -14,10 +15,18 @@ export const Bookings = () => {
   const [loading, setLoading] = useState(true);
   const [selectedBooking, setSelectedBooking] = useState(null);
   const [financeModalBooking, setFinanceModalBooking] = useState(null);
+  
+  // Single delete state
   const [deleteModalBooking, setDeleteModalBooking] = useState(null);
-  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const [deleteFinanceChecked, setDeleteFinanceChecked] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Bulk delete state
+  const [selectedBookingIds, setSelectedBookingIds] = useState([]);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+  const [bulkDeleteFinanceChecked, setBulkDeleteFinanceChecked] = useState(true);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [message, setMessage] = useState('');
@@ -100,18 +109,19 @@ export const Bookings = () => {
     setTimeout(() => setMessage(''), 4000);
   };
 
+  // Single Delete Handlers (No more typing 'HAPUS')
   const handleDeleteClick = (booking) => {
     setDeleteModalBooking(booking);
-    setDeleteConfirmText('');
     setDeleteFinanceChecked(true);
   };
 
   const handleConfirmDelete = async () => {
-    if (!deleteModalBooking || deleteConfirmText.trim().toUpperCase() !== 'HAPUS' || isDeleting) return;
+    if (!deleteModalBooking || isDeleting) return;
     setIsDeleting(true);
     try {
       const res = await adminApi.deleteBooking(deleteModalBooking.id, deleteFinanceChecked);
       setMessage(res.message);
+      setSelectedBookingIds(prev => prev.filter(id => id !== deleteModalBooking.id));
       setDeleteModalBooking(null);
       setSelectedBooking(null);
       fetchBookings();
@@ -120,6 +130,43 @@ export const Bookings = () => {
       alert('Gagal menghapus pesanan: ' + (err.response?.data?.message || err.message));
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  // Bulk Selection & Deletion Handlers
+  const handleToggleSelectAll = (filteredList) => {
+    if (selectedBookingIds.length === filteredList.length && filteredList.length > 0) {
+      setSelectedBookingIds([]);
+    } else {
+      setSelectedBookingIds(filteredList.map(b => b.id));
+    }
+  };
+
+  const handleToggleSelectOne = (id) => {
+    setSelectedBookingIds(prev =>
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectCancelled = () => {
+    const cancelledIds = bookings.filter(b => b.status === 'cancelled').map(b => b.id);
+    setSelectedBookingIds(cancelledIds);
+  };
+
+  const handleConfirmBulkDelete = async () => {
+    if (selectedBookingIds.length === 0 || isBulkDeleting) return;
+    setIsBulkDeleting(true);
+    try {
+      const res = await adminApi.bulkDeleteBookings(selectedBookingIds, bulkDeleteFinanceChecked);
+      setMessage(res.message || `${selectedBookingIds.length} pesanan berhasil dihapus.`);
+      setSelectedBookingIds([]);
+      setIsBulkDeleteModalOpen(false);
+      fetchBookings();
+      setTimeout(() => setMessage(''), 5000);
+    } catch (err) {
+      alert('Gagal menghapus pesanan: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -156,6 +203,16 @@ export const Bookings = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {bookings.filter(b => b.status === 'cancelled').length > 0 && (
+            <button
+              onClick={handleSelectCancelled}
+              className="px-3.5 py-2.5 bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-800/60 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+              title="Tandai semua pesanan yang dibatalkan untuk dibersihkan"
+            >
+              <Trash2 className="w-4 h-4 text-rose-400" />
+              <span>Pilih Yang Batal ({bookings.filter(b => b.status === 'cancelled').length})</span>
+            </button>
+          )}
           <button
             onClick={() => setIsCreateOpen(true)}
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-lg shadow-indigo-600/20"
@@ -232,12 +289,62 @@ export const Bookings = () => {
         />
       </div>
 
+      {/* BULK ACTION BAR (Tampil ketika ada pesanan yang dipilih) */}
+      {selectedBookingIds.length > 0 && (
+        <div className="p-3.5 bg-gradient-to-r from-rose-950/70 via-indigo-950/60 to-slate-900 border border-rose-500/40 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-lg shadow-rose-950/30">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-rose-600/20 text-rose-400 border border-rose-500/30 rounded-xl">
+              <CheckSquare className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white">
+                <span className="text-rose-400 font-extrabold">{selectedBookingIds.length}</span> Pesanan Terpilih
+              </p>
+              <p className="text-[11px] text-slate-400">
+                Pilih aksi massal untuk menghapus atau mengelola pesanan yang ditandai
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleToggleSelectAll(filteredBookings)}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors"
+            >
+              {selectedBookingIds.length === filteredBookings.length ? 'Batalkan Semua' : `Pilih Semua (${filteredBookings.length})`}
+            </button>
+            <button
+              onClick={() => setSelectedBookingIds([])}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors"
+            >
+              Kosongkan Pilihan
+            </button>
+            <button
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-rose-600/30 transition-all active:scale-95"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span>Hapus {selectedBookingIds.length} Terpilih</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Table Pesanan & Order */}
       <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl overflow-hidden backdrop-blur-md">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold bg-slate-900/60">
+                <th className="py-3.5 px-4 w-10 text-center">
+                  <input
+                    type="checkbox"
+                    title="Pilih Semua di Tampilan Ini"
+                    checked={filteredBookings.length > 0 && selectedBookingIds.length === filteredBookings.length}
+                    onChange={() => handleToggleSelectAll(filteredBookings)}
+                    className="rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                  />
+                </th>
                 <th className="py-3.5 px-4">Booking ID</th>
                 <th className="py-3.5 px-4">Client Pemesan</th>
                 <th className="py-3.5 px-4">Mitra / Driver</th>
@@ -250,22 +357,33 @@ export const Bookings = () => {
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
+                  <td colSpan={8} className="py-8 text-center text-slate-500">
                     Memuat daftar pesanan...
                   </td>
                 </tr>
               ) : filteredBookings.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
+                  <td colSpan={8} className="py-8 text-center text-slate-500">
                     Tidak ada transaksi pemesanan ditemukan.
                   </td>
                 </tr>
               ) : (
                 filteredBookings.map((b) => {
                   const dpValue = b.dp_amount || (parseFloat(b.total_price || 0) * 0.3);
+                  const isSelected = selectedBookingIds.includes(b.id);
 
                   return (
-                    <tr key={b.id} className="hover:bg-slate-800/40 transition-colors">
+                    <tr key={b.id} className={`hover:bg-slate-800/40 transition-colors ${isSelected ? 'bg-indigo-950/25 border-l-2 border-l-indigo-500' : ''}`}>
+                      {/* Selection Checkbox */}
+                      <td className="py-4 px-4 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectOne(b.id)}
+                          className="rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                        />
+                      </td>
+
                       {/* ID */}
                       <td className="py-4 px-4 font-mono font-bold text-indigo-400">
                         {b.id}
@@ -749,21 +867,6 @@ export const Bookings = () => {
               </div>
             </label>
 
-            {/* Strict confirmation challenge */}
-            <div className="space-y-1.5 pt-1">
-              <label className="block text-slate-300 font-bold">
-                Ketik kata <span className="text-rose-400 font-mono tracking-wider font-extrabold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-800">HAPUS</span> di bawah ini untuk mengonfirmasi:
-              </label>
-              <input 
-                type="text"
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value)}
-                placeholder="Ketik HAPUS"
-                autoFocus
-                className="w-full px-3 py-2 bg-slate-900 border border-slate-700 focus:border-rose-500 rounded-lg text-white font-mono placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-rose-500 uppercase tracking-widest text-center"
-              />
-            </div>
-
             {/* Action Buttons */}
             <div className="pt-2 flex justify-end gap-2">
               <button
@@ -776,13 +879,9 @@ export const Bookings = () => {
               </button>
               <button
                 type="button"
-                disabled={deleteConfirmText.trim().toUpperCase() !== 'HAPUS' || isDeleting}
+                disabled={isDeleting}
                 onClick={handleConfirmDelete}
-                className={`px-4 py-2 rounded-lg font-bold flex items-center gap-2 transition-all ${
-                  deleteConfirmText.trim().toUpperCase() === 'HAPUS' && !isDeleting
-                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30'
-                    : 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
-                }`}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold flex items-center gap-2 transition-all shadow-lg shadow-rose-600/30 active:scale-95"
               >
                 {isDeleting ? (
                   <>
@@ -792,7 +891,95 @@ export const Bookings = () => {
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    <span>Hapus Permanen</span>
+                    <span>Ya, Hapus Sekarang</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL HAPUS MASSAL PESANAN */}
+      {isBulkDeleteModalOpen && (
+        <Modal
+          isOpen={isBulkDeleteModalOpen}
+          onClose={() => { if (!isBulkDeleting) setIsBulkDeleteModalOpen(false); }}
+          title={`Hapus ${selectedBookingIds.length} Pesanan Sekaligus`}
+        >
+          <div className="space-y-4 text-xs text-slate-300">
+            {/* Danger warning box */}
+            <div className="p-3.5 bg-rose-950/40 border border-rose-500/50 rounded-xl text-rose-200 flex items-start gap-3">
+              <OctagonAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-extrabold text-sm text-rose-300">Konfirmasi Hapus Massal ({selectedBookingIds.length} Pesanan)</p>
+                <p className="text-slate-300 leading-relaxed text-xs">
+                  Tindakan ini akan menghapus permanen seluruh pesanan terpilih, membebaskan jadwal driver, dan membersihkan data obrolan terkait.
+                </p>
+              </div>
+            </div>
+
+            {/* Selected Bookings Summary */}
+            <div className="p-3 bg-slate-900/80 border border-slate-700/80 rounded-xl space-y-2">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                <span className="text-slate-400 font-medium">Total Pesanan Terpilih:</span>
+                <span className="font-mono text-white font-bold text-sm">{selectedBookingIds.length} Pesanan</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-slate-400 font-medium block">Daftar ID:</span>
+                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto pr-1">
+                  {selectedBookingIds.map((id) => (
+                    <span key={id} className="font-mono text-[10px] bg-slate-800 text-indigo-300 px-2 py-0.5 rounded border border-slate-700">
+                      {id.slice(0, 8)}...
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Checkbox option for Finance Cleanup */}
+            <label className="flex items-start gap-3 p-3 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-xl cursor-pointer transition-colors">
+              <input 
+                type="checkbox"
+                checked={bulkDeleteFinanceChecked}
+                onChange={(e) => setBulkDeleteFinanceChecked(e.target.checked)}
+                className="mt-0.5 rounded border-slate-700 bg-slate-800 text-rose-600 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+              />
+              <div className="space-y-0.5">
+                <span className="font-bold text-white block">Hapus seluruh riwayat tagihan & transaksi DP terkait di Modul Keuangan</span>
+                <span className="text-[11px] text-slate-400 block">
+                  {bulkDeleteFinanceChecked 
+                    ? '✅ Seluruh data transaksi DP & pelunasan untuk pesanan yang dipilih akan langsung dibersihkan dari sistem Keuangan.'
+                    : '⚠️ Data tagihan DP akan tetap tersimpan di modul Keuangan.'}
+                </span>
+              </div>
+            </label>
+
+            {/* Action Buttons */}
+            <div className="pt-2 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={() => setIsBulkDeleteModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-bold transition-colors"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isBulkDeleting}
+                onClick={handleConfirmBulkDelete}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold flex items-center gap-2 transition-all shadow-lg shadow-rose-600/30 active:scale-95"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Menghapus {selectedBookingIds.length} Pesanan...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Ya, Hapus {selectedBookingIds.length} Pesanan</span>
                   </>
                 )}
               </button>

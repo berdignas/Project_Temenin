@@ -200,7 +200,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const DriverActiveBookingScreen(),
+                            builder: (context) => DriverActiveBookingScreen(booking: targetBooking),
                           ),
                         );
                       }
@@ -983,6 +983,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
             // Top Row: Icon + Badge / Switch
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -992,32 +993,41 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                   ),
                   child: Icon(icon, color: iconColor, size: 20),
                 ),
+                const SizedBox(width: 4),
                 if (hasSwitch)
-                  Transform.scale(
-                    scale: 0.75,
-                    child: Switch(
-                      value: switchValue,
-                      onChanged: onSwitchChanged,
-                      activeColor: AppTheme.success,
-                      activeTrackColor: AppTheme.success.withOpacity(0.3),
-                      inactiveThumbColor: AppTheme.textMuted,
-                      inactiveTrackColor: AppTheme.border,
+                  SizedBox(
+                    height: 28,
+                    width: 44,
+                    child: FittedBox(
+                      fit: BoxFit.contain,
+                      child: Switch(
+                        value: switchValue,
+                        onChanged: onSwitchChanged,
+                        activeColor: AppTheme.success,
+                        activeTrackColor: AppTheme.success.withOpacity(0.3),
+                        inactiveThumbColor: AppTheme.textMuted,
+                        inactiveTrackColor: AppTheme.border,
+                      ),
                     ),
                   )
                 else
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: badgeColor.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      badgeText,
-                      style: GoogleFonts.plusJakartaSans(
-                        color: badgeColor,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.4,
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        badgeText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.plusJakartaSans(
+                          color: badgeColor,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.4,
+                        ),
                       ),
                     ),
                   ),
@@ -1490,7 +1500,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         } else {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const DriverActiveBookingScreen()),
+            MaterialPageRoute(builder: (context) => DriverActiveBookingScreen(booking: bookingData)),
           );
         }
       },

@@ -187,8 +187,12 @@ class BookingModel {
         avatarUrl: rawDetails['driverImage']?.toString(),
         vehicleName: rawDetails['vehicle']?.toString() ?? rawDetails['vehicle_name']?.toString() ?? rawDetails['driverName']?.toString(),
         vehicleType: rawDetails['serviceType']?.toString() ?? rawDetails['vehicle_type']?.toString(),
-        plateNumber: rawDetails['plateNumber']?.toString(),
-        rating: (rawDetails['driverRating'] as num?)?.toDouble() ?? (rawDetails['rating'] as num?)?.toDouble() ?? 0.0,
+        rating: (rawDetails['driverRating'] is num)
+            ? (rawDetails['driverRating'] as num).toDouble()
+            : (double.tryParse(rawDetails['driverRating']?.toString() ?? '') ??
+                ((rawDetails['rating'] is num)
+                    ? (rawDetails['rating'] as num).toDouble()
+                    : (double.tryParse(rawDetails['rating']?.toString() ?? '') ?? 0.0))),
       );
     }
 
@@ -292,8 +296,12 @@ class DriverModel {
       vehicleName: json['vehicle_name']?.toString() ?? rawName?.toString(),
       vehicleType: json['vehicle_type']?.toString() ?? json['serviceType']?.toString() ?? 'Temenin Driver',
       plateNumber: json['plate_number']?.toString(),
-      pricePerHour: (json['price_per_hour'] as num?)?.toInt(),
-      rating: (json['rating'] as num?)?.toDouble() ?? 5.0,
+      pricePerHour: (json['price_per_hour'] is num)
+          ? (json['price_per_hour'] as num).toInt()
+          : int.tryParse(json['price_per_hour']?.toString() ?? ''),
+      rating: (json['rating'] is num)
+          ? (json['rating'] as num).toDouble()
+          : (double.tryParse(json['rating']?.toString() ?? '') ?? 5.0),
     );
   }
 

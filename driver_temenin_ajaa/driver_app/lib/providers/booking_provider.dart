@@ -30,6 +30,8 @@ class BookingProvider extends ChangeNotifier {
   final Set<String> _seenPelunasanBookingIds = {};
   final Set<String> _seenMessageKeys = {};
   bool _isFirstBookingProcess = true;
+  String _lastBookingsFingerprint = '';
+  final Map<String, Map<String, dynamic>> _clientUserCache = {};
   
   bool _isLoading = false;
   String? _errorMessage;
@@ -108,6 +110,7 @@ class BookingProvider extends ChangeNotifier {
   // Set active booking manually (e.g. on click from list)
   void setActiveBooking(BookingModel? booking) {
     _activeBooking = booking;
+    _ongoingTrip = booking;
     notifyListeners();
   }
 
@@ -156,21 +159,33 @@ class BookingProvider extends ChangeNotifier {
   }
 
   Future<void> _processBookingsData(List<Map<String, dynamic>> data) async {
-    debugPrint('📦 _processBookingsData received ${data.length} rows from Supabase');
     if (data.isEmpty) {
-      _pendingOffers = [];
-      _incomingBooking = null;
-      _activeBooking = null;
-      notifyListeners();
+      if (_pendingOffers.isNotEmpty || _incomingBooking != null || _activeBooking != null) {
+        _pendingOffers = [];
+        _incomingBooking = null;
+        _activeBooking = null;
+        notifyListeners();
+      }
       return;
     }
 
+    final currentFingerprint = data.map((b) {
+      final d = b['additional_details'];
+      final sub = d is Map ? "${d['sub_status']}_${d['dp_paid']}_${d['pelunasan_paid']}_${d['payout_status']}_${d['driver_credited']}" : '';
+      return "${b['id']}_${b['status']}_${b['driver_id']}_$sub";
+    }).join('|');
+
+    final bool hasDataChanged = currentFingerprint != _lastBookingsFingerprint;
+    final int prevNotifCount = _notifications.length;
+    _lastBookingsFingerprint = currentFingerprint;
+
     final pendingList = data.where((b) {
-      if (b['status'] != 'pending') return false;
-      final bDriverId = b['driver_id']?.toString();
+      if (b['status']?.toString() != 'pending') return false;
+      final rawDriverId = b['driver_id'];
+      final bDriverId = rawDriverId != null ? rawDriverId.toString().trim() : '';
       
       // If driver_id is not assigned, it's an open offer broadcast
-      if (bDriverId == null || bDriverId.isEmpty) return true;
+      if (bDriverId.isEmpty || bDriverId == 'null') return true;
       
       // Check against all known IDs for this driver
       if (_associatedDriverIds.contains(bDriverId)) return true;
@@ -180,9 +195,12 @@ class BookingProvider extends ChangeNotifier {
       // Check additional details for partner metadata
       final details = b['additional_details'];
       if (details is Map) {
-        if (details['driverId']?.toString() == _currentDriverId || 
-            details['driver_id']?.toString() == _currentDriverId ||
-            details['driver_user_id']?.toString() == _currentUserId) {
+        final dId = details['driverId']?.toString() ?? details['driver_id']?.toString();
+        final uId = details['driver_user_id']?.toString();
+        if (dId != null && dId.isNotEmpty && (_currentDriverId == dId || _associatedDriverIds.contains(dId))) {
+          return true;
+        }
+        if (uId != null && uId.isNotEmpty && _currentUserId == uId) {
           return true;
         }
       }
@@ -190,29 +208,35 @@ class BookingProvider extends ChangeNotifier {
       return false; // Do not notify driver if targeted to another specific driver
     }).toList();
 
-    // Batch fetch client details for all bookings in data
-    final clientIds = data
-        .map((b) => b['user_id']?.toString())
-        .where((id) => id != null && id.isNotEmpty)
-        .cast<String>()
-        .toSet()
-        .toList();
-    Map<String, Map<String, dynamic>> userMap = {};
-    if (clientIds.isNotEmpty) {
+    // Fetch client details only for users not yet in memory cache
+    final Set<String> clientIds = {};
+    for (final b in data) {
+      final uid = b['user_id'];
+      if (uid != null) {
+        final s = uid.toString().trim();
+        if (s.isNotEmpty && s != 'null') {
+          clientIds.add(s);
+        }
+      }
+    }
+
+    final missingClientIds = clientIds.where((id) => !_clientUserCache.containsKey(id)).toList();
+    if (missingClientIds.isNotEmpty) {
       try {
         final usersData = await Supabase.instance.client
             .from('users')
             .select()
-            .inFilter('id', clientIds);
+            .inFilter('id', missingClientIds);
         for (final u in usersData) {
-          if (u['id'] != null) {
-            userMap[u['id'].toString()] = Map<String, dynamic>.from(u as Map);
+          if (u is Map && u['id'] != null) {
+            _clientUserCache[u['id'].toString()] = Map<String, dynamic>.from(u);
           }
         }
       } catch (e) {
         debugPrint('Error batch fetching client details: $e');
       }
     }
+    final userMap = _clientUserCache;
 
     // Real-time calculation of pending escrow (DP safely held in platform)
     double realtimePendingEscrow = 0.0;
@@ -318,15 +342,16 @@ class BookingProvider extends ChangeNotifier {
 
       if (s == 'cancelled' || sub == 'cancelled') {
         convertedCancelled.add(model);
-      } else if (isPelunasanPaid || s == 'completed') {
-        convertedCompleted.add(model);
       } else if (model.isOngoingTrip) {
         convertedOngoing.add(model);
+      } else if (isPelunasanPaid || s == 'closed' || sub == 'closed' || s == 'completed' || sub == 'completed') {
+        convertedCompleted.add(model);
       } else {
         convertedUpcoming.add(model);
       }
     }
 
+    convertedOngoing.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     convertedUpcoming.sort((a, b) => (a.bookingDate ?? a.createdAt).compareTo(b.bookingDate ?? b.createdAt));
     convertedCompleted.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     convertedCancelled.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -334,10 +359,11 @@ class BookingProvider extends ChangeNotifier {
     _upcomingBookings = convertedUpcoming;
     _completedBookings = convertedCompleted;
     _cancelledBookings = convertedCancelled;
+    _bookings = [...convertedOngoing, ...convertedUpcoming, ...convertedCompleted, ...convertedCancelled];
 
     // Set ongoing trip (if physically on trip)
     if (convertedOngoing.isNotEmpty) {
-      if (_ongoingTrip != null) {
+      if (_ongoingTrip != null && convertedOngoing.any((b) => b.id == _ongoingTrip!.id)) {
         _ongoingTrip = convertedOngoing.firstWhere(
           (b) => b.id == _ongoingTrip!.id,
           orElse: () => convertedOngoing.first,
@@ -362,7 +388,7 @@ class BookingProvider extends ChangeNotifier {
     }
 
     // DP Paid Notifications for upcoming bookings
-    for (final b in [..._upcomingBookings, if (_ongoingTrip != null) _ongoingTrip!]) {
+    for (final b in _upcomingBookings) {
       final add = b.additionalDetails;
       final isDpPaid = add?['dp_paid'] == true || add?['sub_status'] == 'dp_paid' || b.status == 'dp_paid';
       if (isDpPaid && !_seenDpPaidBookingIds.contains(b.id)) {
@@ -391,7 +417,7 @@ class BookingProvider extends ChangeNotifier {
                          d?['driver_reviewed'] == true ||
                          b.status == 'closed' || 
                          d?['sub_status'] == 'closed';
-      return !isReviewed;
+      return !isReviewed && b.isPelunasanPaid;
     }).toList();
 
     if (pendingReviewList.isNotEmpty) {
@@ -470,9 +496,13 @@ class BookingProvider extends ChangeNotifier {
       }
     }
 
+    final bool hasNotifChanged = _notifications.length != prevNotifCount;
     _isFirstBookingProcess = false;
-    debugPrint('🔔 Total Notifications: ${_notifications.length}, Unread: $unreadNotificationsCount, Active Banner: ${_activeBannerNotification?.title}');
-    notifyListeners();
+
+    if (hasDataChanged || hasNotifChanged) {
+      debugPrint('📦 Driver bookings updated (${data.length} items, unread: $unreadNotificationsCount)');
+      notifyListeners();
+    }
   }
 
   // Subscribe to real-time bookings from Supabase
@@ -512,8 +542,8 @@ class BookingProvider extends ChangeNotifier {
       debugPrint('❌ Supabase chat stream connection failed: $e');
     }
 
-    // Polling fallback every 15 seconds (realtime stream is primary)
-    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
+    // Polling fallback every 5 seconds (realtime stream is primary)
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
       try {
         final data = await Supabase.instance.client
             .from('bookings')

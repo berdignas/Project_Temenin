@@ -280,11 +280,13 @@ class _ChatListScreenState extends State<ChatListScreen> with SingleTickerProvid
         final Map<String, Map<String, dynamic>> groupedMap = {};
 
         // Fetch latest messages from dedicated booking_messages table
-        final List<String> bookingIds = data
-            .map((b) => b['id']?.toString())
-            .where((id) => id != null && id.isNotEmpty)
-            .cast<String>()
-            .toList();
+        final List<String> bookingIds = [];
+        for (final b in data) {
+          final id = b['id']?.toString().trim();
+          if (id != null && id.isNotEmpty && id != 'null') {
+            bookingIds.add(id);
+          }
+        }
 
         final Map<String, Map<String, dynamic>> latestMessagesMap = {};
         if (bookingIds.isNotEmpty) {

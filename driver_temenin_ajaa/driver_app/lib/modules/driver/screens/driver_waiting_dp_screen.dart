@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/constants/api_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/services/notification_sound_service.dart';
 import '../../../core/utils/booking_date_helper.dart';
@@ -261,9 +262,12 @@ class _DriverWaitingDpScreenState extends State<DriverWaitingDpScreen> with Sing
         _currentBooking.additionalDetails?['user_avatar'] ??
         _currentBooking.additionalDetails?['avatar'] ??
         '';
-    final clientImage = (rawClientPhoto != null && rawClientPhoto.toString().trim().isNotEmpty)
+    String clientImage = (rawClientPhoto != null && rawClientPhoto.toString().trim().isNotEmpty)
         ? rawClientPhoto.toString().trim()
         : 'https://ui-avatars.com/api/?name=${Uri.encodeComponent(clientName)}&background=D64573&color=fff&bold=true';
+    if (clientImage.startsWith('/uploads')) {
+      clientImage = '${ApiConstants.baseUrl}$clientImage';
+    }
     final clientPhone = client?.phone ?? _currentBooking.additionalDetails?['clientPhone']?.toString() ?? '-';
 
     final totalVal = _currentBooking.totalPrice > 0 
@@ -455,7 +459,15 @@ class _DriverWaitingDpScreenState extends State<DriverWaitingDpScreen> with Sing
                         CircleAvatar(
                           radius: 22,
                           backgroundColor: AppTheme.fuchsiaLight,
-                          backgroundImage: NetworkImage(clientImage),
+                          child: ClipOval(
+                            child: Image.network(
+                              clientImage,
+                              width: 44,
+                              height: 44,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, color: AppTheme.primaryPink, size: 22),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
