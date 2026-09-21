@@ -49,11 +49,20 @@ class _BookingHistoryPageState extends State<BookingHistoryPage> {
             .from('bookings')
             .stream(primaryKey: ['id'])
             .eq('user_id', userId)
-            .listen((_) {
-              if (mounted) {
-                _loadBookings(showLoading: false);
-              }
-            });
+            .handleError((err) {
+              debugPrint("BookingHistoryPage realtime stream error handled: $err");
+            })
+            .listen(
+              (_) {
+                if (mounted) {
+                  _loadBookings(showLoading: false);
+                }
+              },
+              onError: (err) {
+                debugPrint("BookingHistoryPage realtime stream error: $err");
+              },
+              cancelOnError: false,
+            );
       }
     } catch (e) {
       debugPrint("BookingHistoryPage realtime subscription error: $e");

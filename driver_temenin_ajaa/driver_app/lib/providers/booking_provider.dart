@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/services/booking_service.dart';
@@ -813,6 +814,22 @@ class BookingProvider extends ChangeNotifier {
     updatedDetails['sub_status'] = status;
     if (status == 'dp_paid') {
       updatedDetails['dp_paid'] = true;
+    }
+    if (status == 'arrived') {
+      final startOtp = updatedDetails['start_otp'] ?? updatedDetails['otp'] ?? updatedDetails['security_pin'];
+      String? servicePin = updatedDetails['service_pin']?.toString() ?? updatedDetails['service_otp']?.toString();
+      if (servicePin == null || servicePin.isEmpty || servicePin == '1234') {
+        if (startOtp != null && startOtp.toString().isNotEmpty && startOtp.toString() != '1234') {
+          servicePin = startOtp.toString();
+        } else {
+          final rand = Random();
+          servicePin = (rand.nextInt(9000) + 1000).toString();
+        }
+        updatedDetails['service_pin'] = servicePin;
+        updatedDetails['start_service_pin'] = servicePin;
+        updatedDetails['service_otp'] = servicePin;
+        debugPrint("🆕 Driver arrived: Ensured Token 2 service_pin: $servicePin");
+      }
     }
 
     final updatePayload = <String, dynamic>{

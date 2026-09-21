@@ -95,7 +95,11 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
       _isCountdownFinished = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          _navigateToTracking(nextStatus: sub ?? (st == 'ongoing' ? 'on_the_way' : st) ?? 'on_the_way');
+          _navigateToTracking(
+            nextStatus: sub ?? (st == 'ongoing' ? 'on_the_way' : st) ?? 'on_the_way',
+            force: true,
+            replace: true,
+          );
         }
       });
       return;
@@ -213,7 +217,7 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
       final nextStatus = (subStatus != null && subStatus.isNotEmpty)
           ? subStatus
           : (status == 'ongoing' ? 'on_the_way' : status ?? 'on_the_way');
-      _navigateToTracking(nextStatus: nextStatus, force: true);
+      _navigateToTracking(nextStatus: nextStatus, force: true, replace: true);
     }
   }
 
@@ -362,7 +366,7 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                       backgroundColor: Colors.green,
                     ),
                   );
-                  _navigateToTracking(nextStatus: 'on_the_way');
+                  _navigateToTracking(nextStatus: 'on_the_way', force: true, replace: true);
                 }
               },
               style: ElevatedButton.styleFrom(
@@ -393,6 +397,9 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('id', queryId)
+          .handleError((err) {
+            debugPrint("Client countdown booking stream handled error: $err");
+          })
           .listen(
             (rows) {
               if (rows.isNotEmpty && mounted) {
@@ -402,6 +409,7 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
             onError: (err) {
               debugPrint("Error in client booking stream: $err");
             },
+            cancelOnError: false,
           );
     } catch (e) {
       debugPrint("Error in client booking stream: $e");
@@ -441,6 +449,26 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
       existingAdd['otp'] = pin;
       existingAdd['security_pin'] = pin;
       existingAdd['pin'] = pin;
+      existingAdd['start_otp'] = pin;
+
+      if (existingAdd['service_pin'] == null || existingAdd['service_pin'].toString().isEmpty) {
+        final rand = Random();
+        String sPin;
+        do {
+          sPin = (rand.nextInt(9000) + 1000).toString();
+        } while (sPin == pin);
+        existingAdd['service_pin'] = sPin;
+        existingAdd['start_service_pin'] = sPin;
+        existingAdd['service_otp'] = sPin;
+      }
+      if (existingAdd['completion_otp'] == null || existingAdd['completion_otp'].toString().isEmpty) {
+        final rand = Random();
+        String cPin;
+        do {
+          cPin = (rand.nextInt(9000) + 1000).toString();
+        } while (cPin == pin || cPin == existingAdd['service_pin']);
+        existingAdd['completion_otp'] = cPin;
+      }
 
       try {
         await Supabase.instance.client
@@ -618,7 +646,7 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                         backgroundColor: Colors.green,
                       ),
                     );
-                    _navigateToTracking(nextStatus: 'on_the_way');
+                    _navigateToTracking(nextStatus: 'on_the_way', force: true, replace: true);
                   }
                 });
               },
@@ -637,23 +665,56 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     );
   }
 
-  void _navigateToTracking({String? nextStatus, bool force = false}) {
+  Future<void> _navigateToTracking({String? nextStatus, bool force = false, bool replace = false}) async {
     if (_isNavigating && !force) return;
     _isNavigating = true;
-    _countdownTimer?.cancel();
-    _pollingTimer?.cancel();
-    _streamSub?.cancel();
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => TrackingDriverScreen(
-          bookingData: _currentDetails,
-          bookingId: widget.bookingId ?? _currentDetails['id']?.toString(),
-          initialStatus: nextStatus ?? _currentDetails['status']?.toString() ?? 'on_the_way',
-        ),
-      ),
-    );
+    final add = _parseMap(_currentDetails['additional_details']) ?? _parseMap(_currentDetails['additionalDetails']);
+    final st = _currentDetails['status']?.toString();
+    final sub = add?['sub_status']?.toString();
+    final resolvedStatus = nextStatus ?? sub ?? (st == 'ongoing' ? 'on_the_way' : st) ?? 'on_the_way';
+
+    try {
+      debugPrint("🚀 Navigating to TrackingDriverScreen with status: $resolvedStatus (replace: $replace)");
+      if (replace) {
+        _countdownTimer?.cancel();
+        _pollingTimer?.cancel();
+        _streamSub?.cancel();
+        if (mounted) {
+          await Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TrackingDriverScreen(
+                bookingData: _currentDetails,
+                bookingId: widget.bookingId ?? _currentDetails['id']?.toString(),
+                initialStatus: resolvedStatus,
+              ),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => TrackingDriverScreen(
+                bookingData: _currentDetails,
+                bookingId: widget.bookingId ?? _currentDetails['id']?.toString(),
+                initialStatus: resolvedStatus,
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e, stack) {
+      debugPrint("❌ Error navigating to TrackingDriverScreen: $e\n$stack");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isNavigating = false;
+        });
+      }
+    }
   }
 
   String _formatTime(int totalSeconds) {
@@ -715,11 +776,19 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
     final num totalPayment = _currentDetails['totalPayment'] ?? _currentDetails['totalPrice'] ?? _currentDetails['total_price'] ?? 0;
     final num dpAmount = _currentDetails['dp'] ?? (totalPayment * 0.5);
 
+    void handleBack() {
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      } else {
+        Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+      }
+    }
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) {
-          Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+          handleBack();
         }
       },
       child: Scaffold(
@@ -737,9 +806,7 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
           elevation: 0,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppTheme.textHighContrast, size: 18),
-            onPressed: () {
-              Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
-            },
+            onPressed: handleBack,
           ),
         ),
       body: SafeArea(
@@ -1220,22 +1287,33 @@ class _ClientWaitingCountdownScreenState extends State<ClientWaitingCountdownScr
                       color: AppTheme.primaryPink.withOpacity(0.4),
                       blurRadius: 15,
                       offset: const Offset(0, 4),
-                    )
+                    ),
                   ],
                 ),
-                child: ElevatedButton(
-                  onPressed: () => _navigateToTracking(force: true),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    shadowColor: Colors.transparent,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  ),
-                  child: Text(
-                    "LIHAT PELACAKAN PERJALANAN ➔",
-                    style: GoogleFonts.plusJakartaSans(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () {
+                      debugPrint("🔘 Button LIHAT PELACAKAN PERJALANAN pressed!");
+                      _navigateToTracking(force: true, replace: false);
+                    },
+                    child: Center(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.location_searching_rounded, color: Colors.white, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            "LIHAT PELACAKAN PERJALANAN ➔",
+                            style: GoogleFonts.plusJakartaSans(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

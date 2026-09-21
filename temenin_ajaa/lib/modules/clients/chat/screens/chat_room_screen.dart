@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:temenin_ajaa/core/theme/app_theme.dart';
 import 'package:temenin_ajaa/providers/auth_provider.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../../pages/booking_history_page.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String? bookingId;
@@ -50,12 +51,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     "🚶‍♂️ Saya pakai baju hitam",
   ];
 
+  bool _isBubbleDismissed = false;
+
   @override
   void initState() {
     super.initState();
     _isConnecting = true;
     _subscribeToChat();
     _fetchBookingDetails();
+    _loadBubbleDismissalState();
 
     _scrollController.addListener(() {
       if (_scrollController.hasClients) {
@@ -102,6 +106,207 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } catch (e) {
       debugPrint("Error fetching booking details: $e");
     }
+  }
+
+  Future<void> _loadBubbleDismissalState() async {
+    if (widget.bookingId == null || widget.bookingId!.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final dismissedList = prefs.getStringList('dismissed_order_bubbles') ?? [];
+      if (mounted) {
+        setState(() {
+          _isBubbleDismissed = dismissedList.contains(widget.bookingId);
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading bubble dismissal state: $e");
+    }
+  }
+
+  Future<void> _dismissBubble() async {
+    if (widget.bookingId == null || widget.bookingId!.isEmpty) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final dismissedList = prefs.getStringList('dismissed_order_bubbles') ?? [];
+      if (!dismissedList.contains(widget.bookingId)) {
+        dismissedList.add(widget.bookingId!);
+        await prefs.setStringList('dismissed_order_bubbles', dismissedList);
+      }
+      if (mounted) {
+        setState(() {
+          _isBubbleDismissed = true;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: AppTheme.success, size: 18),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text("Gelembung pesanan dihapus. Rincian tetap tersimpan di Aktivitas."),
+                ),
+              ],
+            ),
+            backgroundColor: AppTheme.surface,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(color: AppTheme.border),
+            ),
+            action: SnackBarAction(
+              label: "Aktivitas",
+              textColor: AppTheme.primaryPink,
+              onPressed: _navigateToActivity,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error saving bubble dismissal: $e");
+    }
+  }
+
+  void _showDeleteBubbleConfirmationDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: AppTheme.border),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.danger.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline_rounded, color: AppTheme.danger, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              "Hapus Gelembung?",
+              style: GoogleFonts.plusJakartaSans(
+                color: AppTheme.textHighContrast,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          "Gelembung status pesanan ini akan dihapus dari tampilan obrolan. Riwayat pesanan tetap aman dan dapat diakses kapan saja melalui menu Aktivitas.",
+          style: GoogleFonts.inter(
+            color: AppTheme.textMediumContrast,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              "Batal",
+              style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.w600),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _dismissBubble();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.danger,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            ),
+            child: const Text("Hapus Gelembung", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _navigateToActivity() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const BookingHistoryPage(),
+      ),
+    );
+  }
+
+  void _showClearChatConfirmation() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: AppTheme.border),
+        ),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppTheme.danger.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.cleaning_services_rounded, color: AppTheme.danger, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              "Bersihkan Obrolan?",
+              style: GoogleFonts.plusJakartaSans(
+                color: AppTheme.textHighContrast,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          "Semua pesan teks dalam percakapan ini akan dibersihkan dari perangkat Anda.",
+          style: GoogleFonts.inter(
+            color: AppTheme.textMediumContrast,
+            fontSize: 13,
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              "Batal",
+              style: GoogleFonts.inter(color: AppTheme.textMuted, fontWeight: FontWeight.w600),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              setState(() {
+                _messages = [];
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Riwayat chat telah dibersihkan."),
+                  backgroundColor: AppTheme.card,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.danger,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            ),
+            child: const Text("Bersihkan", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _subscribeToChat() {
@@ -577,7 +782,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text("Total Estimasi Tarif", style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 13)),
-                    Text("Rp ${totalCost.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}", 
+                    Text("Rp ${(totalCost is num ? totalCost.toInt() : (int.tryParse(totalCost.toString()) ?? 0)).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}", 
                         style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
                   ],
                 ),
@@ -624,8 +829,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         children: [
           Column(
             children: [
-              // Sticky Order Context Banner
-              _buildOrderContextBanner(),
+              // Sticky Gelembung Aktivitas Pesanan (Interactive & Persistent)
+              _buildOrderActivityBubble(),
               
               // Messages Chat Area
               Expanded(
@@ -635,18 +840,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                           valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryPink),
                         ),
                       )
-                    : _messages.isEmpty
+                    : (_messages.isEmpty && _getMilestoneBubblesCount() == 0)
                         ? _buildEmptyChatState(name)
                         : ListView.builder(
                             controller: _scrollController,
                             physics: const BouncingScrollPhysics(),
                             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                            itemCount: _messages.length + 1, // +1 for the safety header
+                            itemCount: _messages.length + 1 + _getMilestoneBubblesCount(),
                             itemBuilder: (context, index) {
                               if (index == 0) {
                                 return _buildSafetyNotice();
                               }
-                              final msg = _messages[index - 1];
+                              final milestoneCount = _getMilestoneBubblesCount();
+                              if (index <= milestoneCount) {
+                                return _buildMilestoneBubbleAtIndex(index - 1);
+                              }
+                              final msg = _messages[index - 1 - milestoneCount];
                               return _buildMessageBubble(msg);
                             },
                           ),
@@ -770,7 +979,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     ),
                     const SizedBox(width: 5),
                     Text(
-                      status,
+                      "Online • Pesan Teks",
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         color: AppTheme.textMuted,
@@ -785,33 +994,102 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         ],
       ),
       actions: [
-        IconButton(
-          icon: Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryPink.withOpacity(0.12),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.phone_rounded, color: AppTheme.primaryPink, size: 18),
+        // Text-Only Security Badge
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFF10B981).withOpacity(0.12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3), width: 0.8),
           ),
-          tooltip: "Panggilan Suara",
-          onPressed: () async {
-            final uri = Uri.parse("tel:08123456789");
-            if (await canLaunchUrl(uri)) {
-              await launchUrl(uri);
-            } else {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Menghubungkan panggilan terenkripsi...")),
-                );
-              }
-            }
-          },
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.mark_chat_read_rounded, color: Color(0xFF10B981), size: 12),
+              const SizedBox(width: 4),
+              Text(
+                "Teks Saja",
+                style: GoogleFonts.inter(
+                  color: const Color(0xFF10B981),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
         ),
+
+        // Detail Order Action
         IconButton(
-          icon: const Icon(Icons.info_outline_rounded, color: AppTheme.textMuted, size: 22),
+          icon: const Icon(Icons.info_outline_rounded, color: AppTheme.textMuted, size: 20),
           tooltip: "Detail Order",
           onPressed: _showBookingDetailsSheet,
+        ),
+
+        // More Options Popup Menu (Navigation to Activity, Clear Chat, etc.)
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert_rounded, color: AppTheme.textHighContrast, size: 20),
+          color: AppTheme.card,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: AppTheme.border),
+          ),
+          onSelected: (val) {
+            if (val == 'activity') {
+              _navigateToActivity();
+            } else if (val == 'details') {
+              _showBookingDetailsSheet();
+            } else if (val == 'delete_bubble') {
+              _showDeleteBubbleConfirmationDialog();
+            } else if (val == 'clear') {
+              _showClearChatConfirmation();
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'activity',
+              child: Row(
+                children: [
+                  const Icon(Icons.assignment_turned_in_rounded, color: AppTheme.primaryPink, size: 18),
+                  const SizedBox(width: 10),
+                  Text("Buka di Aktivitas", style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textHighContrast)),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'details',
+              child: Row(
+                children: [
+                  const Icon(Icons.receipt_long_rounded, color: AppTheme.roseGold, size: 18),
+                  const SizedBox(width: 10),
+                  Text("Detail Pesanan", style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textHighContrast)),
+                ],
+              ),
+            ),
+            if (!_isBubbleDismissed && widget.bookingId != null && widget.bookingId!.isNotEmpty)
+              PopupMenuItem(
+                value: 'delete_bubble',
+                child: Row(
+                  children: [
+                    const Icon(Icons.visibility_off_outlined, color: AppTheme.textMuted, size: 18),
+                    const SizedBox(width: 10),
+                    Text("Hapus Gelembung", style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textHighContrast)),
+                  ],
+                ),
+              ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'clear',
+              child: Row(
+                children: [
+                  const Icon(Icons.cleaning_services_rounded, color: AppTheme.danger, size: 18),
+                  const SizedBox(width: 10),
+                  Text("Bersihkan Chat", style: GoogleFonts.inter(fontSize: 13, color: AppTheme.danger)),
+                ],
+              ),
+            ),
+          ],
         ),
         const SizedBox(width: 4),
       ],
@@ -822,75 +1100,298 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
-  Widget _buildOrderContextBanner() {
-    final bookingCode = widget.bookingId != null && widget.bookingId!.length > 6 
+  /// GELEMBUNG PESANAN (Sticky Order Activity Bubble)
+  /// Ini tidak bisa hilang secara otomatis dari status permintaan s/d selesai,
+  /// KECUALI dihapus oleh pengguna sendiri melalui tombol hapus (X).
+  Widget _buildOrderActivityBubble() {
+    if (_isBubbleDismissed || widget.bookingId == null || widget.bookingId!.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final rawStatus = (_bookingData?['status'] ?? widget.status ?? 'ongoing').toString().toLowerCase();
+    final isPending = rawStatus == 'pending' || rawStatus == 'requested' || rawStatus == 'searching';
+    final isCompleted = rawStatus == 'completed' || rawStatus == 'paid' || rawStatus == 'selesai';
+
+    final bookingCode = widget.bookingId!.length > 6 
         ? widget.bookingId!.substring(0, 6).toUpperCase() 
-        : (widget.bookingId ?? "AKTIF");
+        : widget.bookingId!;
+
+    final destination = _bookingData?['destination'] ?? _bookingData?['destination_address'] ?? 'Tujuan terdaftar';
+    final pickup = _bookingData?['pickup_address'] ?? _bookingData?['pickup_location'] ?? 'Titik jemput terdaftar';
+    final totalFare = _bookingData?['total_price'] ?? _bookingData?['fare'];
+
+    String statusTitle;
+    String statusSubtitle;
+    Color statusColor;
+    IconData statusIcon;
+    int currentStep;
+
+    if (isPending) {
+      statusTitle = "Permintaan Pesanan";
+      statusSubtitle = "Menunggu konfirmasi respon mitra";
+      statusColor = const Color(0xFFF59E0B);
+      statusIcon = Icons.hourglass_top_rounded;
+      currentStep = 0;
+    } else if (isCompleted) {
+      statusTitle = "Pesanan Selesai";
+      statusSubtitle = "Layanan berhasil dituntaskan";
+      statusColor = const Color(0xFFA855F7);
+      statusIcon = Icons.verified_rounded;
+      currentStep = 2;
+    } else {
+      statusTitle = "Pesanan Sedang Berjalan";
+      statusSubtitle = "Mitra siaga & memproses pesanan Anda";
+      statusColor = const Color(0xFF10B981);
+      statusIcon = Icons.directions_car_rounded;
+      currentStep = 1;
+    }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.fromLTRB(14, 10, 14, 6),
       decoration: BoxDecoration(
-        color: AppTheme.card.withOpacity(0.95),
-        border: const Border(bottom: BorderSide(color: AppTheme.border, width: 0.8)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: AppTheme.primaryPink.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.route_rounded, color: AppTheme.primaryPink, size: 16),
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: statusColor.withOpacity(0.45), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: statusColor.withOpacity(0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
-          const SizedBox(width: 10),
-          Expanded(
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: _navigateToActivity,
+          child: Padding(
+            padding: const EdgeInsets.all(14.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  "Pesanan #$bookingCode Aktif",
-                  style: GoogleFonts.plusJakartaSans(
-                    color: AppTheme.textHighContrast,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.bold,
+                // Top Header Row with Status & Dismiss X Button
+                Row(
+                  children: [
+                    // Pulsing Status Dot
+                    Container(
+                      padding: const EdgeInsets.all(7),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: statusColor.withOpacity(0.3)),
+                      ),
+                      child: Icon(statusIcon, color: statusColor, size: 16),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                statusTitle,
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: AppTheme.textHighContrast,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: statusColor.withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  "#$bookingCode",
+                                  style: TextStyle(
+                                    color: statusColor,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            statusSubtitle,
+                            style: GoogleFonts.inter(
+                              color: AppTheme.textMuted,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Tombol Hapus Gelembung (Hanya bisa hilang jika dihapus atas keinginan sendiri)
+                    Tooltip(
+                      message: "Hapus Gelembung Pesanan",
+                      child: InkWell(
+                        onTap: _showDeleteBubbleConfirmationDialog,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.05),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.close_rounded, size: 16, color: AppTheme.textMuted),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                // 3-Step Milestone Stepper Capsule
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.background.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      _buildStepperItem("1. Permintaan", 0, currentStep, statusColor),
+                      Expanded(
+                        child: Container(
+                          height: 2,
+                          color: currentStep >= 1 ? statusColor : AppTheme.border,
+                        ),
+                      ),
+                      _buildStepperItem("2. Berjalan", 1, currentStep, statusColor),
+                      Expanded(
+                        child: Container(
+                          height: 2,
+                          color: currentStep >= 2 ? statusColor : AppTheme.border,
+                        ),
+                      ),
+                      _buildStepperItem("3. Selesai", 2, currentStep, statusColor),
+                    ],
                   ),
                 ),
-                Text(
-                  "Titik jemput & perjalanan sedang dipantau",
-                  style: GoogleFonts.inter(
-                    color: AppTheme.textMuted,
-                    fontSize: 10.5,
+
+                const SizedBox(height: 12),
+
+                // Route & Price Details
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.near_me_rounded, size: 14, color: AppTheme.primaryPink.withOpacity(0.8)),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              "$pickup ➔ $destination",
+                              style: GoogleFonts.inter(
+                                color: AppTheme.textMediumContrast,
+                                fontSize: 11.5,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (totalFare != null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        "Rp ${(totalFare is num ? totalFare.toInt() : (int.tryParse(totalFare.toString()) ?? 0)).toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+
+                const SizedBox(height: 10),
+
+                // Navigasi ke Aktivitas Button
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        statusColor.withOpacity(0.2),
+                        statusColor.withOpacity(0.08),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: statusColor.withOpacity(0.35)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.assignment_turned_in_rounded, color: statusColor, size: 14),
+                      const SizedBox(width: 6),
+                      Text(
+                        "Buka di Aktivitas",
+                        style: GoogleFonts.plusJakartaSans(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.arrow_forward_rounded, color: statusColor, size: 13),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-          InkWell(
-            onTap: _showBookingDetailsSheet,
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: AppTheme.surface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppTheme.border),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    "Detail",
-                    style: GoogleFonts.plusJakartaSans(
-                      color: AppTheme.primaryPink,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(width: 2),
-                  const Icon(Icons.chevron_right_rounded, color: AppTheme.primaryPink, size: 14),
-                ],
-              ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStepperItem(String label, int stepIdx, int currentStep, Color activeColor) {
+    final isActive = currentStep >= stepIdx;
+    final isCurrent = currentStep == stepIdx;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4.0),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(
+              color: isActive ? activeColor : AppTheme.textMuted.withOpacity(0.4),
+              shape: BoxShape.circle,
+              boxShadow: isCurrent
+                  ? [
+                      BoxShadow(
+                        color: activeColor.withOpacity(0.6),
+                        blurRadius: 6,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              color: isActive ? Colors.white : AppTheme.textMuted,
+              fontSize: 9.5,
+              fontWeight: isCurrent ? FontWeight.bold : FontWeight.w500,
             ),
           ),
         ],
@@ -898,12 +1399,248 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     );
   }
 
+  int _getMilestoneBubblesCount() {
+    if (widget.bookingId == null || widget.bookingId!.isEmpty) return 0;
+    final rawStatus = (_bookingData?['status'] ?? widget.status ?? 'ongoing').toString().toLowerCase();
+    final isCompleted = rawStatus == 'completed' || rawStatus == 'paid' || rawStatus == 'selesai';
+    final isPending = rawStatus == 'pending' || rawStatus == 'requested' || rawStatus == 'searching';
+
+    if (isCompleted) return 3;
+    if (isPending) return 1;
+    return 2; // ongoing
+  }
+
+  Widget _buildMilestoneBubbleAtIndex(int idx) {
+    final bookingCode = widget.bookingId!.length > 6 
+        ? widget.bookingId!.substring(0, 6).toUpperCase() 
+        : widget.bookingId!;
+    final serviceType = _bookingData?['service_type'] ?? widget.tag ?? 'Layanan Pendamping';
+
+    if (idx == 0) {
+      // Milestone 1: Permintaan Pesanan Diajukan
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.4)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFF59E0B).withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.assignment_outlined, color: Color(0xFFF59E0B), size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  "Permintaan Pesanan #$bookingCode Diajukan",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "Layanan $serviceType telah diajukan. Semua koordinasi aman via pesan teks terenkripsi.",
+              style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5, height: 1.35),
+            ),
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: _navigateToActivity,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF59E0B).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.assignment_turned_in_rounded, color: Color(0xFFF59E0B), size: 13),
+                    const SizedBox(width: 6),
+                    Text(
+                      "Buka di Aktivitas",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFFF59E0B),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right_rounded, color: Color(0xFFF59E0B), size: 14),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else if (idx == 1) {
+      // Milestone 2: Pesanan Sedang Berjalan
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF10B981).withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.directions_car_rounded, color: Color(0xFF10B981), size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  "Pesanan Sedang Berjalan",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "Mitra terhubung dan siap berinteraksi. Pantau perkembangan perjalanan secara berkala.",
+              style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5, height: 1.35),
+            ),
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: _navigateToActivity,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.track_changes_rounded, color: Color(0xFF10B981), size: 13),
+                    const SizedBox(width: 6),
+                    Text(
+                      "Pantau di Aktivitas",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFF10B981),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right_rounded, color: Color(0xFF10B981), size: 14),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      // Milestone 3: Pesanan Selesai
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFA855F7).withOpacity(0.4)),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFA855F7).withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.verified_rounded, color: Color(0xFFA855F7), size: 18),
+                const SizedBox(width: 8),
+                Text(
+                  "Pesanan Selesai & Dituntaskan",
+                  style: GoogleFonts.plusJakartaSans(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              "Terima kasih telah menggunakan Temenin Aja. Rincian invoice dan ulasan tersimpan aman.",
+              style: GoogleFonts.inter(color: AppTheme.textMuted, fontSize: 11.5, height: 1.35),
+            ),
+            const SizedBox(height: 10),
+            InkWell(
+              onTap: _navigateToActivity,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFA855F7).withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFA855F7).withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.receipt_long_rounded, color: Color(0xFFA855F7), size: 13),
+                    const SizedBox(width: 6),
+                    Text(
+                      "Lihat Rincian di Aktivitas",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: const Color(0xFFA855F7),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.chevron_right_rounded, color: Color(0xFFA855F7), size: 14),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
   Widget _buildSafetyNotice() {
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 14),
+      margin: const EdgeInsets.symmetric(vertical: 12),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.surface.withOpacity(0.8),
+        color: AppTheme.surface.withOpacity(0.85),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppTheme.border.withOpacity(0.8)),
       ),
@@ -911,11 +1648,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.lock_outline_rounded, color: AppTheme.textMuted, size: 14),
+          const Icon(Icons.lock_outline_rounded, color: Color(0xFF10B981), size: 14),
           const SizedBox(width: 8),
           Flexible(
             child: Text(
-              "Chat ini terenkripsi demi keamanan & privasi Anda.",
+              "Pesan Teks Terenkripsi: Panggilan telepon ditiadakan demi privasi & rekam jejak aman.",
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(
                 color: AppTheme.textMuted,

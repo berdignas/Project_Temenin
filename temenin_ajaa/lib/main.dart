@@ -1,4 +1,6 @@
 // Path: lib\main.dart
+import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:provider/provider.dart';
@@ -19,6 +21,27 @@ import 'core/services/pricing_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Handle transient web engine assertions & resize glitches
+  FlutterError.onError = (FlutterErrorDetails details) {
+    final msg = details.exceptionAsString();
+    if (msg.contains('ViewInsets cannot be negative') ||
+        msg.contains('_viewInsets.isNonNegative')) {
+      debugPrint('ℹ️ Handled transient Web Engine ViewInsets assertion');
+      return;
+    }
+    FlutterError.presentError(details);
+  };
+
+  PlatformDispatcher.instance.onError = (error, stack) {
+    final str = error.toString();
+    if (str.contains('ViewInsets cannot be negative') ||
+        str.contains('_viewInsets.isNonNegative')) {
+      debugPrint('ℹ️ Handled transient Web PlatformDispatcher ViewInsets assertion');
+      return true;
+    }
+    return false;
+  };
   
   // Load .env configuration
   try {

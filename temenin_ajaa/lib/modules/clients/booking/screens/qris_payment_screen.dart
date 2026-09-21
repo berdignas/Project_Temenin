@@ -88,6 +88,9 @@ class _QrisPaymentScreenState extends State<QrisPaymentScreen> {
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('id', widget.bookingId)
+          .handleError((err) {
+            debugPrint('Realtime booking stream error handled: $err');
+          })
           .listen(
             (List<Map<String, dynamic>> records) {
               if (!mounted || _isPaymentConfirmed) return;
@@ -99,6 +102,7 @@ class _QrisPaymentScreenState extends State<QrisPaymentScreen> {
             onError: (err) {
               debugPrint('Realtime booking stream error: $err');
             },
+            cancelOnError: false,
           );
     } catch (e) {
       debugPrint('Realtime booking stream exception: $e');

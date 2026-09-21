@@ -219,7 +219,7 @@ class AuthService {
     final cleanPhone = _sanitizePhone(phone);
     final candidateUrls = [
       '${ApiConstants.baseUrl}/api/auth/send-otp',
-      'http://10.0.2.2:3002/api/auth/send-otp',
+      if (!kIsWeb) 'http://10.0.2.2:3002/api/auth/send-otp',
       'http://127.0.0.1:3002/api/auth/send-otp',
       'http://localhost:3002/api/auth/send-otp',
     ];
@@ -256,7 +256,7 @@ class AuthService {
     final cleanPhone = _sanitizePhone(phone);
     final candidateUrls = [
       '${ApiConstants.baseUrl}/api/auth/verify-otp',
-      'http://10.0.2.2:3002/api/auth/verify-otp',
+      if (!kIsWeb) 'http://10.0.2.2:3002/api/auth/verify-otp',
       'http://127.0.0.1:3002/api/auth/verify-otp',
       'http://localhost:3002/api/auth/verify-otp',
     ];

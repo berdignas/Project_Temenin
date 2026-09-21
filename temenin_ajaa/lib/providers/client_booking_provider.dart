@@ -40,13 +40,17 @@ class ClientBookingProvider extends ChangeNotifier {
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('user_id', userId)
+          .handleError((err) {
+            debugPrint('❌ Client Realtime Error handled: $err -> Fallback to REST Polling');
+            startPollingActiveBookings();
+          })
           .listen((List<Map<String, dynamic>> data) async {
             debugPrint('⚡ Client Realtime: Received ${data.length} bookings for user $userId');
             _processBookingData(data);
           }, onError: (err) {
             debugPrint('❌ Client Realtime Error: $err -> Fallback to REST Polling');
             startPollingActiveBookings();
-          });
+          }, cancelOnError: false);
     } catch (e) {
       debugPrint('❌ Client Realtime Exception: $e -> Fallback to REST Polling');
       startPollingActiveBookings();
@@ -299,19 +303,26 @@ class ClientBookingProvider extends ChangeNotifier {
       enrichedDetails['booking_date'] = bookingDateIso;
       enrichedDetails['bookingDate'] = bookingDateIso;
 
-      // Always generate a fresh, unique 4-digit PIN for every new booking
+      // Always generate fresh, unique 4-digit PINs for every new booking
       final random = Random();
       final freshOtp = (random.nextInt(9000) + 1000).toString();
+      String freshServiceOtp;
+      do {
+        freshServiceOtp = (random.nextInt(9000) + 1000).toString();
+      } while (freshServiceOtp == freshOtp);
       String freshCompOtp;
       do {
         freshCompOtp = (random.nextInt(9000) + 1000).toString();
-      } while (freshCompOtp == freshOtp);
+      } while (freshCompOtp == freshOtp || freshCompOtp == freshServiceOtp);
 
       enrichedDetails['otp'] = freshOtp;
       enrichedDetails['security_pin'] = freshOtp;
       enrichedDetails['start_otp'] = freshOtp;
+      enrichedDetails['service_pin'] = freshServiceOtp;
+      enrichedDetails['start_service_pin'] = freshServiceOtp;
+      enrichedDetails['service_otp'] = freshServiceOtp;
       enrichedDetails['completion_otp'] = freshCompOtp;
-      debugPrint("🔑 Generated FRESH PIN for new booking: $freshOtp (Completion: $freshCompOtp)");
+      debugPrint("🔑 Generated FRESH PIN for new booking: Start=$freshOtp, Service=$freshServiceOtp, Completion=$freshCompOtp");
 
       final response = await http.post(
         url,

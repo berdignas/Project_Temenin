@@ -33,7 +33,8 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
     super.initState();
     final rawTotal = widget.bookingData?['totalPayment'] ?? widget.bookingData?['total_price'] ?? 250000;
     totalPayment = rawTotal is num ? rawTotal.toInt() : (int.tryParse(rawTotal.toString()) ?? 250000);
-    dpAmount = widget.bookingData?['dp'] ?? (totalPayment * 0.5).toInt();
+    final rawDp = widget.bookingData?['dp'];
+    dpAmount = rawDp is num ? rawDp.toInt() : (int.tryParse(rawDp?.toString() ?? '') ?? (totalPayment * 0.5).toInt());
     payAmount = widget.isPelunasan ? (totalPayment - dpAmount) : dpAmount;
   }
 
@@ -405,9 +406,22 @@ class _PaymentMethodScreenState extends State<PaymentMethodScreen> {
                 } else {
                   final random = Random();
                   final freshOtp = (random.nextInt(9000) + 1000).toString();
+                  String freshServiceOtp;
+                  do {
+                    freshServiceOtp = (random.nextInt(9000) + 1000).toString();
+                  } while (freshServiceOtp == freshOtp);
+                  String freshCompOtp;
+                  do {
+                    freshCompOtp = (random.nextInt(9000) + 1000).toString();
+                  } while (freshCompOtp == freshOtp || freshCompOtp == freshServiceOtp);
+
                   bookingDetails['otp'] = freshOtp;
                   bookingDetails['security_pin'] = freshOtp;
                   bookingDetails['start_otp'] = freshOtp;
+                  bookingDetails['service_pin'] = freshServiceOtp;
+                  bookingDetails['start_service_pin'] = freshServiceOtp;
+                  bookingDetails['service_otp'] = freshServiceOtp;
+                  bookingDetails['completion_otp'] = freshCompOtp;
                 }
 
                 String? currentBookingId = widget.bookingId;

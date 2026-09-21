@@ -1095,13 +1095,20 @@ class BookingConfirmationScreen extends StatelessWidget {
                 final bookingDetails = Map<String, dynamic>.from(bookingData ?? {});
                 final random = Random();
                 final freshPin = (random.nextInt(9000) + 1000).toString();
+                String freshServicePin;
+                do {
+                  freshServicePin = (random.nextInt(9000) + 1000).toString();
+                } while (freshServicePin == freshPin);
                 String freshCompPin;
                 do {
                   freshCompPin = (random.nextInt(9000) + 1000).toString();
-                } while (freshCompPin == freshPin);
+                } while (freshCompPin == freshPin || freshCompPin == freshServicePin);
                 bookingDetails['otp'] = freshPin;
                 bookingDetails['security_pin'] = freshPin;
                 bookingDetails['start_otp'] = freshPin;
+                bookingDetails['service_pin'] = freshServicePin;
+                bookingDetails['start_service_pin'] = freshServicePin;
+                bookingDetails['service_otp'] = freshServicePin;
                 bookingDetails['completion_otp'] = freshCompPin;
 
                 // Panggil REST API Backend via ClientBookingProvider (/api/bookings)

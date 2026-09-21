@@ -62,6 +62,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   Timer? _pollingTimer;
   bool _isCompletionModalShowing = false;
   bool _isPelunasanModalShowing = false;
+  bool _isEnsuringOtp = false;
   Map<String, dynamic>? _fetchedDriverProfile;
 
   @override
@@ -72,15 +73,25 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     _fetchDriverDetailsIfNeeded();
 
     final initDetails = widget.bookingData;
-    final addDetails = initDetails?['additional_details'] is Map
-        ? initDetails!['additional_details'] as Map
-        : (initDetails?['additionalDetails'] is Map ? initDetails!['additionalDetails'] as Map : null);
+    Map<String, dynamic>? addDetails;
+    if (initDetails?['additional_details'] is Map) {
+      addDetails = Map<String, dynamic>.from(initDetails!['additional_details'] as Map);
+    } else if (initDetails?['additionalDetails'] is Map) {
+      addDetails = Map<String, dynamic>.from(initDetails!['additionalDetails'] as Map);
+    } else if (initDetails?['additional_details'] is String) {
+      try {
+        final dec = jsonDecode(initDetails!['additional_details'] as String);
+        if (dec is Map) addDetails = Map<String, dynamic>.from(dec);
+      } catch (_) {}
+    }
     final subStatus = addDetails?['sub_status']?.toString() ?? initDetails?['sub_status']?.toString();
     final isDpPaid = addDetails?['dp_paid'] == true || initDetails?['dp_paid'] == true || subStatus == 'dp_paid';
     String initialStatus = widget.initialStatus ?? subStatus ?? initDetails?['status'] ?? 'pending';
-    if (isDpPaid && (initialStatus == 'accepted' || initialStatus == 'ongoing')) {
-      if (subStatus == null || subStatus.isEmpty || subStatus == 'accepted') {
-        initialStatus = 'dp_paid';
+    if (isDpPaid) {
+      if (initialStatus == 'accepted' || initialStatus == 'pending') {
+        initialStatus = (subStatus != null && subStatus.isNotEmpty && subStatus != 'accepted')
+            ? subStatus
+            : 'dp_paid';
       }
     }
     _simulationState = initialStatus;
@@ -157,6 +168,9 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       _driversSubscription = Supabase.instance.client
           .from('drivers')
           .stream(primaryKey: ['id'])
+          .handleError((err) {
+            debugPrint("Active drivers stream error handled: $err");
+          })
           .listen(
             (List<Map<String, dynamic>> data) {
               if (mounted) {
@@ -169,6 +183,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
             onError: (err) {
               debugPrint("Active drivers stream Realtime error: $err");
             },
+            cancelOnError: false,
           );
     } catch (e) {
       debugPrint("Error streaming active drivers: $e");
@@ -268,8 +283,8 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     });
   }
 
-  String _formatCurrency(int amount) {
-    return "Rp ${amount.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
+  String _formatCurrency(num amount) {
+    return "Rp ${amount.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
   }
 
   void _showPelunasanModal() {
@@ -522,9 +537,44 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     return null;
   }
 
+  String? _extractServiceOtp(dynamic data) {
+    if (data == null) return null;
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) return trimmed;
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map) return _extractServiceOtp(decoded);
+      } catch (_) {}
+      return null;
+    }
+    if (data is Map) {
+      final direct = data['service_pin']?.toString().trim() ??
+          data['servicePin']?.toString().trim() ??
+          data['start_service_pin']?.toString().trim() ??
+          data['startServicePin']?.toString().trim() ??
+          data['service_otp']?.toString().trim() ??
+          data['serviceOtp']?.toString().trim();
+      if (direct != null && direct.isNotEmpty && direct != 'null') {
+        return direct;
+      }
+      if (data['additional_details'] != null) {
+        final sub = _extractServiceOtp(data['additional_details']);
+        if (sub != null) return sub;
+      }
+      if (data['additionalDetails'] != null) {
+        final sub = _extractServiceOtp(data['additionalDetails']);
+        if (sub != null) return sub;
+      }
+    }
+    return null;
+  }
+
   Future<void> _ensureRealOtpExists() async {
     final bookingId = _currentBookingId ?? widget.bookingId;
     if (bookingId == null || bookingId.startsWith('mock')) return;
+    if (_isEnsuringOtp) return;
+    _isEnsuringOtp = true;
 
     try {
       final dynamic queryId = int.tryParse(bookingId) ?? bookingId;
@@ -546,20 +596,31 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
 
       // Check existing OTPs in DB directly - do NOT fall back to stale memory from old bookings
       String? startOtp = _extractOtp(dbDetails);
+      String? serviceOtp = _extractServiceOtp(dbDetails);
       String? compOtp = _extractCompletionOtp(dbDetails);
 
       final random = Random();
       bool needsUpdate = false;
 
+      // Token 1: OTW Start PIN
       if (startOtp == null || startOtp.isEmpty || startOtp == '1234') {
         startOtp = (random.nextInt(9000) + 1000).toString();
         needsUpdate = true;
       }
 
-      if (compOtp == null || compOtp.isEmpty || compOtp == '1234' || compOtp == startOtp) {
+      // Token 2: Fresh Start Service PIN (preserve if already in DB)
+      if (serviceOtp == null || serviceOtp.isEmpty || serviceOtp == '1234') {
+        do {
+          serviceOtp = (random.nextInt(9000) + 1000).toString();
+        } while (serviceOtp == startOtp);
+        needsUpdate = true;
+      }
+
+      // Token 3: Completion PIN (preserve if already in DB)
+      if (compOtp == null || compOtp.isEmpty || compOtp == '1234') {
         do {
           compOtp = (random.nextInt(9000) + 1000).toString();
-        } while (compOtp == startOtp);
+        } while (compOtp == startOtp || compOtp == serviceOtp);
         needsUpdate = true;
       }
 
@@ -573,14 +634,17 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       updatedDetails['otp'] = startOtp;
       updatedDetails['security_pin'] = startOtp;
       updatedDetails['start_otp'] = startOtp;
+      updatedDetails['service_pin'] = serviceOtp;
+      updatedDetails['start_service_pin'] = serviceOtp;
+      updatedDetails['service_otp'] = serviceOtp;
       updatedDetails['completion_otp'] = compOtp;
 
-      if (needsUpdate || dbDetails['otp'] == null || dbDetails['security_pin'] == null) {
+      if (needsUpdate || dbDetails['otp'] == null || dbDetails['security_pin'] == null || dbDetails['service_pin'] == null) {
         await Supabase.instance.client
             .from('bookings')
             .update({'additional_details': updatedDetails})
             .eq('id', queryId);
-        debugPrint("✅ Saved FRESH Start PIN $startOtp & Completion PIN $compOtp for booking $bookingId to Supabase");
+        debugPrint("✅ Saved FRESH Start PIN $startOtp, Service PIN $serviceOtp & Completion PIN $compOtp for booking $bookingId to Supabase");
       }
 
       if (mounted) {
@@ -589,6 +653,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
             _bookingDetails!['additional_details'] = updatedDetails;
             _bookingDetails!['otp'] = startOtp;
             _bookingDetails!['security_pin'] = startOtp;
+            _bookingDetails!['service_pin'] = serviceOtp;
             _bookingDetails!['completion_otp'] = compOtp;
           } else {
             _bookingDetails = {
@@ -596,6 +661,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
               'additional_details': updatedDetails,
               'otp': startOtp,
               'security_pin': startOtp,
+              'service_pin': serviceOtp,
               'completion_otp': compOtp,
             };
           }
@@ -603,6 +669,8 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       }
     } catch (e) {
       debugPrint("Error in _ensureRealOtpExists: $e");
+    } finally {
+      _isEnsuringOtp = false;
     }
   }
 
@@ -622,6 +690,9 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('id', queryId)
+          .handleError((err) {
+            debugPrint("Booking status stream error handled: $err");
+          })
           .listen(
             (List<Map<String, dynamic>> data) {
               if (data.isNotEmpty) {
@@ -631,6 +702,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
             onError: (err) {
               debugPrint("Booking status stream Realtime error: $err");
             },
+            cancelOnError: false,
           );
     } catch (e) {
       debugPrint('❌ Supabase subscription error: $e');
@@ -816,14 +888,16 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   }
 
   void _handleClientBackNavigation() {
-    Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    } else {
+      Navigator.pushNamedAndRemoveUntil(context, '/client-home', (route) => false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final Map<String, dynamic> details = (_bookingDetails != null && _bookingDetails!.containsKey('additional_details'))
-        ? (_bookingDetails!['additional_details'] as Map<String, dynamic>? ?? widget.bookingData ?? {})
-        : (_bookingDetails ?? widget.bookingData ?? {});
+    final Map<String, dynamic> details = _bookingDetails ?? widget.bookingData ?? {};
 
     final driverProv = Provider.of<DriverProvider>(context);
     final dId = _bookingDetails?['driver_id']?.toString() ?? details['driver_id']?.toString();
@@ -877,15 +951,19 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
       widget.bookingData?['destination'], widget.bookingData?['dropoff'], widget.bookingData?['dropoffLocation'], widget.bookingData?['dropoff_location'],
     ], 'Grand Indonesia Mall, West Mall Lobby (Destinasi Tujuan)');
 
-    final totalPayment = details['totalPayment'] ?? details['total_price'] ?? 130000;
-    final dp = details['dp'] ?? (totalPayment is num ? (totalPayment * 0.5).toInt() : 65000);
-    final remainingPayment = (totalPayment is num && dp is num) ? (totalPayment - dp).toInt() : 65000;
+    final rawTotal = details['totalPayment'] ?? details['total_price'] ?? 130000;
+    final int totalPayment = rawTotal is num ? rawTotal.toInt() : (int.tryParse(rawTotal.toString()) ?? 130000);
+    final rawDp = details['dp'];
+    final int dp = rawDp is num ? rawDp.toInt() : (int.tryParse(rawDp?.toString() ?? '') ?? (totalPayment * 0.5).toInt());
+    final int remainingPayment = totalPayment - dp;
     final paymentMethod = widget.paymentMethod ?? "BCA Virtual Account";
     final serviceType = details['serviceType'] ?? 'antar_jemput';
     final rawOtp = _extractOtp(_bookingDetails) ?? _extractOtp(widget.bookingData) ?? _extractOtp(details);
+    final rawServiceOtp = _extractServiceOtp(_bookingDetails) ?? _extractServiceOtp(widget.bookingData) ?? _extractServiceOtp(details);
     final rawCompOtp = _extractCompletionOtp(_bookingDetails) ?? _extractCompletionOtp(widget.bookingData) ?? _extractCompletionOtp(details);
 
     final startPin = (rawOtp != null && rawOtp.isNotEmpty) ? rawOtp : "••••";
+    final servicePin = (rawServiceOtp != null && rawServiceOtp.isNotEmpty) ? rawServiceOtp : "••••";
     final compPin = (rawCompOtp != null && rawCompOtp.isNotEmpty) ? rawCompOtp : "••••";
 
     final addSub = (details['additional_details'] is Map ? details['additional_details']['sub_status'] : null) ??
@@ -893,10 +971,18 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                    (_bookingDetails?['sub_status']);
     final isOngoingSession = (_simulationState == 'started' || _simulationState == 'ongoing' || _simulationState == 'completion_requested') ||
                              (addSub == 'started' || addSub == 'ongoing' || addSub == 'completion_requested');
-    final otpPin = isOngoingSession ? (compPin.isNotEmpty && compPin != '••••' ? compPin : startPin) : startPin;
 
-    String formatCurrency(int amount) {
-      return "Rp ${amount.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
+    final isArrivedState = _simulationState == 'arrived' || addSub == 'arrived';
+
+    String otpPin = startPin;
+    if (isArrivedState) {
+      otpPin = (servicePin.isNotEmpty && servicePin != '••••') ? servicePin : startPin;
+    } else if (isOngoingSession) {
+      otpPin = (compPin.isNotEmpty && compPin != '••••') ? compPin : startPin;
+    }
+
+    String formatCurrency(num amount) {
+      return "Rp ${amount.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]}.')}";
     }
 
     if (_simulationState == 'review') {
@@ -906,7 +992,8 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
 
 
     if (_simulationState == 'accepted') {
-      final totalEst = (details['totalPayment'] ?? details['total_price'] ?? 130000) as num;
+      final rawAcceptedTotal = details['totalPayment'] ?? details['total_price'] ?? 130000;
+      final int totalEst = rawAcceptedTotal is num ? rawAcceptedTotal.toInt() : (int.tryParse(rawAcceptedTotal.toString()) ?? 130000);
       final dpAmount = (totalEst * 0.5).toInt();
 
       return Scaffold(
@@ -1056,6 +1143,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                             countdownTimer: _countdownTimer,
                             serviceType: serviceType,
                             otpPin: otpPin,
+                            isArrived: isArrivedState,
                           ),
                           const SizedBox(height: 15),
 
@@ -1199,13 +1287,14 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     required String countdownTimer,
     required String serviceType,
     String? otpPin,
+    bool isArrived = false,
   }) {
     String statusLabel = 'ON THE WAY';
     if (_simulationState == 'pending') statusLabel = 'MENUNGGU DRIVER';
     if (_simulationState == 'accepted') statusLabel = 'DRIVER ACCEPTED';
     if (_simulationState == 'dp_paid') statusLabel = 'DP TERBAYAR - MENUNGGU OTW';
     if (_simulationState == 'on_the_way') statusLabel = 'DRIVER ON THE WAY';
-    if (_simulationState == 'arrived') statusLabel = 'DRIVER ARRIVED';
+    if (_simulationState == 'arrived' || isArrived) statusLabel = 'DRIVER ARRIVED';
     if (_simulationState == 'started' || _simulationState == 'ongoing') statusLabel = 'SERVICE ONGOING';
     if (_simulationState == 'completed') statusLabel = 'SERVICE COMPLETED';
     if (_simulationState == 'paid') statusLabel = 'PAID';
@@ -1247,7 +1336,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                         ? "DP Terverifikasi, Menunggu Driver OTW"
                         : (_simulationState == 'on_the_way'
                             ? estimatedTime
-                            : (_simulationState == 'arrived'
+                            : ((_simulationState == 'arrived' || isArrived)
                                 ? "Driver Telah Tiba!"
                                 : (_simulationState == 'completed'
                                     ? "Layanan Selesai"
@@ -1258,7 +1347,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
             const SizedBox(height: 10),
             _buildDurationBadge(countdownTimer),
           ],
-          if (_simulationState == 'arrived' || _simulationState == 'on_the_way' || _simulationState == 'dp_paid') ...[
+          if (isArrived || _simulationState == 'arrived' || _simulationState == 'on_the_way' || _simulationState == 'dp_paid') ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1276,7 +1365,9 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          "PIN VERIFIKASI KEAMANAN",
+                          isArrived
+                              ? "PIN MEMULAI LAYANAN"
+                              : "PIN KEBERANGKATAN OTW",
                           style: GoogleFonts.inter(
                             color: AppTheme.primaryPink,
                             fontSize: 10,
@@ -1286,26 +1377,49 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          "Berikan PIN ini ke driver Anda untuk memulai layanan:",
+                          isArrived
+                              ? "Berikan PIN ini ke driver Anda saat bertemu untuk memulai sesi layanan:"
+                              : "PIN konfirmasi keberangkatan driver menuju lokasi Anda:",
                           style: GoogleFonts.inter(color: AppTheme.textHighContrast, fontSize: 11),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryPink,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      otpPin ?? "1234",
-                      style: GoogleFonts.shareTechMono(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 2,
+                  GestureDetector(
+                    onTap: () {
+                      if (otpPin != null && otpPin != '••••') {
+                        Clipboard.setData(ClipboardData(text: otpPin));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("PIN $otpPin berhasil disalin!"),
+                            backgroundColor: AppTheme.primaryPink,
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryPink,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            otpPin ?? "1234",
+                            style: GoogleFonts.shareTechMono(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 2,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.copy_rounded, color: Colors.white70, size: 14),
+                        ],
                       ),
                     ),
                   ),
@@ -1948,10 +2062,10 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
   }
 
   Widget _buildPaymentSummaryCard({
-    required int totalPayment,
-    required int remainingPayment,
+    required num totalPayment,
+    required num remainingPayment,
     required String paymentMethod,
-    required String Function(int) formatCurrency,
+    required String Function(num) formatCurrency,
   }) {
     return Container(
       padding: const EdgeInsets.all(20),
@@ -1997,7 +2111,7 @@ class _TrackingDriverScreenState extends State<TrackingDriverScreen> {
     );
   }
 
-  Widget _buildFinalInvoiceCard(int totalPayment, int dpPaid, String Function(int) formatCurrency) {
+  Widget _buildFinalInvoiceCard(num totalPayment, num dpPaid, String Function(num) formatCurrency) {
     final currentDue = _finalDueAmount > 0 
         ? _finalDueAmount 
         : ((totalPayment - dpPaid) + (_overtimeHours * _overtimeCost));
@@ -2737,6 +2851,9 @@ class _MockChatScreenState extends State<_MockChatScreen> {
           .stream(primaryKey: ['id'])
           .eq('booking_id', widget.bookingId!)
           .order('created_at', ascending: true)
+          .handleError((err) {
+            debugPrint('Chat stream error handled: $err');
+          })
           .listen((List<Map<String, dynamic>> data) {
             if (mounted) {
               final formatted = data.map((m) {

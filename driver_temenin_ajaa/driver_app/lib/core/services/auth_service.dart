@@ -11,6 +11,27 @@ class AuthService {
   static const String _tokenKey = 'driver_token';
   static const String _userKey = 'driver_user_data';
 
+  List<String> _getCandidateUrls(String endpoint) {
+    final urls = <String>[];
+    final base = ApiConstants.baseUrl;
+    urls.add('$base$endpoint');
+
+    if (kIsWeb) {
+      final loc = 'http://localhost:3002$endpoint';
+      final ip = 'http://127.0.0.1:3002$endpoint';
+      if (!urls.contains(loc)) urls.add(loc);
+      if (!urls.contains(ip)) urls.add(ip);
+    } else {
+      final emuUrl = 'http://10.0.2.2:3002$endpoint';
+      if (!urls.contains(emuUrl)) urls.add(emuUrl);
+      final ip = 'http://127.0.0.1:3002$endpoint';
+      if (!urls.contains(ip)) urls.add(ip);
+      final loc = 'http://localhost:3002$endpoint';
+      if (!urls.contains(loc)) urls.add(loc);
+    }
+    return urls;
+  }
+
   // Login
   Future<Map<String, dynamic>> login(String identifier, String password) async {
     final cleanIdentifier = identifier.trim();
@@ -19,13 +40,7 @@ class AuthService {
     if (cleanPhone.startsWith('0')) cleanPhone = cleanPhone.substring(1);
     if (cleanPhone.startsWith('62')) cleanPhone = cleanPhone.substring(2);
 
-    // List of candidate URLs (configured Wi-Fi IP, Emulator 10.0.2.2, localhost port 3002)
-    final candidateUrls = [
-      '${ApiConstants.baseUrl}${ApiConstants.login}',
-      'http://10.0.2.2:3002${ApiConstants.login}',
-      'http://127.0.0.1:3002${ApiConstants.login}',
-      'http://localhost:3002${ApiConstants.login}',
-    ];
+    final candidateUrls = _getCandidateUrls(ApiConstants.login);
 
     for (final rawUrl in candidateUrls) {
       try {
@@ -533,12 +548,7 @@ class AuthService {
   }) async {
     try {
       final token = await getToken();
-      final candidateUrls = [
-        '${ApiConstants.baseUrl}${ApiConstants.withdraw}',
-        'http://10.0.2.2:3002${ApiConstants.withdraw}',
-        'http://127.0.0.1:3002${ApiConstants.withdraw}',
-        'http://localhost:3002${ApiConstants.withdraw}',
-      ];
+      final candidateUrls = _getCandidateUrls(ApiConstants.withdraw);
 
       for (final rawUrl in candidateUrls) {
         try {
@@ -583,12 +593,7 @@ class AuthService {
   // Send OTP via Backend (Zenziva SMS / Voice Call OTP / WA)
   Future<Map<String, dynamic>> sendOtp(String phone, {String? channel}) async {
     final cleanPhone = _sanitizePhone(phone);
-    final candidateUrls = [
-      '${ApiConstants.baseUrl}/api/auth/send-otp',
-      'http://10.0.2.2:3002/api/auth/send-otp',
-      'http://127.0.0.1:3002/api/auth/send-otp',
-      'http://localhost:3002/api/auth/send-otp',
-    ];
+    final candidateUrls = _getCandidateUrls('/api/auth/send-otp');
 
     for (final rawUrl in candidateUrls) {
       try {
@@ -650,12 +655,7 @@ class AuthService {
   // Verify OTP
   Future<Map<String, dynamic>> verifyOtp(String phone, String otp) async {
     final cleanPhone = _sanitizePhone(phone);
-    final candidateUrls = [
-      '${ApiConstants.baseUrl}/api/auth/verify-otp',
-      'http://10.0.2.2:3002/api/auth/verify-otp',
-      'http://127.0.0.1:3002/api/auth/verify-otp',
-      'http://localhost:3002/api/auth/verify-otp',
-    ];
+    final candidateUrls = _getCandidateUrls('/api/auth/verify-otp');
 
     for (final rawUrl in candidateUrls) {
       try {

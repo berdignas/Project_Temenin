@@ -18,7 +18,44 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content, viewport-fit=cover">
+  <meta name="description" content="Temenin Ajaa Driver App.">
+
+  <script>
+    // Safeguard against Flutter Web Engine Assertion:
+    // "ViewInsets cannot be negative. This is usually caused by an incorrect physicalSize calculation when the keyboard is being dismissed."
+    (function() {
+      if (typeof window !== 'undefined' && window.visualViewport) {
+        try {
+          var vvProto = Object.getPrototypeOf(window.visualViewport);
+          var hDesc = Object.getOwnPropertyDescriptor(vvProto, 'height');
+          if (hDesc && hDesc.get) {
+            Object.defineProperty(vvProto, 'height', {
+              get: function() {
+                var h = hDesc.get.call(this);
+                return Math.min(h, window.innerHeight);
+              },
+              configurable: true,
+              enumerable: true
+            });
+          }
+          var wDesc = Object.getOwnPropertyDescriptor(vvProto, 'width');
+          if (wDesc && wDesc.get) {
+            Object.defineProperty(vvProto, 'width', {
+              get: function() {
+                var w = wDesc.get.call(this);
+                return Math.min(w, window.innerWidth);
+              },
+              configurable: true,
+              enumerable: true
+            });
+          }
+        } catch (e) {
+          console.warn('visualViewport safety guard notice:', e);
+        }
+      }
+    })();
+  </script>
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">

@@ -195,6 +195,9 @@ class _LiveDriverTrackingMapState extends State<LiveDriverTrackingMap> with Sing
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('id', queryId)
+          .handleError((err) {
+            debugPrint("Live map stream error handled: $err");
+          })
           .listen(
             (rows) {
               if (rows.isNotEmpty && mounted) {
@@ -205,6 +208,7 @@ class _LiveDriverTrackingMapState extends State<LiveDriverTrackingMap> with Sing
             onError: (err) {
               debugPrint("Live map stream error: $err");
             },
+            cancelOnError: false,
           );
     } catch (e) {
       debugPrint("Error subscribing to driver GPS stream: $e");

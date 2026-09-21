@@ -514,8 +514,8 @@ class CommunityProvider extends ChangeNotifier {
     bool savedToBackend = false;
     try {
       final candidateUrls = [
-        'http://192.168.1.4:3002/api/community/posts',
-        'http://10.0.2.2:3002/api/community/posts',
+        if (!kIsWeb) 'http://192.168.1.4:3002/api/community/posts',
+        if (!kIsWeb) 'http://10.0.2.2:3002/api/community/posts',
         '${ApiConstants.baseUrl}/api/community/posts',
         'http://127.0.0.1:3002/api/community/posts',
         'http://localhost:3002/api/community/posts',

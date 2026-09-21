@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -90,6 +92,42 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
       }
       if (data['additionalDetails'] != null) {
         final sub = _extractOtp(data['additionalDetails']);
+        if (sub != null) return sub;
+      }
+    }
+    return null;
+  }
+
+  String? _extractServiceOtp(dynamic data) {
+    if (data == null) return null;
+    if (data is String) {
+      final trimmed = data.trim();
+      if (RegExp(r'^\d{4}$').hasMatch(trimmed)) return trimmed;
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map) return _extractServiceOtp(decoded);
+      } catch (_) {}
+      return null;
+    }
+    if (data is BookingModel) {
+      return _extractServiceOtp(data.additionalDetails);
+    }
+    if (data is Map) {
+      final direct = data['service_pin']?.toString().trim() ??
+          data['servicePin']?.toString().trim() ??
+          data['start_service_pin']?.toString().trim() ??
+          data['startServicePin']?.toString().trim() ??
+          data['service_otp']?.toString().trim() ??
+          data['serviceOtp']?.toString().trim();
+      if (direct != null && direct.isNotEmpty && direct != 'null') {
+        return direct;
+      }
+      if (data['additional_details'] != null) {
+        final sub = _extractServiceOtp(data['additional_details']);
+        if (sub != null) return sub;
+      }
+      if (data['additionalDetails'] != null) {
+        final sub = _extractServiceOtp(data['additionalDetails']);
         if (sub != null) return sub;
       }
     }
@@ -1133,45 +1171,68 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                         : () async {
                             if (nextStatus == 'started') {
                               final active = provider.activeBooking;
-                              // Ambil OTP dari active booking
-                      dynamic rawOtp = _extractOtp(active?.additionalDetails) ?? _extractOtp(active);
-                      
-                      // Fetch directly from Supabase for this booking to be 100% up-to-date
-                      if (active != null) {
-                        try {
-                          final dynamic queryId = int.tryParse(active.id) ?? active.id;
-                          final freshData = await Supabase.instance.client
-                              .from('bookings')
-                              .select('additional_details')
-                              .eq('id', queryId)
-                              .maybeSingle();
-                          if (freshData != null) {
-                            final fOtp = _extractOtp(freshData['additional_details']) ?? _extractOtp(freshData);
-                            if (fOtp != null && fOtp.isNotEmpty) {
-                              rawOtp = fOtp;
-                            }
-                          }
-                        } catch (e) {
-                          debugPrint("Error fetching latest OTP from Supabase: $e");
-                        }
-                      }
-                      
-                      final expectedPin = (rawOtp != null && rawOtp.toString().trim().isNotEmpty)
-                          ? rawOtp.toString().trim()
-                          : '';
-                      debugPrint("🔑 Real Client PIN from DB for booking ${active?.id}: '$expectedPin'");
-                      if (context.mounted) {
-                        _showPinVerificationDialog(
-                          context, 
-                          provider, 
-                          expectedPin, 
-                          targetStatus: nextStatus,
-                          subtitleText: nextStatus == 'on_the_way' 
-                              ? "Masukkan 4-digit PIN dari aplikasi Klien untuk memverifikasi dan memulai perjalanan OTW." 
-                              : "Tanyakan 4-digit PIN keamanan kepada klien untuk memverifikasi kedatangan dan memulai sesi.",
-                        );
-                      }
-                    } else if (nextStatus == 'rate_client') {
+                              if (active == null) return;
+
+                              Map<String, dynamic> freshDetails = {};
+                              try {
+                                final dynamic queryId = int.tryParse(active.id) ?? active.id;
+                                final freshData = await Supabase.instance.client
+                                    .from('bookings')
+                                    .select('additional_details')
+                                    .eq('id', queryId)
+                                    .maybeSingle();
+                                if (freshData != null && freshData['additional_details'] != null) {
+                                  if (freshData['additional_details'] is Map) {
+                                    freshDetails = Map<String, dynamic>.from(freshData['additional_details']);
+                                  } else if (freshData['additional_details'] is String) {
+                                    freshDetails = Map<String, dynamic>.from(jsonDecode(freshData['additional_details']));
+                                  }
+                                }
+                              } catch (e) {
+                                debugPrint("Error fetching latest details from Supabase: $e");
+                              }
+
+                              // 1. Token 1 (old start PIN for OTW)
+                              final oldStartPin = _extractOtp(freshDetails) ?? _extractOtp(active.additionalDetails) ?? _extractOtp(active);
+
+                              // 2. Token 2 (start service PIN)
+                              String? servicePin = _extractServiceOtp(freshDetails) ?? _extractServiceOtp(active.additionalDetails);
+
+                              // 3. Ensure Token 2 exists (preserve if already present)
+                              if (servicePin == null || servicePin.isEmpty || servicePin == '1234') {
+                                if (oldStartPin != null && oldStartPin.isNotEmpty && oldStartPin != '1234') {
+                                  servicePin = oldStartPin;
+                                } else {
+                                  final random = Random();
+                                  servicePin = (random.nextInt(9000) + 1000).toString();
+                                }
+
+                                try {
+                                  final dynamic queryId = int.tryParse(active.id) ?? active.id;
+                                  final updateMap = Map<String, dynamic>.from(freshDetails.isNotEmpty ? freshDetails : (active.additionalDetails ?? {}));
+                                  updateMap['service_pin'] = servicePin;
+                                  updateMap['start_service_pin'] = servicePin;
+                                  updateMap['service_otp'] = servicePin;
+                                  await Supabase.instance.client
+                                      .from('bookings')
+                                      .update({'additional_details': updateMap})
+                                      .eq('id', queryId);
+                                  debugPrint("🆕 Driver synced Service PIN: $servicePin");
+                                } catch (e) {
+                                  debugPrint("Error auto-saving service PIN: $e");
+                                }
+                              }
+
+                              debugPrint("🔑 Start Service PIN from DB: '$servicePin' (old Start PIN: '$oldStartPin')");
+                              if (context.mounted) {
+                                _showStartServicePinDialog(
+                                  context,
+                                  provider,
+                                  expectedServicePin: servicePin,
+                                  oldStartPin: oldStartPin,
+                                );
+                              }
+                            } else if (nextStatus == 'rate_client') {
                       final target = provider.activeBooking ?? _lastBooking ?? provider.pendingReviewBooking ?? provider.lastCompletedBooking;
                       Navigator.pushReplacement(
                         context,
@@ -1673,7 +1734,7 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      isPaid ? "Klien telah melunasi sisa tagihan." : "Sesi selesai. Klien sedang melunasi.",
+                      isPaid ? "$clientName telah melunasi sisa tagihan." : "Sesi selesai. $clientName sedang melunasi.",
                       style: GoogleFonts.poppins(
                         color: AppTheme.textHighContrast,
                         fontSize: 14,
@@ -1746,58 +1807,41 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
   }
 
   Widget _buildQuickActions(BuildContext context, String bookingId, String name, String phone, String avatar) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => DriverChatRoomScreen(
-                    bookingId: bookingId,
-                    clientName: name,
-                    clientImage: avatar,
-                  ),
+        ElevatedButton.icon(
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => DriverChatRoomScreen(
+                  bookingId: bookingId,
+                  clientName: name,
+                  clientImage: avatar,
                 ),
-              );
-            },
-            icon: const Icon(Icons.chat_bubble_rounded, size: 18),
-            label: Text("Chat Klien", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.primaryPink,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: const BorderSide(color: AppTheme.border),
               ),
-              elevation: 0,
+            );
+          },
+          icon: const Icon(Icons.chat_bubble_rounded, size: 18),
+          label: Text("Pesan Teks Klien (Chat)", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13.5)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primaryPink,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
             ),
+            elevation: 2,
           ),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text("Menghubungi nomor klien: $phone"),
-                  backgroundColor: AppTheme.primaryPink,
-                ),
-              );
-            },
-            icon: const Icon(Icons.phone_rounded, size: 18),
-            label: Text("Telepon Klien", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 13)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.surface,
-              foregroundColor: AppTheme.textHighContrast,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: const BorderSide(color: AppTheme.border),
-              ),
-              elevation: 0,
+        const SizedBox(height: 6),
+        Center(
+          child: Text(
+            "🔒 Panggilan telepon dinonaktifkan demi privasi. Komunikasi hanya via pesan teks.",
+            style: GoogleFonts.poppins(
+              color: AppTheme.textMuted,
+              fontSize: 10.5,
             ),
           ),
         ),
@@ -2072,7 +2116,268 @@ class _DriverActiveBookingScreenState extends State<DriverActiveBookingScreen> w
     );
   }
 
+  void _showStartServicePinDialog(
+    BuildContext context,
+    BookingProvider provider, {
+    required String expectedServicePin,
+    String? oldStartPin,
+  }) {
+    final pinController = TextEditingController();
+    String? errorMessage;
+    bool isVerifying = false;
 
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF16181D),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+                side: const BorderSide(color: AppTheme.primaryPink, width: 1.5),
+              ),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryPink.withOpacity(0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.vpn_key_rounded, color: AppTheme.primaryPink, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      "PIN Memulai Layanan",
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Minta 4-digit PIN Memulai Layanan yang tampil di aplikasi Klien untuk memulai sesi pendampingan.",
+                      style: GoogleFonts.poppins(
+                        color: Colors.white70,
+                        fontSize: 12.5,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.amber.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              "Gunakan PIN baru yang tampil di layar Klien saat ini (jangan gunakan PIN keberangkatan awal).",
+                              style: GoogleFonts.poppins(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Center(
+                      child: Container(
+                        width: 220,
+                        decoration: BoxDecoration(
+                          color: AppTheme.cardDeep,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: errorMessage != null ? Colors.redAccent : AppTheme.primaryPink.withOpacity(0.5),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: TextField(
+                          controller: pinController,
+                          autofocus: true,
+                          keyboardType: TextInputType.number,
+                          maxLength: 4,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.shareTechMono(
+                            color: Colors.white,
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 10,
+                          ),
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            LengthLimitingTextInputFormatter(4),
+                          ],
+                          decoration: InputDecoration(
+                            counterText: "",
+                            hintText: "••••",
+                            hintStyle: GoogleFonts.shareTechMono(
+                              color: Colors.white24,
+                              fontSize: 28,
+                              letterSpacing: 10,
+                            ),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          onChanged: (_) {
+                            if (errorMessage != null) {
+                              setDialogState(() => errorMessage = null);
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                    if (errorMessage != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                errorMessage!,
+                                style: GoogleFonts.poppins(color: Colors.redAccent, fontSize: 11.5, height: 1.3),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isVerifying ? null : () => Navigator.pop(dialogContext),
+                  child: Text(
+                    "Batal",
+                    style: GoogleFonts.poppins(color: Colors.white38, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: isVerifying
+                      ? null
+                      : () async {
+                          final entered = pinController.text.trim();
+                          if (entered.length < 4) {
+                            setDialogState(() {
+                              errorMessage = "Masukkan 4 digit PIN lengkap.";
+                            });
+                            return;
+                          }
+
+                          setDialogState(() => isVerifying = true);
+
+                          // Collect ALL valid PINs belonging to this booking
+                          final Set<String> validPins = {};
+                          if (expectedServicePin.isNotEmpty && expectedServicePin != '••••') {
+                            validPins.add(expectedServicePin);
+                          }
+                          if (oldStartPin != null && oldStartPin.isNotEmpty && oldStartPin != '••••') {
+                            validPins.add(oldStartPin);
+                          }
+
+                          final active = provider.activeBooking;
+                          if (active != null) {
+                            validPins.addAll(_collectAllPins(active));
+                            validPins.addAll(_collectAllPins(active.additionalDetails));
+                          }
+
+                          // Also check fresh from Supabase right now to get real-time client state
+                          String targetExpected = expectedServicePin;
+                          if (active != null) {
+                            try {
+                              final dynamic queryId = int.tryParse(active.id) ?? active.id;
+                              final freshRec = await Supabase.instance.client
+                                  .from('bookings')
+                                  .select()
+                                  .eq('id', queryId)
+                                  .maybeSingle();
+                              if (freshRec != null) {
+                                validPins.addAll(_collectAllPins(freshRec));
+                                if (freshRec['additional_details'] != null) {
+                                  validPins.addAll(_collectAllPins(freshRec['additional_details']));
+                                  final freshPin = _extractServiceOtp(freshRec['additional_details']);
+                                  if (freshPin != null && freshPin.isNotEmpty) {
+                                    targetExpected = freshPin;
+                                    validPins.add(freshPin);
+                                  }
+                                }
+                              }
+                            } catch (e) {
+                              debugPrint("Error re-checking service PIN from DB: $e");
+                            }
+                          }
+
+                          debugPrint("🔍 Driver Service PIN Verification: Valid PINs=$validPins, TargetExpected=$targetExpected, Entered=$entered");
+
+                          // Verify entered PIN against any valid PIN for this booking
+                          if (validPins.contains(entered) || entered == targetExpected || (oldStartPin != null && entered == oldStartPin)) {
+                            Navigator.pop(dialogContext);
+                            final success = await provider.updateBookingProgress(
+                              'started',
+                              authProvider: Provider.of<AuthProvider>(context, listen: false),
+                            );
+                            if (success && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text("✅ PIN Terverifikasi! Sesi pendampingan resmi dimulai."),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                          } else {
+                            setDialogState(() {
+                              isVerifying = false;
+                              errorMessage = "PIN tidak cocok! Pastikan meminta 4 digit PIN yang tertera di layar Klien saat ini.";
+                            });
+                          }
+                        },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryPink,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  ),
+                  child: isVerifying
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        )
+                      : Text(
+                          "VERIFIKASI & MULAI",
+                          style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 class DriverOrderSummaryScreen extends StatefulWidget {

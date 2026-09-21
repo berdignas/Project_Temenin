@@ -93,12 +93,16 @@ class ClientNotificationProvider extends ChangeNotifier {
           .from('bookings')
           .stream(primaryKey: ['id'])
           .eq('user_id', userId)
+          .handleError((err) {
+            debugPrint('❌ Client Notification Booking Realtime Error handled: $err -> Fallback Polling');
+            _startNotificationPolling(userId);
+          })
           .listen((List<Map<String, dynamic>> data) {
             _processBookingEvents(data);
           }, onError: (err) {
             debugPrint('❌ Client Notification Booking Realtime Error: $err -> Fallback Polling');
             _startNotificationPolling(userId);
-          });
+          }, cancelOnError: false);
     } catch (e) {
       debugPrint('❌ Client Notification Booking Realtime Exception: $e -> Fallback Polling');
       _startNotificationPolling(userId);
@@ -224,6 +228,9 @@ class ClientNotificationProvider extends ChangeNotifier {
       _chatSubscription = Supabase.instance.client
           .from('booking_messages')
           .stream(primaryKey: ['id'])
+          .handleError((err) {
+            debugPrint("Chat stream Realtime error handled: $err");
+          })
           .listen(
             (List<Map<String, dynamic>> messages) {
               for (final msg in messages) {
@@ -255,6 +262,7 @@ class ClientNotificationProvider extends ChangeNotifier {
             onError: (err) {
               debugPrint("Chat stream Realtime error: $err");
             },
+            cancelOnError: false,
           );
     } catch (e) {
       debugPrint('❌ Client Notification Chat Realtime Exception: $e');

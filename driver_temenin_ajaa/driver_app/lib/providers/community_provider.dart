@@ -21,6 +21,25 @@ class CommunityProvider extends ChangeNotifier {
   List<Map<String, dynamic>> get stories => List.unmodifiable(_stories);
   bool get isLoading => _isLoading;
 
+  List<String> _buildCandidateUrls(String path) {
+    final list = <String>[];
+    final base = ApiConstants.baseUrl;
+    list.add('$base$path');
+    final baseAlt = base.replaceAll(':3004', ':3002');
+    if (!list.contains('$baseAlt$path')) list.add('$baseAlt$path');
+
+    if (kIsWeb) {
+      if (!list.contains('http://localhost:3002$path')) list.add('http://localhost:3002$path');
+      if (!list.contains('http://127.0.0.1:3002$path')) list.add('http://127.0.0.1:3002$path');
+    } else {
+      list.add('http://10.0.2.2:3002$path');
+      list.add('http://127.0.0.1:3002$path');
+      list.add('http://localhost:3002$path');
+      list.add('http://192.168.1.4:3002$path');
+    }
+    return list;
+  }
+
   CommunityProvider() {
     _initCommunityData();
   }
@@ -318,16 +337,7 @@ class CommunityProvider extends ChangeNotifier {
       // 1. Fetch Posts from Backend / Supabase
       List<Map<String, dynamic>> remotePosts = [];
       try {
-        final candidateUrls = [
-          '${ApiConstants.baseUrl}/api/community/posts',
-          '${ApiConstants.baseUrl.replaceAll(':3004', ':3002')}/api/community/posts',
-          'http://192.168.1.4:3004/api/community/posts',
-          'http://192.168.1.4:3002/api/community/posts',
-          'http://10.0.2.2:3004/api/community/posts',
-          'http://10.0.2.2:3002/api/community/posts',
-          'http://127.0.0.1:3004/api/community/posts',
-          'http://127.0.0.1:3002/api/community/posts',
-        ];
+        final candidateUrls = _buildCandidateUrls('/api/community/posts');
         for (final url in candidateUrls) {
           try {
             final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 3));
@@ -345,8 +355,8 @@ class CommunityProvider extends ChangeNotifier {
                     'caption': item['caption'] ?? '',
                     'location': item['location'] ?? 'Jakarta',
                     'likes': item['likes_count'] ?? 0,
-                    'isLiked': item['isLiked'] ?? false,
-                    'commentsList': item['commentsList'] ?? <Map<String, dynamic>>[],
+                    'isLiked': false,
+                    'commentsList': <Map<String, dynamic>>[],
                     'time': 'Baru saja',
                   });
                 }
@@ -408,16 +418,7 @@ class CommunityProvider extends ChangeNotifier {
       // 2. Fetch Stories from Backend / Supabase
       List<Map<String, dynamic>> remoteStories = [];
       try {
-        final candidateUrls = [
-          '${ApiConstants.baseUrl}/api/community/stories',
-          '${ApiConstants.baseUrl.replaceAll(':3004', ':3002')}/api/community/stories',
-          'http://192.168.1.4:3004/api/community/stories',
-          'http://192.168.1.4:3002/api/community/stories',
-          'http://10.0.2.2:3004/api/community/stories',
-          'http://10.0.2.2:3002/api/community/stories',
-          'http://127.0.0.1:3004/api/community/stories',
-          'http://127.0.0.1:3002/api/community/stories',
-        ];
+        final candidateUrls = _buildCandidateUrls('/api/community/stories');
         for (final url in candidateUrls) {
           try {
             final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 3));
@@ -551,13 +552,7 @@ class CommunityProvider extends ChangeNotifier {
     // Persist via Backend API (uses supabaseAdmin)
     bool savedToBackend = false;
     try {
-      final candidateUrls = [
-        'http://192.168.1.4:3002/api/community/posts',
-        'http://10.0.2.2:3002/api/community/posts',
-        '${ApiConstants.baseUrl}/api/community/posts',
-        'http://127.0.0.1:3002/api/community/posts',
-        'http://localhost:3002/api/community/posts',
-      ];
+      final candidateUrls = _buildCandidateUrls('/api/community/posts');
       for (final url in candidateUrls) {
         try {
           final res = await http.post(
@@ -660,13 +655,7 @@ class CommunityProvider extends ChangeNotifier {
     // Persist via Backend API (uses supabaseAdmin)
     bool savedToBackend = false;
     try {
-      final candidateUrls = [
-        'http://192.168.1.4:3002/api/community/stories',
-        'http://10.0.2.2:3002/api/community/stories',
-        '${ApiConstants.baseUrl}/api/community/stories',
-        'http://127.0.0.1:3002/api/community/stories',
-        'http://localhost:3002/api/community/stories',
-      ];
+      final candidateUrls = _buildCandidateUrls('/api/community/stories');
       for (final url in candidateUrls) {
         try {
           final res = await http.post(
